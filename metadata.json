@@ -1,0 +1,6 @@
+{
+  "name": "ITERA Claim Reconciliation",
+  "description": "Healthcare billing and reconciliation dashboard for Digital Care Management claims, payments, denials, and audit logs with Google Sheets synchronization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

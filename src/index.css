@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --itera-navy: #12324a;
+  --itera-blue: #176b9c;
+  --itera-sky: #eaf5fb;
+  --itera-canvas: #f4f7f9;
+  --itera-border: #dbe4ea;
+  --itera-text: #20313d;
+  --itera-muted: #6f8290;
+  --itera-success: #23845f;
+  --itera-warning: #c77a16;
+  --itera-danger: #c34853;
+}
+
+@layer base {
+  html {
+    background: var(--itera-canvas);
+  }
+
+  body {
+    margin: 0;
+    color: var(--itera-text);
+    background:
+      radial-gradient(circle at 85% -10%, rgba(27, 152, 224, 0.09), transparent 28rem),
+      var(--itera-canvas);
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Space Grotesk", Inter, sans-serif;
+    letter-spacing: -0.015em;
+  }
+
+  input, select, textarea, button {
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease, color 150ms ease;
+  }
+
+  input:focus, select:focus, textarea:focus {
+    outline: none;
+    border-color: var(--itera-blue);
+    box-shadow: 0 0 0 3px rgba(27, 152, 224, 0.12);
+  }
+
+  input:disabled, select:disabled, textarea:disabled {
+    cursor: not-allowed;
+    opacity: 0.68;
+  }
+}
+
+@layer components {
+  .itera-surface {
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
+  }
+
+  .itera-label {
+    @apply text-[10px] font-bold uppercase tracking-wider text-slate-500;
+  }
+
+  .itera-field {
+    @apply rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 78, 137, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 78, 137, 0.4);
+}
