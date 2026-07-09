@@ -97,6 +97,25 @@ const serviceTypeFromDescription = (description: unknown) => normalizeServiceTyp
 const isSupportedServiceType = (serviceType: string) =>
   DIGITAL_CARE_SERVICE_TYPES.includes(serviceType) || /^[A-Z0-9]{2,8}$/.test(serviceType);
 
+const VIEW_PATHS: Record<ViewType, string> = {
+  dashboard: "/",
+  claims: "/claims",
+  payments: "/payments",
+  denials: "/denials",
+  errors: "/claims-with-errors",
+  providers: "/physician-balances",
+  reports: "/reports/billing-summary",
+  settings: "/settings",
+  "audit-log": "/audit-log"
+};
+
+function viewFromPath(pathname: string): ViewType {
+  if (pathname.startsWith("/reports")) return "reports";
+  const found = (Object.entries(VIEW_PATHS) as Array<[ViewType, string]>)
+    .find(([view, path]) => view !== "reports" && path !== "/" && pathname.startsWith(path));
+  return found?.[0] || "dashboard";
+}
+
 function LoginScreen({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -167,7 +186,7 @@ export default function App() {
   const auth = useAuth();
   const isEnglish = language === "en";
   // Views and Navigation
-  const [currentView, setCurrentView] = useState<ViewType>(() => window.location.pathname.startsWith("/reports") ? "reports" : "dashboard");
+  const [currentView, setCurrentView] = useState<ViewType>(() => viewFromPath(window.location.pathname));
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [statusData, setStatusData] = useState<any>(null);
@@ -260,7 +279,7 @@ export default function App() {
   }, [auth.isReady, auth.isAuthEnabled, auth.user?.uid]);
 
   useEffect(() => {
-    const handlePopState = () => setCurrentView(window.location.pathname.startsWith("/reports") ? "reports" : "dashboard");
+    const handlePopState = () => setCurrentView(viewFromPath(window.location.pathname));
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
@@ -1227,6 +1246,7 @@ export default function App() {
       [field]: value
     });
     setCurrentView("claims");
+    if (window.location.pathname !== VIEW_PATHS.claims) window.history.pushState({}, "", VIEW_PATHS.claims);
   };
 
   const formatUSD = (val: number) => {
@@ -1333,7 +1353,7 @@ export default function App() {
         onViewChange={(view) => {
           setCurrentView(view);
           setSelectedClaimIds([]);
-          const nextPath = view === "reports" ? "/reports/billing-summary" : "/";
+          const nextPath = VIEW_PATHS[view];
           if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
         }}
         userRole={currentUser.role}
