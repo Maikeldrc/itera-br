@@ -19,10 +19,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   HelpCircle,
-  Database,
   Search,
   Upload,
-  Info,
   X,
   Trash2,
   Edit2,
@@ -76,6 +74,11 @@ const createNewClaimServiceLine = (overrides: Partial<NewClaimServiceLine> = {})
   serviceType: "RPM",
   cpt: "99454",
   ...overrides
+});
+
+const createBlankClaimServiceLine = (): NewClaimServiceLine => createNewClaimServiceLine({
+  serviceType: "",
+  cpt: ""
 });
 
 type ServiceCptOption = {
@@ -204,7 +207,7 @@ export default function App() {
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createNewClaimServiceLine()]);
 
   // Fee Schedule management UI states
-  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "sheets-sync">("language");
+  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules">("language");
   const [editingFs, setEditingFs] = useState<FeeSchedule | null>(null);
   const [isFsModalOpen, setIsFsModalOpen] = useState(false);
   const [fsSearchTerm, setFsSearchTerm] = useState("");
@@ -336,20 +339,20 @@ export default function App() {
     }
   };
 
-  // Google Sheets force sync handler
+  // Manual data refresh handler
   const handleSyncWithGoogleSheets = async () => {
     setIsSyncing(true);
     try {
       const res = await apiFetch("/api/sync", { method: "POST" });
       const data = await res.json();
       if (data.success) {
-        notify(data.message, "success");
+        notify("System data refreshed successfully.", "success");
         await fetchAllData();
       } else {
-        notify(`Fallo de sincronización: ${data.error}`, "error");
+        notify(`Data refresh failed: ${data.error}`, "error");
       }
     } catch (err: any) {
-      notify(`Error de red al sincronizar: ${err.message}`, "error");
+      notify(`Data refresh network error: ${err.message}`, "error");
     } finally {
       setIsSyncing(false);
     }
@@ -1239,7 +1242,7 @@ export default function App() {
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 font-sans gap-3">
         <RefreshCw className="w-8 h-8 text-primary-blue animate-spin" />
         <h4 className="font-semibold text-slate-800">Cargando Portal de Conciliación de ITERA HEALTH...</h4>
-        <p className="text-xs text-slate-500 font-mono">Conectando base de datos in-memory / Google Sheets</p>
+        <p className="text-xs text-slate-500 font-mono">Connecting secure data service</p>
       </div>
     );
   }
@@ -1835,7 +1838,7 @@ export default function App() {
                     {isEnglish ? "System Settings" : "Panel de Configuración del Sistema"}
                   </h2>
                   <p className="text-xs text-slate-500 mt-1">
-                    {isEnglish ? "Manage language, contract rules, FCSO fees and real-time synchronization." : "Administra el idioma, las reglas contractuales, los honorarios FCSO y la sincronización en tiempo real."}
+                    {isEnglish ? "Manage language, access, providers, payers, contract rules and FCSO fees." : "Administra idioma, accesos, providers, aseguradoras, reglas contractuales y honorarios FCSO."}
                   </p>
                 </div>
               </div>
@@ -1907,17 +1910,6 @@ export default function App() {
                 >
                   <Sliders className="w-4 h-4" />
                   <span>{isEnglish ? "Contract Rules (Shares)" : "Reglas Contractuales (Shares)"}</span>
-                </button>
-                <button
-                  onClick={() => setSettingsTab("sheets-sync")}
-                  className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
-                    settingsTab === "sheets-sync"
-                      ? "border-primary-blue text-primary-blue bg-blue-50/40 rounded-t-lg"
-                      : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg"
-                  }`}
-                >
-                  <Database className="w-4 h-4" />
-                  <span>{isEnglish ? "Google Sheets Integration" : "Integración Google Sheets"}</span>
                 </button>
               </div>
 
@@ -2609,42 +2601,6 @@ export default function App() {
                 </div>
               )}
 
-              {settingsTab === "sheets-sync" && (
-                <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-4">
-                  <div className="flex items-center gap-2.5 border-b border-slate-100 pb-3">
-                    <div className="p-2 bg-blue-50 rounded-lg text-primary-blue">
-                      <Database className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-slate-900 text-sm">Instrucciones de Conexión de Google Sheets</h4>
-                      <p className="text-[10px] text-slate-500 mt-0.5">Sincroniza y escribe automáticamente los claims conciliados en tu hoja de cálculo principal en tiempo real.</p>
-                    </div>
-                  </div>
-                  
-                  <div className="text-xs text-slate-600 space-y-3.5 leading-relaxed pt-2">
-                    <p className="font-bold text-slate-800">
-                      El motor de sincronización bidireccional está activo. Sigue estos pasos para conectar tu Google Sheet:
-                    </p>
-                    <ol className="list-decimal pl-5 space-y-1.5 text-[11px] text-slate-600">
-                      <li>Crea una cuenta de servicio en tu Google Cloud Console.</li>
-                      <li>Descarga el archivo de credenciales JSON.</li>
-                      <li>Copia la clave privada y el correo de cliente.</li>
-                      <li>Declara las siguientes variables en tu archivo <code className="bg-slate-100 p-0.5 rounded font-mono text-dark-blue">.env</code>:</li>
-                    </ol>
-                    <pre className="bg-slate-950 text-slate-100 p-4 rounded-lg text-[10px] font-mono leading-normal shadow-inner overflow-x-auto">
-{`GOOGLE_CLIENT_EMAIL="tu-servicio-cuenta@proyecto.iam.gserviceaccount.com"
-GOOGLE_PRIVATE_KEY="usar-secret-manager-o-adc-en-produccion"
-GOOGLE_SHEET_ID="tu-sheet-identificador-del-url"`}
-                    </pre>
-                    <div className="bg-amber-50 border border-amber-100 text-amber-800 p-3 rounded-lg text-[10px] flex gap-2">
-                      <Info className="w-4 h-4 shrink-0 mt-0.5 text-amber-600" />
-                      <div>
-                        <strong>Muy importante:</strong> Comparte el Google Sheet con permisos de <strong>editor</strong> con el correo de la cuenta de servicio (service account) especificado arriba para que el sistema pueda persistir datos.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
         </main>
@@ -2762,11 +2718,7 @@ GOOGLE_SHEET_ID="tu-sheet-identificador-del-url"`}
                   </div>
                   <button
                     type="button"
-                    onClick={() => setNewClaimLines(prev => {
-                      const serviceType = prev.at(-1)?.serviceType || "RPM";
-                      const existingCpts = prev.map(line => line.cpt);
-                      return [...prev, createNewClaimServiceLine({ serviceType, cpt: getFirstAvailableCptForService(serviceType, existingCpts) })];
-                    })}
+                    onClick={() => setNewClaimLines(prev => [...prev, createBlankClaimServiceLine()])}
                     className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -2774,7 +2726,7 @@ GOOGLE_SHEET_ID="tu-sheet-identificador-del-url"`}
                   </button>
                 </div>
                 <div className="space-y-2">
-                  <div className="grid grid-cols-[1fr_1fr_120px_34px] gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  <div className="grid grid-cols-[112px_minmax(0,1fr)_120px_34px] gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
                     <span>Servicio</span>
                     <span>CPT Code</span>
                     <span>Charge</span>
@@ -2785,23 +2737,23 @@ GOOGLE_SHEET_ID="tu-sheet-identificador-del-url"`}
                     const cptOptions = getCptOptionsForService(line.serviceType);
                     const hasSelectedCpt = cptOptions.some(option => option.cpt === line.cpt);
                     return (
-                      <div key={line.id} className="grid grid-cols-[1fr_1fr_120px_34px] gap-2">
+                      <div key={line.id} className="grid grid-cols-[112px_minmax(0,1fr)_120px_34px] gap-2">
                         <select
                           value={line.serviceType}
                           onChange={(e) => {
                             const serviceType = e.target.value;
                             setNewClaimLines(prev => prev.map(item => {
                               if (item.id !== line.id) return item;
-                              const existingCpts = prev.filter(prevLine => prevLine.id !== line.id).map(prevLine => prevLine.cpt);
                               return {
                                 ...item,
                                 serviceType,
-                                cpt: getFirstAvailableCptForService(serviceType, existingCpts)
+                                cpt: ""
                               };
                             }));
                           }}
                           className="w-full rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-mono text-slate-700"
                         >
+                          <option value="" disabled>Servicio</option>
                           {getServiceTypeOptions().map(service => (
                             <option key={service} value={service}>{service}</option>
                           ))}
@@ -2810,11 +2762,11 @@ GOOGLE_SHEET_ID="tu-sheet-identificador-del-url"`}
                           required
                           value={hasSelectedCpt ? line.cpt : ""}
                           onChange={(e) => setNewClaimLines(prev => prev.map(item => item.id === line.id ? { ...item, cpt: e.target.value } : item))}
-                          disabled={cptOptions.length === 0}
+                          disabled={!line.serviceType || cptOptions.length === 0}
                           className="w-full rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           <option value="" disabled>
-                            {cptOptions.length === 0 ? "Sin CPT configurados" : "Selecciona CPT"}
+                            {!line.serviceType ? "Selecciona servicio primero" : cptOptions.length === 0 ? "Sin CPT configurados" : "Selecciona CPT"}
                           </option>
                           {cptOptions.map(option => (
                             <option key={`${option.serviceType}-${option.cpt}`} value={option.cpt}>

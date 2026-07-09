@@ -184,7 +184,7 @@ export function Sidebar({ currentView, onViewChange, userRole, isCollapsed, onTo
           <div className="opacity-60 space-y-1">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-emerald-400"></div>
-              <span>{isEnglish ? "G-Sheet Connected" : "G-Sheet Conectado"}</span>
+              <span>{isEnglish ? "System Online" : "Sistema Activo"}</span>
             </div>
             <div className="font-mono text-[9px]">v1.2.0-Production</div>
           </div>
@@ -198,7 +198,7 @@ export function Sidebar({ currentView, onViewChange, userRole, isCollapsed, onTo
         </div>
       ) : (
         <div className="p-4 mt-auto border-t border-secondary-blue flex flex-col items-center gap-4">
-          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" title="G-Sheet Connected (HIPAA Audit Enabled)"></div>
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" title={isEnglish ? "System Online" : "Sistema Activo"}></div>
           <Info className="w-4 h-4 text-blue-200 opacity-60" title="HIPAA Compliant - PHI Encrypted" />
         </div>
       )}

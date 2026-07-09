@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from "react";
-import { Database, RefreshCw, UserCheck, ShieldAlert, LogOut } from "lucide-react";
+import { CheckCircle2, RefreshCw, UserCheck, ShieldAlert, LogOut } from "lucide-react";
 import { User, UserRole } from "../types";
 import { useLanguage } from "./LanguageProvider";
 
@@ -54,7 +54,7 @@ export function Header({
 
       {/* Badges & Actions */}
       <div className="flex items-center gap-4">
-        {/* Google Sheet Connection Badge */}
+        {/* System Connection Badge */}
         {sheetStatus && (
           <div
             className={`hidden md:flex items-center gap-1.5 px-3 py-1 rounded border text-xs font-medium font-mono ${
@@ -64,12 +64,12 @@ export function Header({
             }`}
             title={
               sheetStatus.configured
-                ? (isEnglish ? "Live sync with Google Sheets" : "Sincronizado en vivo con Google Sheets")
-                : (isEnglish ? "Running in local demo mode. Configure .env credentials for production." : "Ejecutando en modo local (Modo demo sin Sheets). Configura credenciales en .env para producción.")
+                ? (isEnglish ? "Secure data service connected" : "Servicio de datos seguro conectado")
+                : (isEnglish ? "Running in local demo mode." : "Ejecutando en modo demo local.")
             }
           >
-            <Database className="w-3.5 h-3.5" />
-            <span>{sheetStatus.configured ? (isEnglish ? "Sheets Connected" : "Sheets Conectado") : (isEnglish ? "Local / Demo Mode" : "Modo Local / Demo")}</span>
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            <span>{sheetStatus.configured ? (isEnglish ? "System Online" : "Sistema Activo") : (isEnglish ? "Local / Demo Mode" : "Modo Local / Demo")}</span>
           </div>
         )}
 
@@ -79,7 +79,7 @@ export function Header({
             onClick={onSync}
             disabled={isSyncing}
             className="flex items-center justify-center p-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors disabled:opacity-50"
-            title={isEnglish ? "Sync data with Google Sheets" : "Sincronizar datos con Google Sheets"}
+            title={isEnglish ? "Refresh system data" : "Actualizar datos del sistema"}
           >
             <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin text-primary-blue" : ""}`} />
           </button>
