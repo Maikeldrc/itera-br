@@ -912,9 +912,9 @@ function mapRowToObject(tabName: string, headers: string[], row: string[]): any 
     const rawVal = row[index] !== undefined ? row[index] : "";
     
     // Parse boolean, numbers and strings correctly
-    if (rawVal === "true") {
+    if (String(rawVal).toLowerCase() === "true") {
       obj[header] = true;
-    } else if (rawVal === "false") {
+    } else if (String(rawVal).toLowerCase() === "false") {
       obj[header] = false;
     } else if (rawVal === "") {
       obj[header] = "";
