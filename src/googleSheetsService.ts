@@ -9,10 +9,12 @@ import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS
 
 /**
  * Service to manage read/write operations to Google Sheets.
- * Falls back to an in-memory database with seed data if Google Sheets environment variables are not configured or fail to connect.
+ * Falls back to an in-memory database with seed data only for local/demo mode.
+ * In production with a Google Sheet configured, the spreadsheet is the source of truth even when it is empty.
  */
 export class GoogleSheetsService {
   private isConfigured: boolean = false;
+  private useSeedData: boolean = false;
   private clientEmail?: string;
   private privateKey?: string;
   private sheetId?: string;
@@ -20,22 +22,27 @@ export class GoogleSheetsService {
   private sheets: any = null;
 
   // In-memory data store for fallback/caching
-  public claims: Claim[] = [...SEED_CLAIMS];
-  public payments: Payment[] = [...SEED_PAYMENTS];
-  public notes: Note[] = [...SEED_NOTES];
-  public auditLogs: AuditLog[] = [...SEED_AUDIT_LOGS];
-  public providers: Provider[] = [...SEED_PROVIDERS];
-  public payers: Payer[] = [...SEED_PAYERS];
-  public users: User[] = [...SEED_USERS];
-  public settings: Setting[] = [...SEED_SETTINGS];
-  public feeSchedules: FeeSchedule[] = [...SEED_FEE_SCHEDULES];
-  public eligibilityCoverage: EligibilityCoverage[] = [...SEED_ELIGIBILITY_COVERAGE];
-  public reportFeeSchedules: ReportFeeSchedule[] = [...SEED_REPORT_FEE_SCHEDULES];
+  public claims: Claim[] = [];
+  public payments: Payment[] = [];
+  public notes: Note[] = [];
+  public auditLogs: AuditLog[] = [];
+  public providers: Provider[] = [];
+  public payers: Payer[] = [];
+  public users: User[] = [];
+  public settings: Setting[] = [];
+  public feeSchedules: FeeSchedule[] = [];
+  public eligibilityCoverage: EligibilityCoverage[] = [];
+  public reportFeeSchedules: ReportFeeSchedule[] = [];
 
   constructor() {
     this.clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
     this.privateKey = process.env.GOOGLE_PRIVATE_KEY;
     this.sheetId = process.env.GOOGLE_SHEET_ID;
+    this.useSeedData = this.shouldUseSeedData();
+
+    if (this.useSeedData) {
+      this.loadSeedData();
+    }
 
     if (this.sheetId && this.clientEmail && this.privateKey) {
       try {
@@ -77,8 +84,29 @@ export class GoogleSheetsService {
       hasPrivateKey: !!this.privateKey,
       hasSheetId: !!this.sheetId,
       usingAdc: process.env.GOOGLE_USE_ADC === "true",
-      usingFallback: !this.isConfigured
+      usingFallback: !this.isConfigured,
+      usingSeedData: this.useSeedData
     };
+  }
+
+  private shouldUseSeedData(): boolean {
+    if (process.env.USE_SEED_DATA === "true") return true;
+    if (this.sheetId) return false;
+    return process.env.NODE_ENV !== "production";
+  }
+
+  private loadSeedData() {
+    this.claims = [...SEED_CLAIMS];
+    this.payments = [...SEED_PAYMENTS];
+    this.notes = [...SEED_NOTES];
+    this.auditLogs = [...SEED_AUDIT_LOGS];
+    this.providers = [...SEED_PROVIDERS];
+    this.payers = [...SEED_PAYERS];
+    this.users = [...SEED_USERS];
+    this.settings = [...SEED_SETTINGS];
+    this.feeSchedules = [...SEED_FEE_SCHEDULES];
+    this.eligibilityCoverage = [...SEED_ELIGIBILITY_COVERAGE];
+    this.reportFeeSchedules = [...SEED_REPORT_FEE_SCHEDULES];
   }
 
   /**
@@ -135,7 +163,7 @@ export class GoogleSheetsService {
     }
 
     try {
-      // Try to load tables. If tabs don't exist, we bootstrap them!
+      // Try to load tables. If tabs don't exist, create the required schema.
       await this.bootstrapSheetsIfEmpty();
       await this.loadAllFromSheets();
       return { success: true, message: "Successfully synchronized with Google Sheets!" };
@@ -146,7 +174,7 @@ export class GoogleSheetsService {
   }
 
   /**
-   * Create tabs and write headers/seed data if spreadsheet is fresh
+   * Create missing tabs. In production, write headers only; seed data requires USE_SEED_DATA=true.
    */
   private async bootstrapSheetsIfEmpty() {
     if (!this.isConfigured) return;
@@ -187,8 +215,7 @@ export class GoogleSheetsService {
             }
           });
           
-          // Seed initial data
-          const rows = tab.seed.map((item: any) => mapObjectToRow(tab.name, item));
+          const rows = this.useSeedData ? tab.seed.map((item: any) => mapObjectToRow(tab.name, item)) : [];
           await this.overwriteTab(tab.name, tab.headers, rows);
         }
       }
@@ -209,25 +236,23 @@ export class GoogleSheetsService {
           range: `${tab}!A:ZZ`,
         });
 
-        const rows = response.data.values;
-        if (rows && rows.length > 1) {
-          const headers = rows[0];
-          const dataRows = rows.slice(1);
-          const mappedObjects = dataRows.map((row: string[]) => mapRowToObject(tab, headers, row));
-          
-          // Save in memory
-          if (tab === "Claims") this.claims = mappedObjects as Claim[];
-          if (tab === "Payments") this.payments = mappedObjects as Payment[];
-          if (tab === "Notes") this.notes = mappedObjects as Note[];
-          if (tab === "Audit_Log") this.auditLogs = mappedObjects as AuditLog[];
-          if (tab === "Providers") this.providers = mappedObjects as Provider[];
-          if (tab === "Payers") this.payers = mappedObjects as Payer[];
-          if (tab === "Users") this.users = mappedObjects as User[];
-          if (tab === "Settings") this.settings = mappedObjects as Setting[];
-          if (tab === "FeeSchedules") this.feeSchedules = mappedObjects as FeeSchedule[];
-          if (tab === "Fee_Schedule") this.reportFeeSchedules = mappedObjects as ReportFeeSchedule[];
-          if (tab === "Eligibility_Coverage") this.eligibilityCoverage = mappedObjects as EligibilityCoverage[];
-        }
+        const rows = response.data.values || [];
+        const headers = rows[0] || getHeadersForTab(tab);
+        const dataRows = rows.length > 1 ? rows.slice(1) : [];
+        const mappedObjects = dataRows.map((row: string[]) => mapRowToObject(tab, headers, row));
+
+        // Save in memory even when the sheet is empty, so old seed/cache data cannot leak into production.
+        if (tab === "Claims") this.claims = mappedObjects as Claim[];
+        if (tab === "Payments") this.payments = mappedObjects as Payment[];
+        if (tab === "Notes") this.notes = mappedObjects as Note[];
+        if (tab === "Audit_Log") this.auditLogs = mappedObjects as AuditLog[];
+        if (tab === "Providers") this.providers = mappedObjects as Provider[];
+        if (tab === "Payers") this.payers = mappedObjects as Payer[];
+        if (tab === "Users") this.users = mappedObjects as User[];
+        if (tab === "Settings") this.settings = mappedObjects as Setting[];
+        if (tab === "FeeSchedules") this.feeSchedules = mappedObjects as FeeSchedule[];
+        if (tab === "Fee_Schedule") this.reportFeeSchedules = mappedObjects as ReportFeeSchedule[];
+        if (tab === "Eligibility_Coverage") this.eligibilityCoverage = mappedObjects as EligibilityCoverage[];
       } catch (err) {
         console.error(`Failed to load tab ${tab} from Google Sheets:`, err);
       }
@@ -655,6 +680,9 @@ export class GoogleSheetsService {
   }
 
   public async resetClaimsToSeeds(): Promise<void> {
+    if (!this.useSeedData) {
+      throw new Error("Seed reset is disabled. Set USE_SEED_DATA=true to enable demo data.");
+    }
     this.claims = [...SEED_CLAIMS];
     if (this.isConfigured) {
       const rows = this.claims.map(c => mapObjectToRow("Claims", c));
@@ -860,6 +888,21 @@ const ELIGIBILITY_COVERAGE_HEADERS = [
   "total_eligible_patients", "notes", "created_at", "updated_at"
 ];
 
+function getHeadersForTab(tabName: string): string[] {
+  if (tabName === "Claims") return CLAIMS_HEADERS;
+  if (tabName === "Payments") return PAYMENTS_HEADERS;
+  if (tabName === "Notes") return NOTES_HEADERS;
+  if (tabName === "Audit_Log") return AUDIT_LOGS_HEADERS;
+  if (tabName === "Providers") return PROVIDERS_HEADERS;
+  if (tabName === "Payers") return PAYERS_HEADERS;
+  if (tabName === "Users") return USERS_HEADERS;
+  if (tabName === "Settings") return SETTINGS_HEADERS;
+  if (tabName === "FeeSchedules") return FEESCHEDULES_HEADERS;
+  if (tabName === "Fee_Schedule") return REPORT_FEESCHEDULE_HEADERS;
+  if (tabName === "Eligibility_Coverage") return ELIGIBILITY_COVERAGE_HEADERS;
+  return [];
+}
+
 /**
  * Maps a row array from sheets to a TypeScript object record
  */
@@ -889,18 +932,7 @@ function mapRowToObject(tabName: string, headers: string[], row: string[]): any 
  * Maps a TypeScript object record to a flat row array for sheets
  */
 function mapObjectToRow(tabName: string, obj: any): any[] {
-  let headers: string[] = [];
-  if (tabName === "Claims") headers = CLAIMS_HEADERS;
-  else if (tabName === "Payments") headers = PAYMENTS_HEADERS;
-  else if (tabName === "Notes") headers = NOTES_HEADERS;
-  else if (tabName === "Audit_Log") headers = AUDIT_LOGS_HEADERS;
-  else if (tabName === "Providers") headers = PROVIDERS_HEADERS;
-  else if (tabName === "Payers") headers = PAYERS_HEADERS;
-  else if (tabName === "Users") headers = USERS_HEADERS;
-  else if (tabName === "Settings") headers = SETTINGS_HEADERS;
-  else if (tabName === "FeeSchedules") headers = FEESCHEDULES_HEADERS;
-  else if (tabName === "Fee_Schedule") headers = REPORT_FEESCHEDULE_HEADERS;
-  else if (tabName === "Eligibility_Coverage") headers = ELIGIBILITY_COVERAGE_HEADERS;
+  const headers = getHeadersForTab(tabName);
 
   return headers.map(h => {
     const val = obj[h];
