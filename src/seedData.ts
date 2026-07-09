@@ -37,14 +37,14 @@ export const SEED_SETTINGS: Setting[] = [
 ];
 
 export const SEED_FEE_SCHEDULES: FeeSchedule[] = [
-  { id: "FSCH-001", cpt_code: "99453", year: 2026, semester1_rate: 19.20, semester2_rate: 19.50, description: "RPM - Device set-up and patient education" },
-  { id: "FSCH-002", cpt_code: "99454", year: 2026, semester1_rate: 62.44, semester2_rate: 63.10, description: "RPM - Device supply and daily recordings" },
-  { id: "FSCH-003", cpt_code: "99457", year: 2026, semester1_rate: 51.04, semester2_rate: 51.80, description: "RPM - Treatment management services (first 20 min)" },
-  { id: "FSCH-004", cpt_code: "99458", year: 2026, semester1_rate: 41.12, semester2_rate: 41.90, description: "RPM - Treatment management services (additional 20 min)" },
-  { id: "FSCH-005", cpt_code: "99490", year: 2026, semester1_rate: 65.20, semester2_rate: 66.00, description: "CCM - Clinical staff time (first 20 min)" },
-  { id: "FSCH-006", cpt_code: "99439", year: 2026, semester1_rate: 48.15, semester2_rate: 48.95, description: "CCM - Clinical staff time (additional 20 min)" },
-  { id: "FSCH-007", cpt_code: "99491", year: 2026, semester1_rate: 85.30, semester2_rate: 86.20, description: "CCM - Physician or QHP time (first 30 min)" },
-  { id: "FSCH-008", cpt_code: "99424", year: 2026, semester1_rate: 73.40, semester2_rate: 74.20, description: "PINC - Principal Illness Navigation (first 60 min)" }
+  { id: "FSCH-001", cpt_code: "99453", year: 2026, semester1_rate: 19.20, semester2_rate: 19.50, max_per_dos: 1, description: "RPM - Device set-up and patient education" },
+  { id: "FSCH-002", cpt_code: "99454", year: 2026, semester1_rate: 62.44, semester2_rate: 63.10, max_per_dos: 1, description: "RPM - Device supply and daily recordings" },
+  { id: "FSCH-003", cpt_code: "99457", year: 2026, semester1_rate: 51.04, semester2_rate: 51.80, max_per_dos: 1, description: "RPM - Treatment management services (first 20 min)" },
+  { id: "FSCH-004", cpt_code: "99458", year: 2026, semester1_rate: 41.12, semester2_rate: 41.90, max_per_dos: 2, description: "RPM - Treatment management services (additional 20 min)" },
+  { id: "FSCH-005", cpt_code: "99490", year: 2026, semester1_rate: 65.20, semester2_rate: 66.00, max_per_dos: 1, description: "CCM - Clinical staff time (first 20 min)" },
+  { id: "FSCH-006", cpt_code: "99439", year: 2026, semester1_rate: 48.15, semester2_rate: 48.95, max_per_dos: 2, description: "CCM - Clinical staff time (additional 20 min)" },
+  { id: "FSCH-007", cpt_code: "99491", year: 2026, semester1_rate: 85.30, semester2_rate: 86.20, max_per_dos: 1, description: "CCM - Physician or QHP time (first 30 min)" },
+  { id: "FSCH-008", cpt_code: "99424", year: 2026, semester1_rate: 73.40, semester2_rate: 74.20, max_per_dos: 1, description: "PINC - Principal Illness Navigation (first 60 min)" }
 ];
 
 export const SEED_REPORT_FEE_SCHEDULES: ReportFeeSchedule[] = SEED_FEE_SCHEDULES.map(item => ({

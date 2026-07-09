@@ -15,6 +15,7 @@ import { runReconciliationEngineTests } from "./src/reconciliationEngine.test";
 import { runReportsEngineTests } from "./src/reportsEngine.test";
 import { Claim, Payment, Note, ClaimStatus, ClaimClassification, ErrorCategory, Payer, User, UserRole } from "./src/types";
 import { generateClaimId } from "./src/claimId";
+import { validateClaimCptRepeatLimits } from "./src/cptRepeatLimits";
 
 type AppRequest = express.Request & {
   appUser?: User;
@@ -319,7 +320,7 @@ async function startServer() {
       const rawClaim = req.body;
 
       // Claim IDs are always generated server-side to guarantee uniqueness.
-      const claims = await sheetsService.getClaims();
+      const claims = await sheetsService.getClaims(true);
       rawClaim.claim_id = generateClaimId(
         claims.map(c => c.claim_id),
         rawClaim.patient_id,
@@ -354,6 +355,7 @@ async function startServer() {
 
       // Validate
       const validationErrors = validateClaim(calculated);
+      validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
       if (validationErrors.length > 0) {
         return res.status(400).json({ error: "Validation failed", details: validationErrors });
       }
@@ -371,10 +373,13 @@ async function startServer() {
       const operatorEmail = getOperatorEmail(req);
       const rawClaimUpdates = req.body;
 
-      const claims = await sheetsService.getClaims();
+      const claims = await sheetsService.getClaims(true);
       const existing = claims.find(c => c.claim_id === req.params.id);
       if (!existing) {
         return res.status(404).json({ error: "Claim not found" });
+      }
+      if (existing.deleted_flag) {
+        return res.status(410).json({ error: "Claim has been deleted" });
       }
 
       // Capture payer state BEFORE merge so we can detect changes explicitly
@@ -395,6 +400,7 @@ async function startServer() {
 
       // Validate
       const validationErrors = validateClaim(calculated);
+      validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
       if (validationErrors.length > 0) {
         return res.status(400).json({ error: "Validation failed", details: validationErrors });
       }
@@ -434,6 +440,19 @@ async function startServer() {
     }
   });
 
+  // DELETE Claim (soft delete, Admin only)
+  app.delete("/api/claims/:id", requireRoles(UserRole.Admin), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const reason = String(req.body?.reason || "").trim() || "Claim entered in error";
+      const deleted = await sheetsService.softDeleteClaim(req.params.id, operatorEmail, reason);
+      res.json({ success: true, claim: deleted });
+    } catch (err: any) {
+      const status = /not found/i.test(err.message || "") ? 404 : 500;
+      res.status(status).json({ error: err.message || "Failed to delete claim" });
+    }
+  });
+
   // POST Bulk Update Claims
   app.post("/api/claims/bulk-update", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
     try {
@@ -452,7 +471,7 @@ async function startServer() {
       let successCount = 0;
       for (const id of claimIds) {
         const claim = sheetsService.claims.find(c => c.claim_id === id);
-        if (claim) {
+        if (claim && !claim.deleted_flag) {
           const merged = { ...claim, ...updates };
           const recomputed = calculateClaimFinancials(merged, {
             providerSharePercent: pPercent,
@@ -460,6 +479,7 @@ async function startServer() {
           });
 
           const validationErrors = validateClaim(recomputed);
+          validationErrors.push(...validateClaimCptRepeatLimits(recomputed, await sheetsService.getFeeSchedules()));
           if (validationErrors.length > 0) {
             return res.status(400).json({
               error: `Validation failed for claim ${id}`,
@@ -909,6 +929,7 @@ async function startServer() {
             iteraSharePercent: iPercent
           });
           const validationErrors = validateClaim(calculated);
+          validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
           if (validationErrors.length > 0) {
             errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
           } else {
@@ -980,6 +1001,7 @@ async function startServer() {
 
         // Validate
         const validationErrors = validateClaim(calculated);
+        validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
         if (validationErrors.length > 0) {
           errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
         } else {

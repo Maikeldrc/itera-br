@@ -24,7 +24,7 @@ import {
   FileText,
   Check
 } from "lucide-react";
-import { Claim, ClaimStatus, ClaimClassification } from "../types";
+import { Claim, ClaimStatus, ClaimClassification, UserRole } from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
@@ -38,6 +38,8 @@ interface ClaimsTableProps {
   onViewDetails: (claim: Claim) => void;
   onUpdateClaim?: (updates: Partial<Claim>, targetClaimId?: string) => Promise<void>;
   onSaveServiceLineNotes?: (serviceLinesJson: string, targetClaimId?: string) => Promise<void>;
+  onDeleteClaim?: (claim: Claim, reason: string) => Promise<void>;
+  userRole?: UserRole | string;
 }
 
 interface ServiceLineRow {
@@ -279,7 +281,9 @@ export function ClaimsTable({
   onSelectAllClaims,
   onViewDetails,
   onUpdateClaim,
-  onSaveServiceLineNotes
+  onSaveServiceLineNotes,
+  onDeleteClaim,
+  userRole
 }: ClaimsTableProps) {
   const [viewMode, setViewMode] = useState<"patient" | "cpt">("patient");
   const [sortField, setSortField] = useState<SortField>("updated_at");
@@ -749,6 +753,29 @@ export function ClaimsTable({
 
   const { language } = useLanguage();
   const isEnglish = language === "en";
+  const isAdmin = userRole === UserRole.Admin;
+
+  const requestSoftDeleteClaim = async (claim: Claim) => {
+    if (!onDeleteClaim || !isAdmin) return;
+    const reason = await promptAction({
+      title: isEnglish ? "Delete claim" : "Eliminar claim",
+      message: isEnglish
+        ? `This will hide ${claim.claim_id} from operational views while keeping the full audit trail. Enter the reason.`
+        : `Esto ocultará ${claim.claim_id} de las vistas operativas manteniendo toda la trazabilidad. Ingresa la razón.`,
+      inputLabel: isEnglish ? "Reason" : "Razón",
+      placeholder: isEnglish ? "Entered in error, duplicate claim..." : "Introducido por error, claim duplicado...",
+      inputType: "text",
+      cancelLabel: isEnglish ? "Cancel" : "Cancelar",
+      confirmLabel: isEnglish ? "Delete claim" : "Eliminar claim"
+    });
+    if (!reason || !reason.trim()) return;
+    try {
+      await onDeleteClaim(claim, reason.trim());
+      notify(isEnglish ? "Claim deleted from operational views." : "Claim eliminado de las vistas operativas.", "success");
+    } catch (err: any) {
+      notify(err.message || (isEnglish ? "Failed to delete claim." : "No se pudo eliminar el claim."), "error");
+    }
+  };
 
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
@@ -1070,6 +1097,18 @@ export function ClaimsTable({
                                   ? (isEnglish ? "Unlock Claim" : "Desbloquear Reclamación") 
                                   : (isEnglish ? "Block Claim" : "Bloquear Reclamación")}
                               </button>
+                              {isAdmin && onDeleteClaim && (
+                                <button
+                                  onClick={async () => {
+                                    setActiveActionMenu(null);
+                                    await requestSoftDeleteClaim(claim);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded border-t border-slate-100 px-3 py-2 text-[11px] font-bold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {isEnglish ? "Delete claim" : "Eliminar claim"}
+                                </button>
+                              )}
                             </div>
                           </>
                         )}
@@ -1307,6 +1346,18 @@ export function ClaimsTable({
                                   ? (isEnglish ? `Unlock CPT ${slRow.cpt}` : `Desbloquear CPT ${slRow.cpt}`)
                                   : (isEnglish ? `Block CPT ${slRow.cpt}` : `Bloquear CPT ${slRow.cpt}`)}
                               </button>
+                              {isAdmin && onDeleteClaim && (
+                                <button
+                                  onClick={async () => {
+                                    setActiveActionMenu(null);
+                                    await requestSoftDeleteClaim(claim);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded border-t border-slate-100 px-3 py-2 text-[11px] font-bold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {isEnglish ? "Delete claim" : "Eliminar claim"}
+                                </button>
+                              )}
                             </div>
                           </>
                         )}

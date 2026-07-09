@@ -148,6 +148,10 @@ export interface Claim {
   billable_flag?: boolean;
   voided_flag?: boolean;
   corrected_claim_flag?: boolean;
+  deleted_flag?: boolean;
+  deleted_at?: string;
+  deleted_by?: string;
+  delete_reason?: string;
   service_lines_json?: string;
   // Transient metadata used during insurance change events (not persisted)
   insurance_change_reason?: string;
@@ -185,7 +189,7 @@ export interface Note {
 export interface AuditLog {
   audit_id: string;
   claim_id: string;
-  action_type: "Create" | "Update" | "Bulk Update" | "Import" | "Lock" | "Unlock" | "Status Change";
+  action_type: "Create" | "Update" | "Bulk Update" | "Import" | "Lock" | "Unlock" | "Status Change" | "Delete";
   field_name: string;
   previous_value: string;
   new_value: string;
@@ -230,6 +234,7 @@ export interface FeeSchedule {
   year: number;
   semester1_rate: number;
   semester2_rate: number;
+  max_per_dos?: number;
   description: string;
 }
 

@@ -261,8 +261,8 @@ export class GoogleSheetsService {
 
   // --- External API Integrations ---
 
-  public async getClaims(): Promise<Claim[]> {
-    return this.claims;
+  public async getClaims(includeDeleted = false): Promise<Claim[]> {
+    return includeDeleted ? this.claims : this.claims.filter(claim => !claim.deleted_flag);
   }
 
   public async updateClaim(claimId: string, updatedClaim: Claim, operatorEmail: string): Promise<Claim> {
@@ -315,6 +315,10 @@ export class GoogleSheetsService {
 
     const claimToAdd = {
       ...newClaim,
+      deleted_flag: false,
+      deleted_at: "",
+      deleted_by: "",
+      delete_reason: "",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       updated_by: operatorEmail
@@ -342,6 +346,52 @@ export class GoogleSheetsService {
     }
 
     return claimToAdd;
+  }
+
+  public async softDeleteClaim(claimId: string, operatorEmail: string, reason: string): Promise<Claim> {
+    const index = this.claims.findIndex(c => c.claim_id === claimId);
+    if (index === -1) {
+      throw new Error(`Claim with ID ${claimId} not found.`);
+    }
+
+    const previous = this.claims[index];
+    if (previous.deleted_flag) {
+      throw new Error(`Claim ${claimId} is already deleted.`);
+    }
+
+    const deletedAt = new Date().toISOString();
+    const updated = {
+      ...previous,
+      deleted_flag: true,
+      deleted_at: deletedAt,
+      deleted_by: operatorEmail,
+      delete_reason: reason,
+      updated_at: deletedAt,
+      updated_by: operatorEmail
+    } as Claim;
+
+    this.claims[index] = updated;
+
+    const auditRecord: AuditLog = {
+      audit_id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      claim_id: claimId,
+      action_type: "Delete",
+      field_name: "deleted_flag",
+      previous_value: "false",
+      new_value: "true",
+      reason: reason || "Soft delete requested by administrator",
+      changed_by: operatorEmail,
+      changed_at: deletedAt
+    };
+    this.auditLogs.unshift(auditRecord);
+
+    if (this.isConfigured) {
+      const rows = this.claims.map(c => mapObjectToRow("Claims", c));
+      await this.overwriteTab("Claims", CLAIMS_HEADERS, rows);
+      await this.appendRow("Audit_Log", mapObjectToRow("Audit_Log", auditRecord));
+    }
+
+    return updated;
   }
 
   public async bulkUpdateClaims(claimIds: string[], updates: Partial<Claim>, operatorEmail: string): Promise<number> {
@@ -623,7 +673,8 @@ export class GoogleSheetsService {
   public async createFeeSchedule(fs: FeeSchedule): Promise<FeeSchedule> {
     const fsToAdd = {
       ...fs,
-      id: fs.id || `FSCH-${Date.now()}`
+      id: fs.id || `FSCH-${Date.now()}`,
+      max_per_dos: Math.max(1, Math.floor(Number(fs.max_per_dos) || 1))
     };
     this.feeSchedules.push(fsToAdd);
     if (this.isConfigured) {
@@ -638,7 +689,11 @@ export class GoogleSheetsService {
     if (index === -1) {
       throw new Error(`Fee schedule with ID ${id} not found.`);
     }
-    this.feeSchedules[index] = { ...updated, id };
+    this.feeSchedules[index] = {
+      ...updated,
+      id,
+      max_per_dos: Math.max(1, Math.floor(Number(updated.max_per_dos) || 1))
+    };
     if (this.isConfigured) {
       const rows = this.feeSchedules.map(f => mapObjectToRow("FeeSchedules", f));
       await this.overwriteTab("FeeSchedules", FEESCHEDULES_HEADERS, rows);
@@ -842,7 +897,8 @@ const CLAIMS_HEADERS = [
   "check_or_eft_number", "carc_code", "rarc_code", "denial_reason", "error_flag", "error_category",
   "locked", "lock_reason", "correction_status", "resubmission_date", "corrected_claim_reference",
   "last_note", "service_lines_json", "created_at", "updated_at", "updated_by"
-  ,"cpt_description", "submission_date", "itera_billed_fee", "billable_flag", "voided_flag", "corrected_claim_flag"
+  ,"cpt_description", "submission_date", "itera_billed_fee", "billable_flag", "voided_flag", "corrected_claim_flag",
+  "deleted_flag", "deleted_at", "deleted_by", "delete_reason"
 ];
 
 const PAYMENTS_HEADERS = [
@@ -875,7 +931,7 @@ const SETTINGS_HEADERS = [
 ];
 
 const FEESCHEDULES_HEADERS = [
-  "id", "cpt_code", "year", "semester1_rate", "semester2_rate", "description"
+  "id", "cpt_code", "year", "semester1_rate", "semester2_rate", "max_per_dos", "description"
 ];
 
 const REPORT_FEESCHEDULE_HEADERS = [

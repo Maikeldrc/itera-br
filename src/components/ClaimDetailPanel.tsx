@@ -37,6 +37,7 @@ import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
 import { validateServiceLineDetails } from "../serviceLineValidation";
+import { validateCptRepeatLimitsByLine } from "../cptRepeatLimits";
 
 const COMMON_CPT_DESCRIPTIONS: Record<string, string> = {
   "99453": "RPM - Preparación inicial de dispositivo, educación y entrenamiento del paciente.",
@@ -991,7 +992,7 @@ export function ClaimDetailPanel({
   const handleSaveClaim = async () => {
     if (isReadOnly) return;
     try {
-      const validationErrors = serviceLineValidation.allErrors;
+      const validationErrors = serviceLineValidationAllErrors;
 
       if (validationErrors.length > 0) {
         setShowValidationErrors(true);
@@ -1109,8 +1110,23 @@ export function ClaimDetailPanel({
     allowed_amount: Number(allowedAmount),
     paid_amount: Number(paidAmount)
   });
-  const serviceLineErrors = serviceLineValidation.lineErrors;
+  const repeatLimitLineErrors = validateCptRepeatLimitsByLine(serviceLines, feeSchedules, claim.date_of_service_from);
+  const serviceLineErrors = Object.keys({
+    ...serviceLineValidation.lineErrors,
+    ...repeatLimitLineErrors
+  }).reduce<Record<number, string[]>>((acc, key) => {
+    const index = Number(key);
+    acc[index] = [
+      ...(serviceLineValidation.lineErrors[index] || []),
+      ...(repeatLimitLineErrors[index] || [])
+    ];
+    return acc;
+  }, {});
   const claimValidationErrors = serviceLineValidation.claimErrors;
+  const serviceLineValidationAllErrors = [
+    ...serviceLineValidation.allErrors,
+    ...Object.values(repeatLimitLineErrors).flat()
+  ];
 
   const formatUSD = (val: number) => {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val);

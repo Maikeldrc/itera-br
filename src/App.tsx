@@ -45,6 +45,7 @@ import { useFeedback } from "./components/FeedbackProvider";
 import { AppLanguage, useLanguage } from "./components/LanguageProvider";
 import { useAuth } from "./auth";
 import { apiFetch, setApiTokenProvider } from "./apiClient";
+import { validateCptRepeatLimits } from "./cptRepeatLimits";
 
 const INITIAL_FILTERS: FilterState = {
   search: "",
@@ -215,6 +216,7 @@ export default function App() {
   const [fsYear, setFsYear] = useState(2026);
   const [fsSemester1Rate, setFsSemester1Rate] = useState(0);
   const [fsSemester2Rate, setFsSemester2Rate] = useState(0);
+  const [fsMaxPerDos, setFsMaxPerDos] = useState(1);
   const [fsDescription, setFsDescription] = useState("");
   const [editingPayer, setEditingPayer] = useState<Payer | null>(null);
   const [payerSearchTerm, setPayerSearchTerm] = useState("");
@@ -476,19 +478,17 @@ export default function App() {
       notify("Añade al menos un CPT code para crear el claim.", "warning");
       return;
     }
-    const duplicateCpts = normalizedLines
-      .map(line => line.cpt)
-      .filter((cpt, index, list) => list.indexOf(cpt) !== index);
-    if (duplicateCpts.length > 0) {
-      notify(`No repitas CPT codes en el mismo claim: ${Array.from(new Set(duplicateCpts)).join(", ")}.`, "warning");
-      return;
-    }
     const invalidServiceCpts = normalizedLines.filter(line => !isCptAllowedForService(line.serviceType, line.cpt));
     if (invalidServiceCpts.length > 0) {
       notify(
         `CPT no permitido para el servicio seleccionado: ${invalidServiceCpts.map(line => `${line.serviceType}/${line.cpt}`).join(", ")}.`,
         "warning"
       );
+      return;
+    }
+    const cptRepeatErrors = validateCptRepeatLimits(normalizedLines, feeSchedules, newDos);
+    if (cptRepeatErrors.length > 0) {
+      notify(cptRepeatErrors[0], "warning");
       return;
     }
     const missingRates = lineCharges.filter(line => line.charge <= 0);
@@ -631,6 +631,28 @@ export default function App() {
     }
   };
 
+  const handleSoftDeleteClaim = async (claim: Claim, reason: string) => {
+    const res = await apiFetch(`/api/claims/${claim.claim_id}`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-email": currentUser.email
+      },
+      body: JSON.stringify({ reason })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || "Failed to delete claim");
+    }
+
+    setSelectedClaimIds(prev => prev.filter(id => id !== claim.claim_id));
+    if (selectedClaim?.claim_id === claim.claim_id) {
+      setSelectedClaim(null);
+    }
+    await fetchAllData();
+  };
+
   // Add notes to a claim
   const handleAddClaimNote = async (noteType: Note["note_type"], text: string) => {
     if (!selectedClaim) return;
@@ -771,6 +793,7 @@ export default function App() {
     setFsYear(2026);
     setFsSemester1Rate(0);
     setFsSemester2Rate(0);
+    setFsMaxPerDos(1);
     setFsDescription("");
     setIsFsModalOpen(true);
   };
@@ -781,6 +804,7 @@ export default function App() {
     setFsYear(Number(fs.year) || new Date().getFullYear());
     setFsSemester1Rate(Number(fs.semester1_rate) || 0);
     setFsSemester2Rate(Number(fs.semester2_rate) || 0);
+    setFsMaxPerDos(Math.max(1, Math.floor(Number(fs.max_per_dos) || 1)));
     setFsDescription(String(fs.description ?? ""));
     setIsFsModalOpen(true);
   };
@@ -795,6 +819,7 @@ export default function App() {
       year: Number(fsYear),
       semester1_rate: Number(fsSemester1Rate),
       semester2_rate: Number(fsSemester2Rate),
+      max_per_dos: Math.max(1, Math.floor(Number(fsMaxPerDos) || 1)),
       description: fsDescription
     };
 
@@ -1272,6 +1297,7 @@ export default function App() {
       const description = String(fs.description ?? "").trim();
       const semester1Rate = Number(fs.semester1_rate);
       const semester2Rate = Number(fs.semester2_rate);
+      const maxPerDos = Number(fs.max_per_dos);
       return {
         source: fs,
         key: String(fs.id || `${cptCode || "fee"}-${fs.year || "year"}-${index}`),
@@ -1280,7 +1306,8 @@ export default function App() {
         description,
         year: Number(fs.year) || new Date().getFullYear(),
         semester1Rate: Number.isFinite(semester1Rate) ? semester1Rate : 0,
-        semester2Rate: Number.isFinite(semester2Rate) ? semester2Rate : 0
+        semester2Rate: Number.isFinite(semester2Rate) ? semester2Rate : 0,
+        maxPerDos: Number.isFinite(maxPerDos) && maxPerDos > 0 ? Math.floor(maxPerDos) : 1
       };
     })
     .filter(fs => fs.cptCode || fs.description)
@@ -1407,6 +1434,8 @@ export default function App() {
                 onSaveServiceLineNotes={async (json, targetClaimId) => {
                   await handleSaveServiceLineNotes(json, targetClaimId);
                 }}
+                onDeleteClaim={handleSoftDeleteClaim}
+                userRole={currentUser.role}
               />
 
               {/* Bulk action toolbar */}
@@ -2482,6 +2511,7 @@ export default function App() {
                           <th className="p-3">Año</th>
                           <th className="p-3">Tarifa Semestre 1 (Ene-Jun)</th>
                           <th className="p-3">Tarifa Semestre 2 (Jul-Dic)</th>
+                          <th className="p-3 text-center">Max/DOS</th>
                           <th className="p-3">Descripción Oficial</th>
                           <th className="p-3 text-right">Acciones</th>
                         </tr>
@@ -2494,6 +2524,7 @@ export default function App() {
                               <td className="p-3 font-mono text-slate-600">{fs.year}</td>
                               <td className="p-3 font-mono font-bold text-slate-900">${fs.semester1Rate.toFixed(2)}</td>
                               <td className="p-3 font-mono font-bold text-slate-900">${fs.semester2Rate.toFixed(2)}</td>
+                              <td className="p-3 text-center font-mono font-bold text-slate-700">{fs.maxPerDos}</td>
                               <td className="p-3 text-slate-500 max-w-xs truncate" title={fs.description}>{fs.description || "-"}</td>
                               <td className="p-3 text-right">
                                 <div className="flex items-center justify-end gap-1.5">
@@ -2523,7 +2554,7 @@ export default function App() {
                           ))}
                         {visibleFeeSchedules.length === 0 && (
                           <tr>
-                            <td colSpan={6} className="p-6 text-center text-slate-400">
+                            <td colSpan={7} className="p-6 text-center text-slate-400">
                               {feeScheduleSearch ? "No se encontraron tarifas con ese criterio." : "No hay tarifas configuradas en el Fee Schedule."}
                             </td>
                           </tr>
@@ -2875,7 +2906,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-slate-500 mb-1 font-semibold">Semestre 1 Rate ($)</label>
                   <input
@@ -2897,6 +2928,18 @@ export default function App() {
                     placeholder="63.10"
                     value={fsSemester2Rate || ""}
                     onChange={(e) => setFsSemester2Rate(Number(e.target.value))}
+                    className="w-full p-2 border border-slate-200 rounded bg-slate-50 font-mono font-bold text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-500 mb-1 font-semibold">Max por DOS</label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    required
+                    value={fsMaxPerDos || 1}
+                    onChange={(e) => setFsMaxPerDos(Math.max(1, Math.floor(Number(e.target.value) || 1)))}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 font-mono font-bold text-slate-800"
                   />
                 </div>
