@@ -3,6 +3,7 @@ import { initializeApp, type FirebaseApp } from "firebase/app";
 import {
   getAuth,
   onAuthStateChanged,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   type User as FirebaseUser
@@ -28,6 +29,7 @@ interface AuthContextValue {
   user: FirebaseUser | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
 
@@ -62,10 +64,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await firebaseSignOut(auth);
   }, [auth]);
 
+  const sendPasswordReset = useCallback(async (email: string) => {
+    if (!auth) throw new Error("Firebase Auth is not configured.");
+    await sendPasswordResetEmail(auth, email);
+  }, [auth]);
+
   const getIdToken = useCallback(async () => user ? user.getIdToken() : null, [user]);
 
   return (
-    <AuthContext.Provider value={{ isReady, isAuthEnabled: !!auth, user, signIn, signOut, getIdToken }}>
+    <AuthContext.Provider value={{ isReady, isAuthEnabled: !!auth, user, signIn, signOut, sendPasswordReset, getIdToken }}>
       {children}
     </AuthContext.Provider>
   );

@@ -26,6 +26,7 @@ import {
   X,
   Trash2,
   Edit2,
+  Mail,
   Calendar,
   DollarSign,
   Languages,
@@ -1084,6 +1085,34 @@ export default function App() {
     }
   };
 
+  const handleSendPasswordReset = async (user: User) => {
+    if (!auth.isAuthEnabled) {
+      notify("Firebase Auth is not configured. Password reset emails cannot be sent.", "warning");
+      return;
+    }
+
+    const email = user.email?.trim().toLowerCase();
+    if (!email) {
+      notify("This user has no valid email address.", "warning");
+      return;
+    }
+
+    const confirmed = await confirmAction({
+      title: "Send password reset",
+      message: `Send a Firebase password reset email to ${email}?`,
+      confirmLabel: "Send email",
+      tone: "primary"
+    });
+    if (!confirmed) return;
+
+    try {
+      await auth.sendPasswordReset(email);
+      notify(`Password reset email sent to ${email}.`, "success");
+    } catch (err: any) {
+      notify(`Unable to send password reset email: ${err.message}`, "error");
+    }
+  };
+
   // Trigger quick physician payout recording from Balances view
   const handleRecordPhysicianPayout = async (providerId: string, amount: number) => {
     if (amount <= 0) {
@@ -2053,6 +2082,15 @@ export default function App() {
                               </td>
                               <td className="p-3 text-right">
                                 <div className="flex justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={!user.email}
+                                    onClick={() => handleSendPasswordReset(user)}
+                                    className="rounded p-1 text-slate-500 hover:bg-blue-50 hover:text-primary-blue disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                                    title={isEnglish ? "Send password reset email" : "Enviar email de reset password"}
+                                  >
+                                    <Mail className="h-3.5 w-3.5" />
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => handleEditUser(user)}
