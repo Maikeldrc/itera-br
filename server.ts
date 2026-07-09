@@ -193,13 +193,17 @@ async function startServer() {
   // Initialize our Google Sheets / Memory database service
   const sheetsService = new GoogleSheetsService();
   
-  // Try to sync on server start (non-blocking)
-  sheetsService.syncWithGoogleSheets().then(res => {
+  // Start sync immediately and make auth wait for it to avoid cold-start authorization races.
+  const initialSyncPromise = sheetsService.syncWithGoogleSheets().then(res => {
     if (res.success) {
       console.log("Initial Google Sheets sync completed successfully.");
     } else {
       console.warn("Initial Google Sheets sync failed or was bypassed. Operating in-memory mode.");
     }
+    return res;
+  }).catch(err => {
+    console.error("Initial Google Sheets sync failed:", err);
+    return { success: false, error: err?.message || String(err) };
   });
 
   // Automatically execute reconciliation engine unit tests on server start for audit/verification
@@ -219,6 +223,7 @@ async function startServer() {
 
   const authenticateRequest = async (req: AppRequest, res: express.Response, next: express.NextFunction) => {
     try {
+      await initialSyncPromise;
       const users = await sheetsService.getUsers();
       if (!authRequired) {
         const requestedEmail = ((req.headers["x-user-email"] as string) || "").toLowerCase();
