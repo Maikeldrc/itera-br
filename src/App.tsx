@@ -112,7 +112,7 @@ const VIEW_PATHS: Record<ViewType, string> = {
 function viewFromPath(pathname: string): ViewType {
   if (pathname.startsWith("/reports")) return "reports";
   const found = (Object.entries(VIEW_PATHS) as Array<[ViewType, string]>)
-    .find(([view, path]) => view !== "reports" && path !== "/" && pathname.startsWith(path));
+    .find(([view, path]) => view !== "reports" && path !== "/" && (pathname === path || pathname.startsWith(`${path}/`)));
   return found?.[0] || "dashboard";
 }
 
