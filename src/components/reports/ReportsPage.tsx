@@ -35,6 +35,10 @@ function excelValue(value: unknown) {
     .replace(/"/g, "&quot;");
 }
 
+function textValue(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 const EXPORT_COLUMNS: Array<[string, keyof ReportRow]> = [
   ["Date", "date"], ["Practice", "practice"], ["Provider", "provider"], ["Service Type", "serviceType"],
   ["CPT Code", "cptCode"], ["CPT Description", "cptDescription"], ["Unique Billable Patients", "uniqueBillablePatients"],
@@ -91,7 +95,7 @@ function exportExcelRows(rows: ReportRow[], view: ReportView) {
 }
 
 function serviceTypesForClaim(claim: Claim) {
-  const values = new Set((claim.service_type || "").split(",").map(item => item.trim()).filter(Boolean));
+  const values = new Set(textValue(claim.service_type).split(",").map(item => item.trim()).filter(Boolean));
   try {
     const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
     if (Array.isArray(lines)) {
@@ -147,7 +151,7 @@ export function ReportsPage({
   const kpis = calculateReportKpis(rows);
   const practices = Array.from(new Map(claims.map(claim => [claim.practice_id, { id: claim.practice_id, name: claim.practice_name }])).values());
   const serviceTypes = Array.from(new Set(claims.flatMap(serviceTypesForClaim))).sort();
-  const cptCodes = Array.from(new Set(claims.flatMap(claim => claim.cpt_hcpcs.split(/[\s,]+/).filter(Boolean)))).sort();
+  const cptCodes = Array.from(new Set(claims.flatMap(claim => textValue(claim.cpt_hcpcs).split(/[\s,]+/).filter(Boolean)))).sort();
 
   const saveView = () => {
     const { search, ...safeFilters } = filters;

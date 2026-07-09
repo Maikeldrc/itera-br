@@ -159,12 +159,16 @@ function round(value: number) {
   return Number(value.toFixed(2));
 }
 
-function splitCpts(claim: Claim) {
-  return claim.cpt_hcpcs.split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
-}
-
 function textValue(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function splitCpts(claim: Claim) {
+  return textValue(claim.cpt_hcpcs).split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
+}
+
+function dateText(value: unknown) {
+  return textValue(value).slice(0, 10);
 }
 
 function feeScheduleFor(
@@ -176,7 +180,7 @@ function feeScheduleFor(
   const reportSchedule = reportFeeSchedules
     .filter(item => item.active && textValue(item.cpt_hcpcs) === cptCode)
     .sort((a, b) => textValue(b.effective_date).localeCompare(textValue(a.effective_date)))
-    .find(item => !item.effective_date || textValue(item.effective_date) <= claim.date_of_service_from);
+    .find(item => !item.effective_date || textValue(item.effective_date) <= dateText(claim.date_of_service_from));
   if (reportSchedule) {
     return {
       description: reportSchedule.cpt_description,
@@ -185,8 +189,9 @@ function feeScheduleFor(
     };
   }
 
-  const year = Number(claim.date_of_service_from?.slice(0, 4)) || new Date().getFullYear();
-  const month = Number(claim.date_of_service_from?.slice(5, 7)) || 1;
+  const serviceDate = dateText(claim.date_of_service_from);
+  const year = Number(serviceDate.slice(0, 4)) || new Date().getFullYear();
+  const month = Number(serviceDate.slice(5, 7)) || 1;
   const schedule = feeSchedules.find(item => textValue(item.cpt_code) === cptCode && Number(item.year) === year);
   return {
     description: schedule?.description || claim.cpt_description || "",
@@ -252,8 +257,9 @@ export function expandClaimsToReportLines(
 
 function matchesFilters(line: ReportLine, filters: ReportFiltersState) {
   const claim = line.claim;
-  const submissionDate = claim.submission_date || claim.created_at?.slice(0, 10) || "";
-  const paymentDate = claim.payment_date || "";
+  const serviceDate = dateText(claim.date_of_service_from);
+  const submissionDate = dateText(claim.submission_date) || dateText(claim.created_at);
+  const paymentDate = dateText(claim.payment_date);
   const search = filters.search.trim().toLowerCase();
 
   if (search && ![
@@ -265,17 +271,17 @@ function matchesFilters(line: ReportLine, filters: ReportFiltersState) {
     line.cptDescription,
     claim.payer_name
   ].some(value => String(value || "").toLowerCase().includes(search))) return false;
-  if (filters.startDate && claim.date_of_service_from < filters.startDate) return false;
-  if (filters.endDate && claim.date_of_service_from > filters.endDate) return false;
-  if (filters.month && claim.month_of_service !== filters.month) return false;
-  if (filters.practiceId && claim.practice_id !== filters.practiceId) return false;
-  if (filters.providerId && claim.provider_id !== filters.providerId) return false;
-  if (filters.serviceType && line.serviceType !== filters.serviceType) return false;
-  if (filters.cptCode && line.cptCode !== filters.cptCode) return false;
-  if (filters.billedBy && claim.billed_by !== filters.billedBy) return false;
-  if (filters.paymentReceivedBy && claim.payment_received_by !== filters.paymentReceivedBy) return false;
-  if (filters.claimStatus && claim.claim_status !== filters.claimStatus) return false;
-  if (filters.payerId && claim.payer_id !== filters.payerId) return false;
+  if (filters.startDate && serviceDate < filters.startDate) return false;
+  if (filters.endDate && serviceDate > filters.endDate) return false;
+  if (filters.month && textValue(claim.month_of_service) !== filters.month) return false;
+  if (filters.practiceId && textValue(claim.practice_id) !== filters.practiceId) return false;
+  if (filters.providerId && textValue(claim.provider_id) !== filters.providerId) return false;
+  if (filters.serviceType && textValue(line.serviceType) !== filters.serviceType) return false;
+  if (filters.cptCode && textValue(line.cptCode) !== filters.cptCode) return false;
+  if (filters.billedBy && textValue(claim.billed_by) !== filters.billedBy) return false;
+  if (filters.paymentReceivedBy && textValue(claim.payment_received_by) !== filters.paymentReceivedBy) return false;
+  if (filters.claimStatus && textValue(claim.claim_status) !== filters.claimStatus) return false;
+  if (filters.payerId && textValue(claim.payer_id) !== filters.payerId) return false;
   if (filters.submissionStartDate && submissionDate < filters.submissionStartDate) return false;
   if (filters.submissionEndDate && submissionDate > filters.submissionEndDate) return false;
   if (filters.paymentStartDate && (!paymentDate || paymentDate < filters.paymentStartDate)) return false;
@@ -286,15 +292,15 @@ function matchesFilters(line: ReportLine, filters: ReportFiltersState) {
 function groupValue(line: ReportLine, groupBy: ReportGroupBy) {
   const claim = line.claim;
   const values: Record<ReportGroupBy, string> = {
-    month: claim.month_of_service,
-    date: claim.date_of_service_from,
-    practice: claim.practice_name,
-    provider: claim.provider_name,
-    serviceType: line.serviceType,
-    cpt: line.cptCode,
-    payer: claim.payer_name,
-    billedBy: claim.billed_by,
-    paymentReceivedBy: claim.payment_received_by
+    month: textValue(claim.month_of_service),
+    date: dateText(claim.date_of_service_from),
+    practice: textValue(claim.practice_name),
+    provider: textValue(claim.provider_name),
+    serviceType: textValue(line.serviceType),
+    cpt: textValue(line.cptCode),
+    payer: textValue(claim.payer_name),
+    billedBy: textValue(claim.billed_by),
+    paymentReceivedBy: textValue(claim.payment_received_by)
   };
   return values[groupBy] || "N/A";
 }
@@ -314,7 +320,7 @@ function coverageForGroup(
       .filter(line => line.claim.billable_flag !== false && !line.claim.voided_flag && !INVALID_STATUSES.has(line.claim.claim_status))
       .map(line => line.claim.patient_id)
   );
-  const keys = new Set(lines.map(line => `${line.claim.practice_id}|${line.serviceType}|${line.claim.month_of_service}`));
+  const keys = new Set(lines.map(line => `${textValue(line.claim.practice_id)}|${textValue(line.serviceType)}|${textValue(line.claim.month_of_service)}`));
   const matchingCoverage = coverage.filter(item => keys.has(`${item.practice_id}|${item.service_type}|${item.period}`));
   const eligible = matchingCoverage.length > 0
     ? matchingCoverage.reduce((sum, item) => sum + number(item.total_eligible_patients), 0)
@@ -370,8 +376,8 @@ export function aggregateReports(
     const iteraDenied = deniedClaims.filter(claim => claim.billed_by === "ITERA");
     const providerPending = pendingClaims.filter(claim => claim.billed_by === "Provider");
     const iteraPending = pendingClaims.filter(claim => claim.billed_by === "ITERA");
-    const submissionDates = claimList.map(claim => claim.submission_date || claim.created_at?.slice(0, 10) || "");
-    const paymentDates = claimList.map(claim => claim.payment_date || "");
+    const submissionDates = claimList.map(claim => dateText(claim.submission_date) || dateText(claim.created_at));
+    const paymentDates = claimList.map(claim => dateText(claim.payment_date));
     const latestSubmission = submissionDates.filter(Boolean).sort().at(-1) || "";
 
     return {
@@ -380,15 +386,15 @@ export function aggregateReports(
       deniedClaimIds: deniedClaims.map(claim => claim.claim_id),
       billablePatientIds: coverageStats.billablePatientIds,
       coverageEntries: coverageStats.coverageEntries,
-      date: filters.groupBy.includes("month") ? first.claim.month_of_service : first.claim.date_of_service_from,
-      practice: filters.groupBy.includes("practice") ? first.claim.practice_name : "All practices",
-      provider: filters.groupBy.includes("provider") ? first.claim.provider_name : "All providers",
-      serviceType: filters.groupBy.includes("serviceType") ? first.serviceType : "All services",
-      cptCode: filters.groupBy.includes("cpt") ? first.cptCode : "All CPTs",
-      cptDescription: filters.groupBy.includes("cpt") ? first.cptDescription : "Multiple CPT services",
-      payer: filters.groupBy.includes("payer") ? first.claim.payer_name : "All payers",
-      billedBy: filters.groupBy.includes("billedBy") ? first.claim.billed_by : "Mixed",
-      paymentReceivedBy: filters.groupBy.includes("paymentReceivedBy") ? first.claim.payment_received_by : "Mixed",
+      date: filters.groupBy.includes("month") ? textValue(first.claim.month_of_service) : dateText(first.claim.date_of_service_from),
+      practice: filters.groupBy.includes("practice") ? textValue(first.claim.practice_name) : "All practices",
+      provider: filters.groupBy.includes("provider") ? textValue(first.claim.provider_name) : "All providers",
+      serviceType: filters.groupBy.includes("serviceType") ? textValue(first.serviceType) : "All services",
+      cptCode: filters.groupBy.includes("cpt") ? textValue(first.cptCode) : "All CPTs",
+      cptDescription: filters.groupBy.includes("cpt") ? textValue(first.cptDescription) : "Multiple CPT services",
+      payer: filters.groupBy.includes("payer") ? textValue(first.claim.payer_name) : "All payers",
+      billedBy: filters.groupBy.includes("billedBy") ? textValue(first.claim.billed_by) : "Mixed",
+      paymentReceivedBy: filters.groupBy.includes("paymentReceivedBy") ? textValue(first.claim.payment_received_by) : "Mixed",
       uniqueBillablePatients: coverageStats.billablePatients,
       eligiblePatients: coverageStats.eligible,
       coveragePercent: coverageStats.percent === null ? null : round(coverageStats.percent),
