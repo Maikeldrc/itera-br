@@ -52,6 +52,9 @@ const COMMON_CPT_DESCRIPTIONS: Record<string, string> = {
   "99496": "TCM - Gestión de transición de cuidado médico, alta complejidad (comunicación en 2 días, visita en 7 días)."
 };
 
+const textValue = (value: unknown) => String(value ?? "").trim();
+const splitCptCodes = (value: unknown) => textValue(value).split(/[\s,]+/).map(item => item.trim()).filter(Boolean);
+
 const ERA_CODE_OPTIONS = [
   { code: "CO-4", label: "Procedure code inconsistent with modifier", group: "CARC" },
   { code: "CO-5", label: "Procedure code or bill type inconsistent with place of service", group: "CARC" },
@@ -707,7 +710,7 @@ export function ClaimDetailPanel({
 
   // Helper to parse or auto-initialize service lines for a claim
   const initializeServiceLines = (c: Claim): ServiceLine[] => {
-    const codes = c.cpt_hcpcs ? c.cpt_hcpcs.split(/[\s,]+/).map(item => item.trim()).filter(Boolean) : [];
+    const codes = splitCptCodes(c.cpt_hcpcs);
     
     let parsed: ServiceLine[] = [];
     if (c.service_lines_json) {
@@ -1078,7 +1081,7 @@ export function ClaimDetailPanel({
   const filteredNotes = notes.filter(n => n.claim_id === claim.claim_id);
   const filteredAudits = auditLogs.filter(a => a.claim_id === claim.claim_id);
   
-  const cptCodes = claim.cpt_hcpcs ? claim.cpt_hcpcs.split(/[\s,]+/).map(c => c.trim()).filter(Boolean) : [];
+  const cptCodes = splitCptCodes(claim.cpt_hcpcs);
   const patientResponsibilityTotal = serviceLines.reduce((acc, line) => acc + (Number(line.patResp) || 0), 0);
   const totalAdjustments = Number(insuranceAdjustment || 0) + Number(deniedAmount || 0) + Number(writeOffAmount || 0) + Number(uncollectibleAmount || 0);
   const suggestedClaimStatus = (() => {

@@ -1187,26 +1187,26 @@ export default function App() {
   const filteredClaims = claims.filter((claim) => {
     // Search
     if (filters.search) {
-      const searchLower = filters.search.toLowerCase();
-      const matchId = claim.claim_id.toLowerCase().includes(searchLower);
-      const matchPatient = claim.patient_display_name_masked.toLowerCase().includes(searchLower) || claim.patient_id.toLowerCase().includes(searchLower);
-      const matchProvider = claim.provider_name.toLowerCase().includes(searchLower);
+      const searchLower = toText(filters.search).toLowerCase();
+      const matchId = toText(claim.claim_id).toLowerCase().includes(searchLower);
+      const matchPatient = toText(claim.patient_display_name_masked).toLowerCase().includes(searchLower) || toText(claim.patient_id).toLowerCase().includes(searchLower);
+      const matchProvider = toText(claim.provider_name).toLowerCase().includes(searchLower);
       if (!matchId && !matchPatient && !matchProvider) return false;
     }
 
     // Dates
-    if (filters.startDate && claim.date_of_service_from < filters.startDate) return false;
-    if (filters.endDate && claim.date_of_service_from > filters.endDate) return false;
+    if (filters.startDate && toText(claim.date_of_service_from) < filters.startDate) return false;
+    if (filters.endDate && toText(claim.date_of_service_from) > filters.endDate) return false;
     
     // Select dropdowns
-    if (filters.providerId && claim.provider_id !== filters.providerId) return false;
-    if (filters.payerId && claim.payer_id !== filters.payerId) return false;
-    if (filters.serviceType && claim.service_type !== filters.serviceType) return false;
-    if (filters.billedBy && claim.billed_by !== filters.billedBy) return false;
-    if (filters.paymentReceivedBy && claim.payment_received_by !== filters.paymentReceivedBy) return false;
-    if (filters.status && claim.claim_status !== filters.status) return false;
-    if (filters.classification && claim.claim_classification !== filters.classification) return false;
-    if (filters.monthOfService && claim.month_of_service !== filters.monthOfService) return false;
+    if (filters.providerId && toText(claim.provider_id) !== filters.providerId) return false;
+    if (filters.payerId && toText(claim.payer_id) !== filters.payerId) return false;
+    if (filters.serviceType && toText(claim.service_type) !== filters.serviceType) return false;
+    if (filters.billedBy && toText(claim.billed_by) !== filters.billedBy) return false;
+    if (filters.paymentReceivedBy && toText(claim.payment_received_by) !== filters.paymentReceivedBy) return false;
+    if (filters.status && toText(claim.claim_status) !== filters.status) return false;
+    if (filters.classification && toText(claim.claim_classification) !== filters.classification) return false;
+    if (filters.monthOfService && toText(claim.month_of_service) !== filters.monthOfService) return false;
     
     // Error Flag
     if (filters.errorFlag) {
@@ -1218,7 +1218,7 @@ export default function App() {
   });
 
   // List of unique service types from claims for filters
-  const availableServiceTypes = Array.from(new Set(claims.map((c) => c.service_type))) as string[];
+  const availableServiceTypes = Array.from(new Set(claims.map((c) => toText(c.service_type)).filter(Boolean))) as string[];
 
   // Clickable KPI card trigger helper
   const handleKPICardClick = (field: keyof FilterState, value: string) => {

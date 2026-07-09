@@ -65,10 +65,13 @@ const getCptRowStatus = (line: any, fallbackStatus: string = "Pending") => {
   return line?.status || fallbackStatus;
 };
 
+const textValue = (value: unknown) => String(value ?? "").trim();
+
+const splitCptCodes = (value: unknown) =>
+  textValue(value).split(/[\s,]+/).map(item => item.trim()).filter(Boolean);
+
 const getClaimCptCodes = (claim: Claim) => {
-  const codes = claim.cpt_hcpcs
-    ? claim.cpt_hcpcs.split(/[\s,]+/).map(item => item.trim()).filter(Boolean)
-    : [];
+  const codes = splitCptCodes(claim.cpt_hcpcs);
 
   if (claim.service_lines_json) {
     try {
@@ -87,7 +90,7 @@ const getClaimCptCodes = (claim: Claim) => {
 };
 
 const getServiceLinesForClaim = (claim: Claim): ServiceLineRow[] => {
-  const codes = claim.cpt_hcpcs ? claim.cpt_hcpcs.split(/[\s,]+/).map(item => item.trim()).filter(Boolean) : [];
+  const codes = splitCptCodes(claim.cpt_hcpcs);
   
   let parsed: any[] = [];
   if (claim.service_lines_json) {
@@ -102,7 +105,7 @@ const getServiceLinesForClaim = (claim: Claim): ServiceLineRow[] => {
     return parsed.map((sl, idx) => ({
       row_id: `${claim.claim_id}-${sl.cpt || "unknown"}-${idx}`,
       claim,
-      cpt: sl.cpt || claim.cpt_hcpcs || "N/A",
+      cpt: textValue(sl.cpt) || textValue(claim.cpt_hcpcs) || "N/A",
       units: sl.units !== undefined ? sl.units : 1,
       charged: sl.charged !== undefined ? sl.charged : 0,
       allowed: sl.allowed !== undefined ? sl.allowed : 0,
@@ -121,7 +124,7 @@ const getServiceLinesForClaim = (claim: Claim): ServiceLineRow[] => {
     return [{
       row_id: `${claim.claim_id}-unknown-0`,
       claim,
-      cpt: claim.cpt_hcpcs || "N/A",
+      cpt: textValue(claim.cpt_hcpcs) || "N/A",
       units: claim.units || 1,
       charged: claim.billed_charge,
       allowed: claim.allowed_amount,
@@ -384,7 +387,7 @@ export function ClaimsTable({
 
       // Initialize if empty
       if (serviceLines.length === 0 && activeIssueClaim.cpt_hcpcs) {
-        const cpts = activeIssueClaim.cpt_hcpcs.split(/[\s,]+/);
+        const cpts = splitCptCodes(activeIssueClaim.cpt_hcpcs);
         serviceLines = cpts.map(cpt => ({
           cpt: cpt,
           charged: activeIssueClaim.billed_charge / cpts.length,
@@ -553,7 +556,7 @@ export function ClaimsTable({
         try { serviceLines = JSON.parse(claim.service_lines_json); } catch (e) { console.error(e); }
       }
       if (serviceLines.length === 0 && claim.cpt_hcpcs) {
-        const cpts = claim.cpt_hcpcs.split(/[\s,]+/);
+        const cpts = splitCptCodes(claim.cpt_hcpcs);
         serviceLines = cpts.map(cpt => ({
           cpt,
           charged: claim.billed_charge / cpts.length,
@@ -1017,7 +1020,7 @@ export function ClaimsTable({
                                     try { serviceLines = JSON.parse(claim.service_lines_json); } catch {}
                                   }
                                   if (serviceLines.length === 0 && claim.cpt_hcpcs) {
-                                    const cpts = claim.cpt_hcpcs.split(/[\s,]+/);
+                                    const cpts = splitCptCodes(claim.cpt_hcpcs);
                                     serviceLines = cpts.map(c => ({ cpt: c, charged: claim.billed_charge / cpts.length, status: "Pending" }));
                                   }
                                   const initialInputs: Record<string, string> = {};
@@ -1053,7 +1056,7 @@ export function ClaimsTable({
                                     } catch {}
                                   }
                                   if (initialLines.length === 0 && claim.cpt_hcpcs) {
-                                    initialLines = claim.cpt_hcpcs.split(/[\s,]+/);
+                                    initialLines = splitCptCodes(claim.cpt_hcpcs);
                                   }
                                   setSelectedLines(initialLines);
                                 }}
@@ -1132,7 +1135,7 @@ export function ClaimsTable({
                   const isLocked = claim.locked;
 
                   // Pro-rate Ending AP based on this service line's share of total billed, or divide equally
-                  const numLines = claim.service_lines_json ? JSON.parse(claim.service_lines_json).length : (claim.cpt_hcpcs ? claim.cpt_hcpcs.split(/[\s,]+/).length : 1);
+                  const numLines = claim.service_lines_json ? JSON.parse(claim.service_lines_json).length : (splitCptCodes(claim.cpt_hcpcs).length || 1);
                   const proRatedAp = numLines > 0 ? (claim.ending_ap_to_physician / numLines) : 0;
 
                   return (
@@ -1282,7 +1285,7 @@ export function ClaimsTable({
                                     try { serviceLines = JSON.parse(claim.service_lines_json); } catch {}
                                   }
                                   if (serviceLines.length === 0 && claim.cpt_hcpcs) {
-                                    const cpts = claim.cpt_hcpcs.split(/[\s,]+/);
+                                    const cpts = splitCptCodes(claim.cpt_hcpcs);
                                     serviceLines = cpts.map(c => ({
                                       cpt: c,
                                       charged: claim.billed_charge / cpts.length,
@@ -1441,7 +1444,7 @@ export function ClaimsTable({
           try { serviceLines = JSON.parse(activePaymentClaim.service_lines_json); } catch {}
         }
         if (serviceLines.length === 0 && activePaymentClaim.cpt_hcpcs) {
-          const cpts = activePaymentClaim.cpt_hcpcs.split(/[\s,]+/);
+          const cpts = splitCptCodes(activePaymentClaim.cpt_hcpcs);
           serviceLines = cpts.map(c => ({
             cpt: c,
             charged: activePaymentClaim.billed_charge / cpts.length,
@@ -1470,7 +1473,7 @@ export function ClaimsTable({
               try { updatedLines = JSON.parse(activePaymentClaim.service_lines_json); } catch {}
             }
             if (updatedLines.length === 0 && activePaymentClaim.cpt_hcpcs) {
-              const cpts = activePaymentClaim.cpt_hcpcs.split(/[\s,]+/);
+              const cpts = splitCptCodes(activePaymentClaim.cpt_hcpcs);
               updatedLines = cpts.map(c => ({
                 cpt: c,
                 charged: activePaymentClaim.billed_charge / cpts.length,
