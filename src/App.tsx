@@ -774,11 +774,11 @@ export default function App() {
 
   const handleOpenEditFeeSchedule = (fs: FeeSchedule) => {
     setEditingFs(fs);
-    setFsCptCode(fs.cpt_code);
-    setFsYear(fs.year);
-    setFsSemester1Rate(fs.semester1_rate);
-    setFsSemester2Rate(fs.semester2_rate);
-    setFsDescription(fs.description);
+    setFsCptCode(String(fs.cpt_code ?? ""));
+    setFsYear(Number(fs.year) || new Date().getFullYear());
+    setFsSemester1Rate(Number(fs.semester1_rate) || 0);
+    setFsSemester2Rate(Number(fs.semester2_rate) || 0);
+    setFsDescription(String(fs.description ?? ""));
     setIsFsModalOpen(true);
   };
 
@@ -1261,6 +1261,31 @@ export default function App() {
       </div>
     );
   }
+
+  const feeScheduleSearch = fsSearchTerm.trim().toLowerCase();
+  const visibleFeeSchedules = feeSchedules
+    .map((fs, index) => {
+      const cptCode = String(fs.cpt_code ?? "").trim();
+      const description = String(fs.description ?? "").trim();
+      const semester1Rate = Number(fs.semester1_rate);
+      const semester2Rate = Number(fs.semester2_rate);
+      return {
+        source: fs,
+        key: String(fs.id || `${cptCode || "fee"}-${fs.year || "year"}-${index}`),
+        id: String(fs.id ?? ""),
+        cptCode,
+        description,
+        year: Number(fs.year) || new Date().getFullYear(),
+        semester1Rate: Number.isFinite(semester1Rate) ? semester1Rate : 0,
+        semester2Rate: Number.isFinite(semester2Rate) ? semester2Rate : 0
+      };
+    })
+    .filter(fs => fs.cptCode || fs.description)
+    .filter(fs =>
+      !feeScheduleSearch ||
+      fs.cptCode.toLowerCase().includes(feeScheduleSearch) ||
+      fs.description.toLowerCase().includes(feeScheduleSearch)
+    );
 
   return (
     <div className="h-screen w-screen flex bg-[#e8f1f2] overflow-hidden font-sans text-slate-800">
@@ -2470,29 +2495,31 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
-                        {feeSchedules
-                          .filter(fs => 
-                            fs.cpt_code.toLowerCase().includes(fsSearchTerm.toLowerCase()) ||
-                            fs.description.toLowerCase().includes(fsSearchTerm.toLowerCase())
-                          )
+                        {visibleFeeSchedules
                           .map(fs => (
-                            <tr key={fs.id} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="p-3 font-mono font-bold text-primary-blue text-xs">{fs.cpt_code}</td>
+                            <tr key={fs.key} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="p-3 font-mono font-bold text-primary-blue text-xs">{fs.cptCode || "-"}</td>
                               <td className="p-3 font-mono text-slate-600">{fs.year}</td>
-                              <td className="p-3 font-mono font-bold text-slate-900">${Number(fs.semester1_rate).toFixed(2)}</td>
-                              <td className="p-3 font-mono font-bold text-slate-900">${Number(fs.semester2_rate).toFixed(2)}</td>
-                              <td className="p-3 text-slate-500 max-w-xs truncate" title={fs.description}>{fs.description}</td>
+                              <td className="p-3 font-mono font-bold text-slate-900">${fs.semester1Rate.toFixed(2)}</td>
+                              <td className="p-3 font-mono font-bold text-slate-900">${fs.semester2Rate.toFixed(2)}</td>
+                              <td className="p-3 text-slate-500 max-w-xs truncate" title={fs.description}>{fs.description || "-"}</td>
                               <td className="p-3 text-right">
                                 <div className="flex items-center justify-end gap-1.5">
                                   <button
-                                    onClick={() => handleOpenEditFeeSchedule(fs)}
+                                    onClick={() => handleOpenEditFeeSchedule(fs.source)}
                                     className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded transition-colors"
                                     title="Editar"
                                   >
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </button>
                                   <button
-                                    onClick={() => handleDeleteFeeSchedule(fs.id)}
+                                    onClick={() => {
+                                      if (!fs.id) {
+                                        notify("Esta tarifa no tiene ID válido para eliminar. Edítela y guárdela primero.", "warning");
+                                        return;
+                                      }
+                                      handleDeleteFeeSchedule(fs.id);
+                                    }}
                                     className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded transition-colors"
                                     title="Eliminar"
                                   >
@@ -2502,10 +2529,10 @@ export default function App() {
                               </td>
                             </tr>
                           ))}
-                        {feeSchedules.length === 0 && (
+                        {visibleFeeSchedules.length === 0 && (
                           <tr>
                             <td colSpan={6} className="p-6 text-center text-slate-400">
-                              No hay tarifas configuradas en el Fee Schedule.
+                              {feeScheduleSearch ? "No se encontraron tarifas con ese criterio." : "No hay tarifas configuradas en el Fee Schedule."}
                             </td>
                           </tr>
                         )}
