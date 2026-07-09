@@ -45,7 +45,7 @@ import { useFeedback } from "./components/FeedbackProvider";
 import { AppLanguage, useLanguage } from "./components/LanguageProvider";
 import { useAuth } from "./auth";
 import { apiFetch, setApiTokenProvider } from "./apiClient";
-import { validateCptRepeatLimits } from "./cptRepeatLimits";
+import { validateClaimCptRepeatLimitsAgainstExisting, validateCptRepeatLimits } from "./cptRepeatLimits";
 
 const INITIAL_FILTERS: FilterState = {
   search: "",
@@ -515,6 +515,19 @@ export default function App() {
     const cptRepeatErrors = validateCptRepeatLimits(normalizedLines, feeSchedules, newDos);
     if (cptRepeatErrors.length > 0) {
       notify(cptRepeatErrors[0], "warning");
+      return;
+    }
+    const existingRepeatErrors = validateClaimCptRepeatLimitsAgainstExisting(
+      {
+        patient_id: newPatientId.trim(),
+        date_of_service_from: newDos,
+        service_lines_json: JSON.stringify(normalizedLines.map(line => ({ cpt: line.cpt, units: 1 })))
+      },
+      feeSchedules,
+      claims
+    );
+    if (existingRepeatErrors.length > 0) {
+      notify(existingRepeatErrors[0], "warning");
       return;
     }
     const missingRates = lineCharges.filter(line => line.charge <= 0);

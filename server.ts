@@ -15,7 +15,7 @@ import { runReconciliationEngineTests } from "./src/reconciliationEngine.test";
 import { runReportsEngineTests } from "./src/reportsEngine.test";
 import { Claim, Payment, Note, ClaimStatus, ClaimClassification, ErrorCategory, Payer, User, UserRole } from "./src/types";
 import { generateClaimId } from "./src/claimId";
-import { validateClaimCptRepeatLimits } from "./src/cptRepeatLimits";
+import { validateClaimCptRepeatLimits, validateClaimCptRepeatLimitsAgainstExisting } from "./src/cptRepeatLimits";
 
 type AppRequest = express.Request & {
   appUser?: User;
@@ -360,6 +360,11 @@ async function startServer() {
       // Validate
       const validationErrors = validateClaim(calculated);
       validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
+      validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+        calculated,
+        await sheetsService.getFeeSchedules(),
+        claims
+      ));
       if (validationErrors.length > 0) {
         return res.status(400).json({ error: "Validation failed", details: validationErrors });
       }
@@ -405,6 +410,12 @@ async function startServer() {
       // Validate
       const validationErrors = validateClaim(calculated);
       validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
+      validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+        calculated,
+        await sheetsService.getFeeSchedules(),
+        claims,
+        req.params.id
+      ));
       if (validationErrors.length > 0) {
         return res.status(400).json({ error: "Validation failed", details: validationErrors });
       }
@@ -484,6 +495,12 @@ async function startServer() {
 
           const validationErrors = validateClaim(recomputed);
           validationErrors.push(...validateClaimCptRepeatLimits(recomputed, await sheetsService.getFeeSchedules()));
+          validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+            recomputed,
+            await sheetsService.getFeeSchedules(),
+            sheetsService.claims,
+            id
+          ));
           if (validationErrors.length > 0) {
             return res.status(400).json({
               error: `Validation failed for claim ${id}`,
@@ -933,7 +950,12 @@ async function startServer() {
             iteraSharePercent: iPercent
           });
           const validationErrors = validateClaim(calculated);
-          validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
+          validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
+          validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+            calculated,
+            feeSchedules,
+            [...existingClaims, ...importedClaims]
+          ));
           if (validationErrors.length > 0) {
             errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
           } else {
@@ -1005,7 +1027,12 @@ async function startServer() {
 
         // Validate
         const validationErrors = validateClaim(calculated);
-        validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
+        validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
+        validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+          calculated,
+          feeSchedules,
+          [...existingClaims, ...importedClaims]
+        ));
         if (validationErrors.length > 0) {
           errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
         } else {

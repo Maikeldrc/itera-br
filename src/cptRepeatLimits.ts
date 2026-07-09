@@ -2,6 +2,7 @@ import { Claim, FeeSchedule } from "./types";
 
 export type CptRepeatLine = {
   cpt?: string;
+  units?: number;
 };
 
 const DEFAULT_MAX_PER_DOS = 1;
@@ -31,7 +32,7 @@ export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedul
   lines.forEach(line => {
     const cpt = normalizedCpt(line.cpt);
     if (!cpt) return;
-    counts.set(cpt, (counts.get(cpt) || 0) + 1);
+    counts.set(cpt, (counts.get(cpt) || 0) + lineUnitCount(line));
   });
 
   const errors: Record<number, string[]> = {};
@@ -51,6 +52,11 @@ export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedul
   return errors;
 }
 
+function lineUnitCount(line: CptRepeatLine) {
+  const units = Number(line.units);
+  return Number.isFinite(units) && units > 0 ? Math.floor(units) : 1;
+}
+
 export function validateCptRepeatLimits(lines: CptRepeatLine[], feeSchedules: FeeSchedule[], dos?: string) {
   const lineErrors = validateCptRepeatLimitsByLine(lines, feeSchedules, dos);
   return Object.values(lineErrors).flat();
@@ -61,7 +67,12 @@ export function extractClaimCptRepeatLines(claim: Partial<Claim>): CptRepeatLine
     try {
       const parsed = JSON.parse(claim.service_lines_json);
       if (Array.isArray(parsed)) {
-        return parsed.map(line => ({ cpt: normalizedCpt(line?.cpt) })).filter(line => line.cpt);
+        return parsed
+          .map(line => ({
+            cpt: normalizedCpt(line?.cpt),
+            units: lineUnitCount({ units: line?.units })
+          }))
+          .filter(line => line.cpt);
       }
     } catch {
       return [];
@@ -80,4 +91,49 @@ export function validateClaimCptRepeatLimits(claim: Partial<Claim>, feeSchedules
     feeSchedules,
     claim.date_of_service_from
   );
+}
+
+function normalizeDos(value: unknown) {
+  return normalizedCpt(value).slice(0, 10);
+}
+
+export function validateClaimCptRepeatLimitsAgainstExisting(
+  claim: Partial<Claim>,
+  feeSchedules: FeeSchedule[],
+  existingClaims: Partial<Claim>[],
+  currentClaimId?: string
+) {
+  const patientId = normalizedCpt(claim.patient_id);
+  const dos = normalizeDos(claim.date_of_service_from);
+  if (!patientId || !dos) return [];
+
+  const candidateLines = extractClaimCptRepeatLines(claim);
+  if (candidateLines.length === 0) return [];
+
+  const counts = new Map<string, number>();
+  const addLine = (line: CptRepeatLine) => {
+    const cpt = normalizedCpt(line.cpt);
+    if (!cpt) return;
+    counts.set(cpt, (counts.get(cpt) || 0) + lineUnitCount(line));
+  };
+
+  existingClaims
+    .filter(existing => !existing.deleted_flag)
+    .filter(existing => !currentClaimId || normalizedCpt(existing.claim_id) !== normalizedCpt(currentClaimId))
+    .filter(existing => normalizedCpt(existing.patient_id) === patientId)
+    .filter(existing => normalizeDos(existing.date_of_service_from) === dos)
+    .flatMap(existing => extractClaimCptRepeatLines(existing))
+    .forEach(addLine);
+
+  candidateLines.forEach(addLine);
+
+  const uniqueCandidateCpts = Array.from(new Set(candidateLines.map(line => normalizedCpt(line.cpt)).filter(Boolean)));
+  return uniqueCandidateCpts.flatMap(cpt => {
+    const totalCount = counts.get(cpt) || 0;
+    const max = getCptMaxPerDos(cpt, feeSchedules, dos);
+    if (totalCount <= max) return [];
+    return [
+      `CPT ${cpt} exceeds Max/DOS for patient ${patientId} on ${dos}. Max allowed: ${max}; existing plus current total: ${totalCount}.`
+    ];
+  });
 }
