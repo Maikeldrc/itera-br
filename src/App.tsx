@@ -94,6 +94,9 @@ const normalizeServiceType = (value: unknown) => toText(value).toUpperCase();
 
 const serviceTypeFromDescription = (description: unknown) => normalizeServiceType(toText(description).split(" - ")[0] || "");
 
+const isSupportedServiceType = (serviceType: string) =>
+  DIGITAL_CARE_SERVICE_TYPES.includes(serviceType) || /^[A-Z0-9]{2,8}$/.test(serviceType);
+
 function LoginScreen({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -369,6 +372,7 @@ export default function App() {
       .filter(item => item.active !== false && item.cpt_hcpcs && item.service_type)
       .forEach(item => {
         const serviceType = normalizeServiceType(item.service_type);
+        if (!isSupportedServiceType(serviceType)) return;
         const cpt = toText(item.cpt_hcpcs);
         const description = toText(item.cpt_description) || `${serviceType} - ${cpt}`;
         options.set(`${serviceType}:${cpt}`, {
@@ -382,7 +386,7 @@ export default function App() {
       .filter(item => item.cpt_code && item.description)
       .forEach(item => {
         const serviceType = serviceTypeFromDescription(item.description);
-        if (!serviceType) return;
+        if (!serviceType || !isSupportedServiceType(serviceType)) return;
         const cpt = toText(item.cpt_code);
         const key = `${serviceType}:${cpt}`;
         if (!options.has(key)) {
