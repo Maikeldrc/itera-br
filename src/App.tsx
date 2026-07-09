@@ -77,6 +77,16 @@ const createNewClaimServiceLine = (overrides: Partial<NewClaimServiceLine> = {})
   ...overrides
 });
 
+type ServiceCptOption = {
+  cpt: string;
+  serviceType: string;
+  description: string;
+};
+
+const normalizeServiceType = (value: string) => value.trim().toUpperCase();
+
+const serviceTypeFromDescription = (description: string) => normalizeServiceType(description.split(" - ")[0] || "");
+
 function LoginScreen({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -344,11 +354,83 @@ export default function App() {
     }
   };
 
+  const getConfiguredCptOptions = (): ServiceCptOption[] => {
+    const options = new Map<string, ServiceCptOption>();
+
+    reportFeeSchedules
+      .filter(item => item.active !== false && item.cpt_hcpcs && item.service_type)
+      .forEach(item => {
+        const serviceType = normalizeServiceType(item.service_type);
+        const cpt = item.cpt_hcpcs.trim();
+        options.set(`${serviceType}:${cpt}`, {
+          cpt,
+          serviceType,
+          description: item.cpt_description || `${serviceType} - ${cpt}`
+        });
+      });
+
+    feeSchedules
+      .filter(item => item.cpt_code && item.description)
+      .forEach(item => {
+        const serviceType = serviceTypeFromDescription(item.description);
+        if (!serviceType) return;
+        const cpt = item.cpt_code.trim();
+        const key = `${serviceType}:${cpt}`;
+        if (!options.has(key)) {
+          options.set(key, {
+            cpt,
+            serviceType,
+            description: item.description
+          });
+        }
+      });
+
+    return Array.from(options.values()).sort((a, b) => a.serviceType.localeCompare(b.serviceType) || a.cpt.localeCompare(b.cpt));
+  };
+
+  const getCptOptionsForService = (serviceType: string) => {
+    const normalizedService = normalizeServiceType(serviceType);
+    return getConfiguredCptOptions().filter(option => option.serviceType === normalizedService);
+  };
+
+  const getServiceTypeOptions = () => {
+    const configuredServices = getConfiguredCptOptions().map(option => option.serviceType);
+    return Array.from(new Set([...DIGITAL_CARE_SERVICE_TYPES, ...configuredServices])).sort();
+  };
+
+  const isCptAllowedForService = (serviceType: string, cpt: string) => {
+    const normalizedCpt = cpt.trim();
+    return getCptOptionsForService(serviceType).some(option => option.cpt === normalizedCpt);
+  };
+
+  const getFirstAvailableCptForService = (serviceType: string, excludedCpts: string[] = []) => {
+    const excluded = new Set(excludedCpts.map(cpt => cpt.trim()).filter(Boolean));
+    return getCptOptionsForService(serviceType).find(option => !excluded.has(option.cpt))?.cpt
+      || getCptOptionsForService(serviceType)[0]?.cpt
+      || "";
+  };
+
   const getManualClaimLineCharge = (line: NewClaimServiceLine) => {
     const cpt = line.cpt.trim();
+    const serviceType = normalizeServiceType(line.serviceType);
     const year = Number(newDos.slice(0, 4)) || new Date().getFullYear();
     const month = Number(newDos.slice(5, 7)) || 1;
-    const schedule = feeSchedules.find(item => item.cpt_code === cpt && item.year === year);
+
+    const reportSchedule = reportFeeSchedules
+      .filter(item =>
+        item.active !== false
+        && item.cpt_hcpcs === cpt
+        && normalizeServiceType(item.service_type) === serviceType
+      )
+      .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
+      .find(item => !item.effective_date || item.effective_date <= newDos);
+    if (reportSchedule) return Number(reportSchedule.unit_price || 0);
+
+    const schedule = feeSchedules.find(item =>
+      item.cpt_code === cpt
+      && item.year === year
+      && serviceTypeFromDescription(item.description) === serviceType
+    );
     if (!schedule) return 0;
     return Number((month >= 7 ? schedule.semester2_rate : schedule.semester1_rate).toFixed(2));
   };
@@ -362,6 +444,17 @@ export default function App() {
     charge: getManualClaimLineCharge(line)
   }));
   const newClaimTotalCharge = Number(newClaimLineCharges.reduce((sum, line) => sum + line.charge, 0).toFixed(2));
+
+  const getDefaultNewClaimLine = () => {
+    const serviceOptions = getServiceTypeOptions();
+    const serviceType = serviceOptions.includes("RPM") ? "RPM" : serviceOptions[0] || "RPM";
+    return createNewClaimServiceLine({ serviceType, cpt: getFirstAvailableCptForService(serviceType) });
+  };
+
+  const handleOpenCreateClaim = () => {
+    setNewClaimLines([getDefaultNewClaimLine()]);
+    setIsCreateOpen(true);
+  };
 
   // Create claim manually with one or more CPT service lines
   const handleCreateClaimManually = async (e: React.FormEvent) => {
@@ -384,6 +477,14 @@ export default function App() {
       .filter((cpt, index, list) => list.indexOf(cpt) !== index);
     if (duplicateCpts.length > 0) {
       notify(`No repitas CPT codes en el mismo claim: ${Array.from(new Set(duplicateCpts)).join(", ")}.`, "warning");
+      return;
+    }
+    const invalidServiceCpts = normalizedLines.filter(line => !isCptAllowedForService(line.serviceType, line.cpt));
+    if (invalidServiceCpts.length > 0) {
+      notify(
+        `CPT no permitido para el servicio seleccionado: ${invalidServiceCpts.map(line => `${line.serviceType}/${line.cpt}`).join(", ")}.`,
+        "warning"
+      );
       return;
     }
     const missingRates = lineCharges.filter(line => line.charge <= 0);
@@ -468,7 +569,7 @@ export default function App() {
       setNewPatientName("");
       setNewPatientId("");
       setNewDos(new Date().toISOString().split("T")[0]);
-      setNewClaimLines([createNewClaimServiceLine()]);
+      setNewClaimLines([getDefaultNewClaimLine()]);
       await fetchAllData();
     } catch (err: any) {
       notify(`Error al guardar: ${err.message}`, "error");
@@ -1177,7 +1278,7 @@ export default function App() {
               isEnglish={isEnglish}
               formatUSD={formatUSD}
               onImport={() => setIsImportOpen(true)}
-              onCreate={() => setIsCreateOpen(true)}
+              onCreate={handleOpenCreateClaim}
               onFilterStatus={(status) => handleKPICardClick("status", status)}
               onFilterErrors={() => handleKPICardClick("errorFlag", "true")}
             />
@@ -1211,7 +1312,7 @@ export default function App() {
                     {isEnglish ? "Import CSV" : "Importar CSV"}
                   </button>
                   <button
-                    onClick={() => setIsCreateOpen(true)}
+                    onClick={handleOpenCreateClaim}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-blue hover:bg-secondary-blue text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/10"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -2596,7 +2697,11 @@ GOOGLE_SHEET_ID="tu-sheet-identificador-del-url"`}
                   </div>
                   <button
                     type="button"
-                    onClick={() => setNewClaimLines(prev => [...prev, createNewClaimServiceLine({ serviceType: prev.at(-1)?.serviceType || "RPM", cpt: "" })])}
+                    onClick={() => setNewClaimLines(prev => {
+                      const serviceType = prev.at(-1)?.serviceType || "RPM";
+                      const existingCpts = prev.map(line => line.cpt);
+                      return [...prev, createNewClaimServiceLine({ serviceType, cpt: getFirstAvailableCptForService(serviceType, existingCpts) })];
+                    })}
                     className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100"
                   >
                     <Plus className="h-3.5 w-3.5" />
@@ -2612,25 +2717,46 @@ GOOGLE_SHEET_ID="tu-sheet-identificador-del-url"`}
                   </div>
                   {newClaimLines.map((line) => {
                     const charge = getManualClaimLineCharge(line);
+                    const cptOptions = getCptOptionsForService(line.serviceType);
+                    const hasSelectedCpt = cptOptions.some(option => option.cpt === line.cpt);
                     return (
                       <div key={line.id} className="grid grid-cols-[1fr_1fr_120px_34px] gap-2">
                         <select
                           value={line.serviceType}
-                          onChange={(e) => setNewClaimLines(prev => prev.map(item => item.id === line.id ? { ...item, serviceType: e.target.value } : item))}
+                          onChange={(e) => {
+                            const serviceType = e.target.value;
+                            setNewClaimLines(prev => prev.map(item => {
+                              if (item.id !== line.id) return item;
+                              const existingCpts = prev.filter(prevLine => prevLine.id !== line.id).map(prevLine => prevLine.cpt);
+                              return {
+                                ...item,
+                                serviceType,
+                                cpt: getFirstAvailableCptForService(serviceType, existingCpts)
+                              };
+                            }));
+                          }}
                           className="w-full rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-mono text-slate-700"
                         >
-                          {DIGITAL_CARE_SERVICE_TYPES.map(service => (
+                          {getServiceTypeOptions().map(service => (
                             <option key={service} value={service}>{service}</option>
                           ))}
                         </select>
-                        <input
-                          type="text"
+                        <select
                           required
-                          placeholder="99454"
-                          value={line.cpt}
-                          onChange={(e) => setNewClaimLines(prev => prev.map(item => item.id === line.id ? { ...item, cpt: e.target.value.replace(/[^\dA-Za-z]/g, "").toUpperCase() } : item))}
-                          className="w-full rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px]"
-                        />
+                          value={hasSelectedCpt ? line.cpt : ""}
+                          onChange={(e) => setNewClaimLines(prev => prev.map(item => item.id === line.id ? { ...item, cpt: e.target.value } : item))}
+                          disabled={cptOptions.length === 0}
+                          className="w-full rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] disabled:bg-slate-100 disabled:text-slate-400"
+                        >
+                          <option value="" disabled>
+                            {cptOptions.length === 0 ? "Sin CPT configurados" : "Selecciona CPT"}
+                          </option>
+                          {cptOptions.map(option => (
+                            <option key={`${option.serviceType}-${option.cpt}`} value={option.cpt}>
+                              {option.cpt} — {option.description.replace(`${option.serviceType} - `, "")}
+                            </option>
+                          ))}
+                        </select>
                         <div className={`flex items-center rounded-lg border px-2 py-1.5 font-mono text-[11px] font-bold ${charge > 0 ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
                           ${charge.toFixed(2)}
                         </div>
