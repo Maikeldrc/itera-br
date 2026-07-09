@@ -5,6 +5,7 @@
 
 import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, ClaimStatus, ClaimClassification, ErrorCategory, UserRole, FeeSchedule, EligibilityCoverage, ReportFeeSchedule } from "./types";
 import { calculateClaimFinancials } from "./reconciliationEngine";
+import { serializeMenuAccess, serializeProviderAccess, ROLE_DEFAULT_MENU_ACCESS } from "./accessControl";
 
 export const SEED_PROVIDERS: Provider[] = [
   { provider_id: "PROV_01", provider_name: "Dr. Robert Chen", npi: "1982736450", practice_id: "PRAC_01", practice_name: "Metropolitan Care Group", active: true },
@@ -22,11 +23,11 @@ export const SEED_PAYERS: Payer[] = [
 ];
 
 export const SEED_USERS: User[] = [
-  { user_id: "USR_01", name: "Manuel David", email: "mdavid@itera.health", role: UserRole.Admin, active: true },
-  { user_id: "USR_02", name: "Elena Gomez", email: "egomez@itera.health", role: UserRole.BillingManager, active: true },
-  { user_id: "USR_03", name: "James Smith", email: "jsmith@itera.health", role: UserRole.ReconciliationSpecialist, active: true },
-  { user_id: "USR_04", name: "Dr. Robert Chen", email: "rchen@metrocare.com", role: UserRole.ProviderViewer, active: true },
-  { user_id: "USR_05", name: "Alicia Patel", email: "apatel@itera.health", role: UserRole.Auditor, active: true },
+  { user_id: "USR_01", name: "Manuel David", email: "mdavid@itera.health", role: UserRole.Admin, menu_access: serializeMenuAccess(ROLE_DEFAULT_MENU_ACCESS[UserRole.Admin]), provider_access: serializeProviderAccess([], true), active: true },
+  { user_id: "USR_02", name: "Elena Gomez", email: "egomez@itera.health", role: UserRole.BillingManager, menu_access: serializeMenuAccess(ROLE_DEFAULT_MENU_ACCESS[UserRole.BillingManager]), provider_access: serializeProviderAccess([], true), active: true },
+  { user_id: "USR_03", name: "James Smith", email: "jsmith@itera.health", role: UserRole.ReconciliationSpecialist, menu_access: serializeMenuAccess(ROLE_DEFAULT_MENU_ACCESS[UserRole.ReconciliationSpecialist]), provider_access: serializeProviderAccess([], true), active: true },
+  { user_id: "USR_04", name: "Dr. Robert Chen", email: "rchen@metrocare.com", role: UserRole.ProviderViewer, menu_access: serializeMenuAccess(ROLE_DEFAULT_MENU_ACCESS[UserRole.ProviderViewer]), provider_access: serializeProviderAccess(["PROV_01"], false), active: true },
+  { user_id: "USR_05", name: "Alicia Patel", email: "apatel@itera.health", role: UserRole.Auditor, menu_access: serializeMenuAccess(ROLE_DEFAULT_MENU_ACCESS[UserRole.Auditor]), provider_access: serializeProviderAccess([], true), active: true },
 ];
 
 export const SEED_SETTINGS: Setting[] = [

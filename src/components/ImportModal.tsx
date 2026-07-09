@@ -7,6 +7,7 @@ import React, { useState, useRef } from "react";
 import { X, Upload, FileSpreadsheet, AlertTriangle, CheckCircle, Info } from "lucide-react";
 import { ClaimStatus, ClaimClassification } from "../types";
 import { useFeedback } from "./FeedbackProvider";
+import { useLanguage } from "./LanguageProvider";
 
 interface ImportModalProps {
   isOpen: boolean;
@@ -16,6 +17,8 @@ interface ImportModalProps {
 
 export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const { notify } = useFeedback();
+  const { language } = useLanguage();
+  const isEnglish = language === "en";
   const [file, setFile] = useState<File | null>(null);
   const [filePayload, setFilePayload] = useState<{ fileName: string; fileBase64: string } | null>(null);
   const [parsedRows, setParsedRows] = useState<any[]>([]);
@@ -33,9 +36,9 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const copyTemplate = async () => {
     try {
       await navigator.clipboard.writeText(csvTemplate);
-      notify("Plantilla de CSV copiada al portapapeles.", "success");
+      notify(isEnglish ? "CSV template copied to clipboard." : "Plantilla de CSV copiada al portapapeles.", "success");
     } catch {
-      notify("No se pudo copiar la plantilla al portapapeles.", "error");
+      notify(isEnglish ? "Unable to copy the template to clipboard." : "No se pudo copiar la plantilla al portapapeles.", "error");
     }
   };
 
@@ -111,26 +114,26 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       const isBillingWorklist = !!(claimObj.MRN || claimObj["Provider NPI"] || claimObj.Code1);
 
       if (isBillingWorklist) {
-        if (!claimObj.MRN) errors.push("MRN es requerido.");
-        if (!claimObj["Provider NPI"]) errors.push("Provider NPI es requerido.");
-        if (!claimObj["Payer ID"]) errors.push("Payer ID es requerido.");
-        if (!claimObj["Month Of"]) errors.push("Month Of es requerido.");
+        if (!claimObj.MRN) errors.push(isEnglish ? "MRN is required." : "MRN es requerido.");
+        if (!claimObj["Provider NPI"]) errors.push(isEnglish ? "Provider NPI is required." : "Provider NPI es requerido.");
+        if (!claimObj["Payer ID"]) errors.push(isEnglish ? "Payer ID is required." : "Payer ID es requerido.");
+        if (!claimObj["Month Of"]) errors.push(isEnglish ? "Month Of is required." : "Month Of es requerido.");
         if (!["Code1", "Code2", "Code3", "Code4", "Code5"].some(key => claimObj[key])) {
-          errors.push("Debe incluir al menos un CPT en Code1..Code5.");
+          errors.push(isEnglish ? "Include at least one CPT in Code1..Code5." : "Debe incluir al menos un CPT en Code1..Code5.");
         }
       } else if (!claim_id) {
-        errors.push("Claim ID es requerido.");
+        errors.push(isEnglish ? "Claim ID is required." : "Claim ID es requerido.");
       }
       if (!isBillingWorklist && (!claimObj.billed_by || (claimObj.billed_by !== "ITERA" && claimObj.billed_by !== "Provider"))) {
-        errors.push("Billed by debe ser 'ITERA' o 'Provider'.");
+        errors.push(isEnglish ? "Billed by must be 'ITERA' or 'Provider'." : "Billed by debe ser 'ITERA' o 'Provider'.");
       }
       if (claimObj.billed_charge && isNaN(Number(claimObj.billed_charge))) {
-        errors.push("Billed Charge debe ser un valor numérico.");
+        errors.push(isEnglish ? "Billed Charge must be a numeric value." : "Billed Charge debe ser un valor numérico.");
       }
 
       validations.push({
         row: rowNum,
-        claim_id: claim_id || `[Fila ${rowNum}]`,
+        claim_id: claim_id || `[${isEnglish ? "Row" : "Fila"} ${rowNum}]`,
         status: errors.length === 0 ? "valid" : "invalid",
         errors
       });
@@ -153,7 +156,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       }
     } catch (err) {
       console.error(err);
-      notify("Error al importar el archivo.", "error");
+      notify(isEnglish ? "File import failed." : "Error al importar el archivo.", "error");
     } finally {
       setIsProcessing(false);
     }
@@ -170,7 +173,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         <div className="bg-dark-blue p-5 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="w-5 h-5 text-primary-blue" />
-            <h3 className="font-semibold text-lg font-display">Importar Claims desde CSV / XLSX</h3>
+            <h3 className="font-semibold text-lg font-display">{isEnglish ? "Import Claims from CSV / XLSX" : "Importar Claims desde CSV / XLSX"}</h3>
           </div>
           <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-full transition-colors text-white">
             <X className="w-5 h-5" />
@@ -183,16 +186,17 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex items-start gap-3">
             <Info className="w-5 h-5 text-secondary-blue shrink-0 mt-0.5" />
             <div className="text-sm text-slate-700">
-              <h5 className="font-semibold text-dark-blue mb-1">Directrices de Importación de ITERA</h5>
+              <h5 className="font-semibold text-dark-blue mb-1">{isEnglish ? "ITERA Import Guidelines" : "Directrices de Importación de ITERA"}</h5>
               <p className="mb-2">
-                Puede importar el CSV completo de conciliación o el Excel de Billing Worklist con MRN, Provider NPI,
-                Payer ID, Month Of y Code1..Code5. El Excel se importa como Draft y los charges salen del Fee Schedule.
+                {isEnglish
+                  ? "Import the full reconciliation CSV or a Billing Worklist Excel file with MRN, Provider NPI, Payer ID, Month Of and Code1..Code5. Excel rows import as Draft and charges come from the Fee Schedule."
+                  : "Puede importar el CSV completo de conciliación o el Excel de Billing Worklist con MRN, Provider NPI, Payer ID, Month Of y Code1..Code5. El Excel se importa como Draft y los charges salen del Fee Schedule."}
               </p>
               <button
                 onClick={copyTemplate}
                 className="bg-secondary-blue text-white font-semibold text-xs px-3 py-1.5 rounded-lg hover:bg-dark-blue transition-colors"
               >
-                Copiar Plantilla CSV de Ejemplo
+                {isEnglish ? "Copy Sample CSV Template" : "Copiar Plantilla CSV de Ejemplo"}
               </button>
             </div>
           </div>
@@ -207,8 +211,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             >
               <Upload className="w-10 h-10 text-slate-400 group-hover:text-primary-blue transition-colors" />
               <div className="text-center">
-                <p className="text-sm font-semibold text-slate-700">Arrastre y suelte su archivo CSV o XLSX aquí</p>
-                <p className="text-xs text-slate-500 mt-1">o haga clic para seleccionar un archivo local</p>
+                <p className="text-sm font-semibold text-slate-700">{isEnglish ? "Drag and drop your CSV or XLSX file here" : "Arrastre y suelte su archivo CSV o XLSX aquí"}</p>
+                <p className="text-xs text-slate-500 mt-1">{isEnglish ? "or click to select a local file" : "o haga clic para seleccionar un archivo local"}</p>
               </div>
               <input
                 ref={fileInputRef}
@@ -228,7 +232,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 <div>
                   <p className="text-sm font-semibold text-slate-800">{file.name}</p>
                   <p className="text-xs text-slate-500 font-mono">
-                    {(file.size / 1024).toFixed(1)} KB • {filePayload ? "XLSX listo para procesar" : `${parsedRows.length} registros cargados`}
+                    {(file.size / 1024).toFixed(1)} KB - {filePayload ? (isEnglish ? "XLSX ready to process" : "XLSX listo para procesar") : `${parsedRows.length} ${isEnglish ? "records loaded" : "registros cargados"}`}
                   </p>
                 </div>
               </div>
@@ -242,7 +246,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 }}
                 className="text-xs text-rose-500 hover:text-rose-700 font-medium font-mono"
               >
-                Eliminar
+                {isEnglish ? "Remove" : "Eliminar"}
               </button>
             </div>
           )}
@@ -256,16 +260,16 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               )}
               <div className="text-sm">
-                <h5 className="font-semibold mb-1">Resultado de Importación</h5>
-                <p>Importados correctamente: <span className="font-bold">{importResult.importedCount} claims</span></p>
+                <h5 className="font-semibold mb-1">{isEnglish ? "Import Result" : "Resultado de Importación"}</h5>
+                <p>{isEnglish ? "Successfully imported" : "Importados correctamente"}: <span className="font-bold">{importResult.importedCount} claims</span></p>
                 {importResult.errorCount > 0 && (
-                  <p className="mt-1 font-semibold text-rose-700">Rechazados por errores: {importResult.errorCount} registros.</p>
+                  <p className="mt-1 font-semibold text-rose-700">{isEnglish ? "Rejected due to errors" : "Rechazados por errores"}: {importResult.errorCount} {isEnglish ? "records" : "registros"}.</p>
                 )}
                 {importResult.errors.length > 0 && (
                   <div className="mt-2 bg-white/80 border border-rose-100 rounded-lg p-2.5 space-y-1 text-xs text-rose-700 max-h-40 overflow-y-auto font-mono">
                     {importResult.errors.map((err, i) => (
                       <div key={i}>
-                        Fila {err.row} (ID: {err.claimId}): {err.errors.join("; ")}
+                        {isEnglish ? "Row" : "Fila"} {err.row} (ID: {err.claimId}): {err.errors.join("; ")}
                       </div>
                     ))}
                   </div>
@@ -277,18 +281,18 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           {/* Parsing Preview Table */}
           {parsedRows.length > 0 && !filePayload && (
             <div>
-              <h4 className="font-semibold text-slate-800 mb-2 text-sm">Vista Previa de Validación de Datos ({parsedRows.length})</h4>
+              <h4 className="font-semibold text-slate-800 mb-2 text-sm">{isEnglish ? "Data Validation Preview" : "Vista Previa de Validación de Datos"} ({parsedRows.length})</h4>
               <div className="border border-slate-200 rounded-lg overflow-hidden max-h-60 overflow-y-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                      <th className="p-2 text-center w-12">Fila</th>
+                      <th className="p-2 text-center w-12">{isEnglish ? "Row" : "Fila"}</th>
                       <th className="p-2">Claim ID</th>
-                      <th className="p-2">Paciente</th>
+                      <th className="p-2">{isEnglish ? "Patient" : "Paciente"}</th>
                       <th className="p-2">Billed By</th>
                       <th className="p-2 text-right">Billed Charge</th>
-                      <th className="p-2 text-center w-24">Estado</th>
-                      <th className="p-2">Errores detectados</th>
+                      <th className="p-2 text-center w-24">{isEnglish ? "Status" : "Estado"}</th>
+                      <th className="p-2">{isEnglish ? "Detected errors" : "Errores detectados"}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
@@ -297,13 +301,13 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                       return (
                         <tr key={index} className={validation.status === "invalid" ? "bg-rose-50/40" : "hover:bg-slate-50/50"}>
                           <td className="p-2 text-center text-slate-400">{index + 1}</td>
-                          <td className="p-2 font-bold text-slate-900">{row.claim_id || "[VACÍO]"}</td>
+                          <td className="p-2 font-bold text-slate-900">{row.claim_id || (isEnglish ? "[EMPTY]" : "[VACÍO]")}</td>
                           <td className="p-2">{row.patient_id} ({row.patient_display_name_masked})</td>
                           <td className="p-2">{row.billed_by}</td>
                           <td className="p-2 text-right">${row.billed_charge}</td>
                           <td className="p-2 text-center">
                             <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${validation.status === "valid" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-                              {validation.status === "valid" ? "Limpio" : "Error"}
+                              {validation.status === "valid" ? (isEnglish ? "Clean" : "Limpio") : "Error"}
                             </span>
                           </td>
                           <td className="p-2 text-rose-600 font-sans max-w-xs truncate" title={validation.errors.join(", ")}>
@@ -319,10 +323,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           )}
           {filePayload && (
             <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
-              <h4 className="font-semibold text-dark-blue mb-1">Billing Worklist XLSX listo</h4>
+              <h4 className="font-semibold text-dark-blue mb-1">{isEnglish ? "Billing Worklist XLSX ready" : "Billing Worklist XLSX listo"}</h4>
               <p className="text-xs leading-relaxed">
-                El archivo se procesará en el servidor. Cada fila se importará como claim en Draft, usando Provider NPI,
-                Payer ID y Code1..Code5. Los charges se calcularán desde System Settings / FCSO Fee Schedules.
+                {isEnglish
+                  ? "The file will be processed on the server. Each row will import as a Draft claim using Provider NPI, Payer ID and Code1..Code5. Charges are calculated from System Settings / FCSO Fee Schedules."
+                  : "El archivo se procesará en el servidor. Cada fila se importará como claim en Draft, usando Provider NPI, Payer ID y Code1..Code5. Los charges se calcularán desde System Settings / FCSO Fee Schedules."}
               </p>
             </div>
           )}
@@ -334,14 +339,16 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             onClick={onClose}
             className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-600 transition-colors"
           >
-            Cerrar
+            {isEnglish ? "Close" : "Cerrar"}
           </button>
           <button
             onClick={handleImportClick}
             disabled={(!filePayload && parsedRows.length === 0) || isProcessing}
             className="bg-primary-blue hover:bg-secondary-blue disabled:bg-slate-300 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md"
           >
-            {isProcessing ? "Procesando..." : (filePayload ? "Importar XLSX" : `Importar ${parsedRows.length} Registros`)}
+            {isProcessing
+              ? (isEnglish ? "Processing..." : "Procesando...")
+              : (filePayload ? (isEnglish ? "Import XLSX" : "Importar XLSX") : `${isEnglish ? "Import" : "Importar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>
         </div>
       </div>

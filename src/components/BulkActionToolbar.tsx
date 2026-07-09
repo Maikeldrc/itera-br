@@ -6,6 +6,7 @@
 import React, { useState } from "react";
 import { Check, Clipboard, AlertTriangle, HelpCircle, FileSpreadsheet, Tag, Send } from "lucide-react";
 import { ClaimStatus, ClaimClassification } from "../types";
+import { useLanguage } from "./LanguageProvider";
 
 interface BulkActionToolbarProps {
   selectedCount: number;
@@ -20,6 +21,8 @@ export function BulkActionToolbar({
   onExportSelected,
   onClearSelection
 }: BulkActionToolbarProps) {
+  const { language } = useLanguage();
+  const isEnglish = language === "en";
   const [noteText, setNoteText] = useState("");
   const [isNoteOpen, setIsNoteOpen] = useState(false);
 
@@ -39,8 +42,8 @@ export function BulkActionToolbar({
           {selectedCount}
         </span>
         <div>
-          <p className="text-sm font-bold uppercase tracking-wider">Acciones Masivas para Claims</p>
-          <p className="text-[11px] text-blue-200 font-medium">Aplica cambios a todos los elementos seleccionados</p>
+          <p className="text-sm font-bold uppercase tracking-wider">{isEnglish ? "Bulk Claim Actions" : "Acciones Masivas para Claims"}</p>
+          <p className="text-[11px] text-blue-200 font-medium">{isEnglish ? "Apply changes to all selected items" : "Aplica cambios a todos los elementos seleccionados"}</p>
         </div>
       </div>
 
@@ -49,7 +52,7 @@ export function BulkActionToolbar({
         <div className="relative group">
           <button className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer">
             <Check className="w-3.5 h-3.5 text-emerald-400" />
-            Cambiar Estado
+            {isEnglish ? "Change Status" : "Cambiar Estado"}
           </button>
           <div className="absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-44 hidden group-hover:block z-50">
             <button onClick={() => onApplyAction("status", ClaimStatus.Paid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Paid</button>
@@ -67,7 +70,7 @@ export function BulkActionToolbar({
         <div className="relative group">
           <button className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer">
             <Tag className="w-3.5 h-3.5 text-sky-400" />
-            Clasificación
+            {isEnglish ? "Classification" : "Clasificación"}
           </button>
           <div className="absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-48 hidden group-hover:block max-h-60 overflow-y-auto z-50">
             <button onClick={() => onApplyAction("classification", ClaimClassification.CleanClaim)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Clean Claim</button>
@@ -116,23 +119,23 @@ export function BulkActionToolbar({
             className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
           >
             <Clipboard className="w-3.5 h-3.5 text-purple-400" />
-            Añadir Nota
+            {isEnglish ? "Add Note" : "Añadir Nota"}
           </button>
           {isNoteOpen && (
             <div className="absolute bottom-full mb-1 right-0 bg-slate-900 text-slate-100 p-3 rounded shadow-2xl border border-slate-700 w-72 z-50">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">Nota masiva:</label>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1">{isEnglish ? "Bulk note:" : "Nota masiva:"}</label>
               <textarea
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
                 rows={2}
-                placeholder="Escribe la nota de auditoría..."
+                placeholder={isEnglish ? "Write the audit note..." : "Escribe la nota de auditoría..."}
                 className="w-full p-2 bg-slate-800 border border-slate-700 rounded text-xs focus:outline-hidden focus:ring-1 focus:ring-primary-blue text-white"
               />
               <div className="flex justify-end gap-1.5 mt-2">
-                <button onClick={() => setIsNoteOpen(false)} className="px-2 py-1 text-[10px] hover:bg-slate-800 rounded cursor-pointer">Cancelar</button>
+                <button onClick={() => setIsNoteOpen(false)} className="px-2 py-1 text-[10px] hover:bg-slate-800 rounded cursor-pointer">{isEnglish ? "Cancel" : "Cancelar"}</button>
                 <button onClick={handleApplyNote} className="px-2.5 py-1 bg-primary-blue hover:bg-secondary-blue rounded text-[10px] flex items-center gap-1 font-bold text-white uppercase tracking-wider cursor-pointer">
                   <Send className="w-2.5 h-2.5" />
-                  Aplicar
+                  {isEnglish ? "Apply" : "Aplicar"}
                 </button>
               </div>
             </div>
@@ -145,7 +148,7 @@ export function BulkActionToolbar({
           className="bg-primary-blue hover:bg-secondary-blue px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 transition-all text-white border border-transparent shadow-md cursor-pointer"
         >
           <FileSpreadsheet className="w-3.5 h-3.5" />
-          Exportar CSV
+          {isEnglish ? "Export CSV" : "Exportar CSV"}
         </button>
 
         {/* Clear Selection */}
@@ -153,7 +156,7 @@ export function BulkActionToolbar({
           onClick={onClearSelection}
           className="text-slate-300 hover:text-white px-2 py-1.5 text-xs font-semibold font-mono cursor-pointer"
         >
-          Limpiar ({selectedCount})
+          {isEnglish ? "Clear" : "Limpiar"} ({selectedCount})
         </button>
       </div>
     </div>

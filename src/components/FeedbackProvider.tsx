@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { useLanguage } from "./LanguageProvider";
 
 type NoticeTone = "success" | "error" | "warning" | "info";
 
@@ -46,6 +47,8 @@ export function useFeedback() {
 }
 
 export function FeedbackProvider({ children }: { children: React.ReactNode }) {
+  const { language } = useLanguage();
+  const isEnglish = language === "en";
   const [notices, setNotices] = useState<Notice[]>([]);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const noticeId = useRef(0);
@@ -114,7 +117,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
               type="button"
               onClick={() => setNotices(current => current.filter(item => item.id !== notice.id))}
               className="rounded p-0.5 opacity-60 hover:bg-white/60 hover:opacity-100"
-              aria-label="Cerrar mensaje"
+              aria-label={isEnglish ? "Close message" : "Cerrar mensaje"}
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -136,7 +139,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
               </div>
               <div className="flex-1">
                 <h3 id="feedback-dialog-title" className="font-display text-sm font-bold text-slate-900">
-                  {dialog.options.title || "Confirmar acción"}
+                  {dialog.options.title || (isEnglish ? "Confirm action" : "Confirmar acción")}
                 </h3>
                 <p className="mt-1 text-xs leading-relaxed text-slate-500">{dialog.options.message}</p>
               </div>
@@ -168,7 +171,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                 onClick={() => closeDialog(dialog.kind === "confirm" ? false : null)}
                 className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
               >
-                {dialog.options.cancelLabel || "Cancelar"}
+                {dialog.options.cancelLabel || (isEnglish ? "Cancel" : "Cancelar")}
               </button>
               <button
                 type="button"
@@ -176,7 +179,7 @@ export function FeedbackProvider({ children }: { children: React.ReactNode }) {
                 disabled={dialog.kind === "prompt" && !dialog.value.trim()}
                 className={`rounded-xl px-4 py-2 text-xs font-bold text-white disabled:cursor-not-allowed disabled:opacity-40 ${dialog.options.tone === "danger" ? "bg-rose-600 hover:bg-rose-700" : "bg-primary-blue hover:bg-secondary-blue"}`}
               >
-                {dialog.options.confirmLabel || "Confirmar"}
+                {dialog.options.confirmLabel || (isEnglish ? "Confirm" : "Confirmar")}
               </button>
             </div>
           </div>

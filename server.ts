@@ -16,6 +16,9 @@ import { runReportsEngineTests } from "./src/reportsEngine.test";
 import { Claim, Payment, Note, ClaimStatus, ClaimClassification, ErrorCategory, Payer, User, UserRole } from "./src/types";
 import { generateClaimId } from "./src/claimId";
 import { validateClaimCptRepeatLimits, validateClaimCptRepeatLimitsAgainstExisting } from "./src/cptRepeatLimits";
+import { validateUniquePatientProvider } from "./src/patientRegistrationValidation";
+import { runPatientRegistrationValidationTests } from "./src/patientRegistrationValidation.test";
+import { canUserAccessProvider, filterClaimsForUser, filterProvidersForUser } from "./src/accessControl";
 
 type AppRequest = express.Request & {
   appUser?: User;
@@ -214,10 +217,16 @@ async function startServer() {
   // Automatically execute reconciliation engine unit tests on server start for audit/verification
   const testResults = runReconciliationEngineTests();
   const reportTestFailures = runReportsEngineTests();
+  const patientValidationFailures = runPatientRegistrationValidationTests();
   if (reportTestFailures.length === 0) {
     testResults.push({ name: "Reports Engine aggregation, coverage and aging", success: true });
   } else {
     reportTestFailures.forEach(error => testResults.push({ name: "Reports Engine", success: false, error }));
+  }
+  if (patientValidationFailures.length === 0) {
+    testResults.push({ name: "Patient/provider duplicate registration validation", success: true });
+  } else {
+    patientValidationFailures.forEach(error => testResults.push({ name: "Patient registration validation", success: false, error }));
   }
   const failedTests = testResults.filter(r => !r.success);
   if (failedTests.length > 0) {
@@ -262,6 +271,9 @@ async function startServer() {
     next();
   };
 
+  const canAccessClaim = (req: AppRequest, claim: Claim) =>
+    !!req.appUser && canUserAccessProvider(req.appUser, claim.provider_id, claim.provider_npi);
+
   // --- API Routes ---
 
   // Connection and Diagnostic Status
@@ -294,22 +306,25 @@ async function startServer() {
   });
 
   // GET Claims (with filter, search, sorting)
-  app.get("/api/claims", async (req, res) => {
+  app.get("/api/claims", async (req: AppRequest, res) => {
     try {
       const claims = await sheetsService.getClaims();
-      res.json(claims);
+      res.json(filterClaimsForUser(claims, req.appUser));
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to retrieve claims" });
     }
   });
 
   // GET Single Claim Detail
-  app.get("/api/claims/:id", async (req, res) => {
+  app.get("/api/claims/:id", async (req: AppRequest, res) => {
     try {
       const claims = await sheetsService.getClaims();
       const claim = claims.find(c => c.claim_id === req.params.id);
       if (!claim) {
         return res.status(404).json({ error: "Claim not found" });
+      }
+      if (!canAccessClaim(req, claim)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
       }
       res.json(claim);
     } catch (err: any) {
@@ -357,8 +372,13 @@ async function startServer() {
         iteraSharePercent: iPercent
       });
 
+      if (!canUserAccessProvider(req.appUser || {}, calculated.provider_id, calculated.provider_npi)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+
       // Validate
       const validationErrors = validateClaim(calculated);
+      validationErrors.push(...validateUniquePatientProvider(calculated, claims));
       validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
       validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
         calculated,
@@ -390,6 +410,9 @@ async function startServer() {
       if (existing.deleted_flag) {
         return res.status(410).json({ error: "Claim has been deleted" });
       }
+      if (!canAccessClaim(req, existing)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
 
       // Capture payer state BEFORE merge so we can detect changes explicitly
       const prevPayerId   = existing.payer_id;
@@ -407,8 +430,13 @@ async function startServer() {
         iteraSharePercent: iPercent
       });
 
+      if (!canUserAccessProvider(req.appUser || {}, calculated.provider_id, calculated.provider_npi)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+
       // Validate
       const validationErrors = validateClaim(calculated);
+      validationErrors.push(...validateUniquePatientProvider(calculated, claims, req.params.id));
       validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
       validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
         calculated,
@@ -460,6 +488,12 @@ async function startServer() {
     try {
       const operatorEmail = getOperatorEmail(req);
       const reason = String(req.body?.reason || "").trim() || "Claim entered in error";
+      const claims = await sheetsService.getClaims(true);
+      const existing = claims.find(c => c.claim_id === req.params.id);
+      if (!existing) return res.status(404).json({ error: "Claim not found" });
+      if (!canAccessClaim(req, existing)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
       const deleted = await sheetsService.softDeleteClaim(req.params.id, operatorEmail, reason);
       res.json({ success: true, claim: deleted });
     } catch (err: any) {
@@ -487,11 +521,17 @@ async function startServer() {
       for (const id of claimIds) {
         const claim = sheetsService.claims.find(c => c.claim_id === id);
         if (claim && !claim.deleted_flag) {
+          if (!canAccessClaim(req, claim)) {
+            return res.status(403).json({ error: `This user does not have access to claim ${id}.` });
+          }
           const merged = { ...claim, ...updates };
           const recomputed = calculateClaimFinancials(merged, {
             providerSharePercent: pPercent,
             iteraSharePercent: iPercent
           });
+          if (!canUserAccessProvider(req.appUser || {}, recomputed.provider_id, recomputed.provider_npi)) {
+            return res.status(403).json({ error: `This update would move claim ${id} outside the user's provider access.` });
+          }
 
           const validationErrors = validateClaim(recomputed);
           validationErrors.push(...validateClaimCptRepeatLimits(recomputed, await sheetsService.getFeeSchedules()));
@@ -520,10 +560,11 @@ async function startServer() {
   });
 
   // GET Payments
-  app.get("/api/payments", async (req, res) => {
+  app.get("/api/payments", async (req: AppRequest, res) => {
     try {
       const payments = await sheetsService.getPayments();
-      res.json(payments);
+      const visibleClaimIds = new Set(filterClaimsForUser(await sheetsService.getClaims(), req.appUser).map(claim => claim.claim_id));
+      res.json(payments.filter(payment => visibleClaimIds.has(payment.claim_id)));
     } catch (err: any) {
       res.status(500).json({ error: "Failed to load payments" });
     }
@@ -540,6 +581,11 @@ async function startServer() {
       }
       if (!Number.isFinite(Number(paymentData.amount)) || Number(paymentData.amount) <= 0) {
         return res.status(400).json({ error: "Payment amount must be greater than zero." });
+      }
+      const paymentClaim = sheetsService.claims.find(c => c.claim_id === paymentData.claim_id && !c.deleted_flag);
+      if (!paymentClaim) return res.status(404).json({ error: "Claim not found." });
+      if (!canAccessClaim(req, paymentClaim)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
       }
 
       // Add payment
@@ -582,10 +628,11 @@ async function startServer() {
   });
 
   // GET Notes
-  app.get("/api/notes", async (req, res) => {
+  app.get("/api/notes", async (req: AppRequest, res) => {
     try {
       const notes = await sheetsService.getNotes();
-      res.json(notes);
+      const visibleClaimIds = new Set(filterClaimsForUser(await sheetsService.getClaims(), req.appUser).map(claim => claim.claim_id));
+      res.json(notes.filter(note => visibleClaimIds.has(note.claim_id)));
     } catch (err: any) {
       res.status(500).json({ error: "Failed to load notes" });
     }
@@ -599,6 +646,11 @@ async function startServer() {
 
       if (!noteData.claim_id) {
         return res.status(400).json({ error: "Claim ID is required for a note." });
+      }
+      const noteClaim = sheetsService.claims.find(c => c.claim_id === noteData.claim_id && !c.deleted_flag);
+      if (!noteClaim) return res.status(404).json({ error: "Claim not found." });
+      if (!canAccessClaim(req, noteClaim)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
       }
 
       const note = await sheetsService.createNote(noteData, authorEmail);
@@ -618,18 +670,19 @@ async function startServer() {
   });
 
   // GET Audit Logs
-  app.get("/api/audit-logs", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.Auditor), async (req, res) => {
+  app.get("/api/audit-logs", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.Auditor), async (req: AppRequest, res) => {
     try {
       const logs = await sheetsService.getAuditLogs();
-      res.json(logs);
+      const visibleClaimIds = new Set(filterClaimsForUser(await sheetsService.getClaims(), req.appUser).map(claim => claim.claim_id));
+      res.json(logs.filter(log => !log.claim_id || visibleClaimIds.has(log.claim_id)));
     } catch (err: any) {
       res.status(500).json({ error: "Failed to load audit logs" });
     }
   });
 
   // GET Providers
-  app.get("/api/providers", async (req, res) => {
-    res.json(await sheetsService.getProviders());
+  app.get("/api/providers", async (req: AppRequest, res) => {
+    res.json(filterProvidersForUser(await sheetsService.getProviders(), req.appUser));
   });
 
   app.post("/api/providers", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
@@ -708,7 +761,7 @@ async function startServer() {
   });
 
   // GET Users
-  app.get("/api/users", async (req, res) => {
+  app.get("/api/users", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
     res.json(await sheetsService.getUsers());
   });
 
@@ -856,6 +909,9 @@ async function startServer() {
           if (!mrn) rowErrors.push("MRN is required.");
           if (!providerNpi) rowErrors.push("Provider NPI is required.");
           if (!provider) rowErrors.push(`Provider NPI ${providerNpi || "(blank)"} is not registered in Settings.`);
+          if (provider && !canUserAccessProvider(req.appUser || {}, provider.provider_id, provider.npi)) {
+            rowErrors.push(`Current user does not have access to provider ${provider.provider_name}.`);
+          }
           if (!payerId) rowErrors.push("Payer ID is required.");
           if (!payer) rowErrors.push(`Payer ID ${payerId || "(blank)"} is not registered in Settings.`);
           if (!serviceTo) rowErrors.push("Month Of is required.");
@@ -962,6 +1018,10 @@ async function startServer() {
             iteraSharePercent: iPercent
           });
           const validationErrors = validateClaim(calculated);
+          validationErrors.push(...validateUniquePatientProvider(
+            calculated,
+            [...existingClaims, ...importedClaims]
+          ));
           validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
           validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
             calculated,
@@ -1039,6 +1099,13 @@ async function startServer() {
 
         // Validate
         const validationErrors = validateClaim(calculated);
+        validationErrors.push(...(!canUserAccessProvider(req.appUser || {}, calculated.provider_id, calculated.provider_npi)
+          ? ["Current user does not have access to this provider."]
+          : []));
+        validationErrors.push(...validateUniquePatientProvider(
+          calculated,
+          [...existingClaims, ...importedClaims]
+        ));
         validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
         validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
           calculated,

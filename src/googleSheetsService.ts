@@ -6,6 +6,7 @@
 import { google } from "googleapis";
 import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule } from "./types";
 import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS, SEED_PAYERS, SEED_USERS, SEED_SETTINGS, SEED_FEE_SCHEDULES, SEED_ELIGIBILITY_COVERAGE, SEED_REPORT_FEE_SCHEDULES } from "./seedData";
+import { normalizeUserAccess } from "./accessControl";
 
 /**
  * Service to manage read/write operations to Google Sheets.
@@ -651,8 +652,10 @@ export class GoogleSheetsService {
 
   public async createUser(user: User): Promise<User> {
     const nextUserId = user.user_id?.trim() || this.generateUserId();
+    const access = normalizeUserAccess(user);
     const userToAdd = {
       ...user,
+      ...access,
       user_id: nextUserId,
       name: user.name.trim(),
       email: user.email.trim().toLowerCase(),
@@ -678,9 +681,14 @@ export class GoogleSheetsService {
     if (this.users.some(item => item.user_id !== userId && item.email.toLowerCase() === nextEmail)) {
       throw new Error("Another user already uses this email.");
     }
+    const access = normalizeUserAccess({
+      ...this.users[index],
+      ...updates
+    });
     this.users[index] = {
       ...this.users[index],
       ...updates,
+      ...access,
       user_id: userId,
       name: updates.name?.trim() || this.users[index].name,
       email: nextEmail,
@@ -972,7 +980,7 @@ const PAYERS_HEADERS = [
 ];
 
 const USERS_HEADERS = [
-  "user_id", "name", "email", "role", "active"
+  "user_id", "name", "email", "role", "menu_access", "provider_access", "active"
 ];
 
 const SETTINGS_HEADERS = [

@@ -46,6 +46,20 @@ import { AppLanguage, useLanguage } from "./components/LanguageProvider";
 import { useAuth } from "./auth";
 import { apiFetch, setApiTokenProvider } from "./apiClient";
 import { validateClaimCptRepeatLimitsAgainstExisting, validateCptRepeatLimits } from "./cptRepeatLimits";
+import { validateUniquePatientProvider } from "./patientRegistrationValidation";
+import {
+  canUserAccessMenu,
+  filterClaimsForUser,
+  filterProvidersForUser,
+  getUserMenuAccess,
+  MENU_ACCESS_IDS,
+  MenuAccessId,
+  ROLE_DEFAULT_MENU_ACCESS,
+  serializeMenuAccess,
+  serializeProviderAccess,
+  userHasAllProviderAccess,
+  parseProviderAccess
+} from "./accessControl";
 
 const INITIAL_FILTERS: FilterState = {
   search: "",
@@ -210,6 +224,8 @@ export default function App() {
     name: "Elena Gomez",
     email: "egomez@itera.health",
     role: UserRole.BillingManager,
+    menu_access: serializeMenuAccess(ROLE_DEFAULT_MENU_ACCESS[UserRole.BillingManager]),
+    provider_access: serializeProviderAccess([], true),
     active: true
   });
 
@@ -265,7 +281,13 @@ export default function App() {
   const [userNameInput, setUserNameInput] = useState("");
   const [userEmailInput, setUserEmailInput] = useState("");
   const [userRoleInput, setUserRoleInput] = useState<UserRole>(UserRole.ReconciliationSpecialist);
+  const [userMenuAccessInput, setUserMenuAccessInput] = useState<MenuAccessId[]>(ROLE_DEFAULT_MENU_ACCESS[UserRole.ReconciliationSpecialist]);
+  const [userProviderAccessAllInput, setUserProviderAccessAllInput] = useState(true);
+  const [userProviderAccessIdsInput, setUserProviderAccessIdsInput] = useState<string[]>([]);
   const [userActiveInput, setUserActiveInput] = useState(true);
+
+  const visibleClaims = filterClaimsForUser(claims, currentUser);
+  const visibleProviders = filterProvidersForUser(providers, currentUser);
 
   useEffect(() => {
     setApiTokenProvider(auth.getIdToken);
@@ -287,6 +309,22 @@ export default function App() {
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
+
+  useEffect(() => {
+    if (canUserAccessMenu(currentUser, currentView as MenuAccessId)) return;
+    const fallbackView = getUserMenuAccess(currentUser)[0] || "dashboard";
+    setCurrentView(fallbackView);
+    const nextPath = VIEW_PATHS[fallbackView];
+    if (window.location.pathname !== nextPath) window.history.replaceState({}, "", nextPath);
+    setSelectedClaimIds([]);
+  }, [currentUser, currentView]);
+
+  useEffect(() => {
+    const allowedProviderIds = new Set(visibleProviders.map(provider => provider.provider_id));
+    if (allowedProviderIds.size > 0 && !allowedProviderIds.has(newProviderId)) {
+      setNewProviderId(visibleProviders[0].provider_id);
+    }
+  }, [visibleProviders, newProviderId]);
 
   const fetchAllData = async () => {
     if (claims.length === 0) {
@@ -332,11 +370,11 @@ export default function App() {
       const claimsData = await claimsRes.json();
       const paymentsData = await paymentsRes.json();
       const notesData = await notesRes.json();
-      const auditsData = await auditsRes.json();
-      const provData = await provRes.json();
-      const payData = await payRes.json();
-      const settData = await settRes.json();
-      const usrData = await usrRes.json();
+      const auditsData = auditsRes.ok ? await auditsRes.json() : [];
+      const provData = provRes.ok ? await provRes.json() : [];
+      const payData = payRes.ok ? await payRes.json() : [];
+      const settData = settRes.ok ? await settRes.json() : [];
+      const usrData = usrRes.ok ? await usrRes.json() : [];
       const diagnosticData = await statusRes.json();
       const feesData = feesRes.ok ? await feesRes.json() : [];
       const eligibilityData = eligibilityRes.ok ? await eligibilityRes.json() : [];
@@ -363,7 +401,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error(err);
-      setErrorState(err.message || "Error al cargar información de conciliación.");
+      setErrorState(err.message || (isEnglish ? "Unable to load reconciliation data." : "Error al cargar información de conciliación."));
     } finally {
       setIsLoading(false);
     }
@@ -505,13 +543,27 @@ export default function App() {
     }));
 
     if (normalizedLines.length === 0) {
-      notify("Añade al menos un CPT code para crear el claim.", "warning");
+      notify(isEnglish ? "Add at least one CPT code to create the claim." : "Añade al menos un CPT code para crear el claim.", "warning");
+      return;
+    }
+    const duplicatePatientProviderErrors = validateUniquePatientProvider(
+      {
+        patient_id: newPatientId,
+        provider_id: newProviderId,
+        provider_npi: providerObj?.npi
+      },
+      claims
+    );
+    if (duplicatePatientProviderErrors.length > 0) {
+      notify(isEnglish ? "This MRN (Patient ID) is already registered for the same Provider." : "Este MRN (Patient ID) ya está registrado para el mismo Provider.", "warning");
       return;
     }
     const invalidServiceCpts = normalizedLines.filter(line => !isCptAllowedForService(line.serviceType, line.cpt));
     if (invalidServiceCpts.length > 0) {
       notify(
-        `CPT no permitido para el servicio seleccionado: ${invalidServiceCpts.map(line => `${line.serviceType}/${line.cpt}`).join(", ")}.`,
+        isEnglish
+          ? `CPT not allowed for the selected service: ${invalidServiceCpts.map(line => `${line.serviceType}/${line.cpt}`).join(", ")}.`
+          : `CPT no permitido para el servicio seleccionado: ${invalidServiceCpts.map(line => `${line.serviceType}/${line.cpt}`).join(", ")}.`,
         "warning"
       );
       return;
@@ -536,7 +588,12 @@ export default function App() {
     }
     const missingRates = lineCharges.filter(line => line.charge <= 0);
     if (missingRates.length > 0) {
-      notify(`Configura la tarifa en Settings para: ${missingRates.map(line => line.cpt).join(", ")}.`, "warning");
+      notify(
+        isEnglish
+          ? `Configure the rate in Settings for: ${missingRates.map(line => line.cpt).join(", ")}.`
+          : `Configura la tarifa en Settings para: ${missingRates.map(line => line.cpt).join(", ")}.`,
+        "warning"
+      );
       return;
     }
 
@@ -565,7 +622,7 @@ export default function App() {
     const rawClaim: Partial<Claim> = {
       claim_id: "AUTO_GENERATE",
       patient_id: newPatientId.trim() || `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
-      patient_display_name_masked: newPatientName.trim() || "Paciente Nuevo",
+      patient_display_name_masked: newPatientName.trim() || (isEnglish ? "New Patient" : "Paciente Nuevo"),
       practice_id: providerObj?.practice_id || "PRAC_01",
       practice_name: providerObj?.practice_name || "Metropolitan Care Group",
       provider_id: newProviderId,
@@ -611,7 +668,7 @@ export default function App() {
         throw new Error(errData.error || errData.details?.join("; ") || "Failed to create claim");
       }
 
-      notify("Claim creado y recalculado exitosamente.", "success");
+      notify(isEnglish ? "Claim created and recalculated successfully." : "Claim creado y recalculado exitosamente.", "success");
       setIsCreateOpen(false);
       setNewPatientName("");
       setNewPatientId("");
@@ -619,7 +676,7 @@ export default function App() {
       setNewClaimLines([getDefaultNewClaimLine()]);
       await fetchAllData();
     } catch (err: any) {
-      notify(`Error al guardar: ${err.message}`, "error");
+      notify(`${isEnglish ? "Save error" : "Error al guardar"}: ${err.message}`, "error");
     }
   };
 
@@ -766,7 +823,7 @@ export default function App() {
           })
         });
       }
-      notify("Nota agregada de forma masiva.", "success");
+      notify(isEnglish ? "Bulk note added." : "Nota agregada de forma masiva.", "success");
       setSelectedClaimIds([]);
       await fetchAllData();
       return;
@@ -790,11 +847,11 @@ export default function App() {
         throw new Error(errData.error || "Failed to bulk update claims");
       }
 
-      notify("Acción masiva completada con éxito.", "success");
+      notify(isEnglish ? "Bulk action completed successfully." : "Acción masiva completada con éxito.", "success");
       setSelectedClaimIds([]);
       await fetchAllData();
     } catch (err: any) {
-      notify(`Error en lote: ${err.message}`, "error");
+      notify(`${isEnglish ? "Bulk error" : "Error en lote"}: ${err.message}`, "error");
     }
   };
 
@@ -823,10 +880,10 @@ export default function App() {
       body: JSON.stringify({ key, value })
     });
     if (res.ok) {
-      notify("Ajuste contractual actualizado.", "success");
+      notify(isEnglish ? "Contract setting updated." : "Ajuste contractual actualizado.", "success");
       await fetchAllData();
     } else {
-      notify("Error al actualizar ajuste.", "error");
+      notify(isEnglish ? "Unable to update setting." : "Error al actualizar ajuste.", "error");
     }
   };
 
@@ -854,7 +911,7 @@ export default function App() {
 
   const handleSaveFeeSchedule = async () => {
     if (!fsCptCode.trim()) {
-      notify("Por favor ingresa un código CPT.", "warning");
+      notify(isEnglish ? "Please enter a CPT code." : "Por favor ingresa un código CPT.", "warning");
       return;
     }
     const payload = {
@@ -887,18 +944,18 @@ export default function App() {
         await fetchAllData();
       } else {
         const errData = await res.json();
-        notify(`Error: ${errData.error || "No se pudo guardar la tarifa"}`, "error");
+        notify(`Error: ${errData.error || (isEnglish ? "Unable to save the fee schedule" : "No se pudo guardar la tarifa")}`, "error");
       }
     } catch (err: any) {
-      notify(`Error de red: ${err.message}`, "error");
+      notify(`${isEnglish ? "Network error" : "Error de red"}: ${err.message}`, "error");
     }
   };
 
   const handleDeleteFeeSchedule = async (id: string) => {
     const confirmed = await confirmAction({
-      title: "Eliminar tarifa",
-      message: "¿Está seguro de que desea eliminar esta tarifa del Fee Schedule?",
-      confirmLabel: "Eliminar",
+      title: isEnglish ? "Delete fee schedule" : "Eliminar tarifa",
+      message: isEnglish ? "Are you sure you want to delete this fee from the Fee Schedule?" : "¿Está seguro de que desea eliminar esta tarifa del Fee Schedule?",
+      confirmLabel: isEnglish ? "Delete" : "Eliminar",
       tone: "danger"
     });
     if (!confirmed) return;
@@ -909,10 +966,10 @@ export default function App() {
       if (res.ok) {
         await fetchAllData();
       } else {
-        notify("Error al eliminar la tarifa.", "error");
+        notify(isEnglish ? "Unable to delete fee schedule." : "Error al eliminar la tarifa.", "error");
       }
     } catch (err: any) {
-      notify(`Error de red: ${err.message}`, "error");
+      notify(`${isEnglish ? "Network error" : "Error de red"}: ${err.message}`, "error");
     }
   };
 
@@ -1095,6 +1152,9 @@ export default function App() {
     setUserNameInput("");
     setUserEmailInput("");
     setUserRoleInput(UserRole.ReconciliationSpecialist);
+    setUserMenuAccessInput(ROLE_DEFAULT_MENU_ACCESS[UserRole.ReconciliationSpecialist]);
+    setUserProviderAccessAllInput(true);
+    setUserProviderAccessIdsInput([]);
     setUserActiveInput(true);
   };
 
@@ -1103,12 +1163,44 @@ export default function App() {
     setUserNameInput(user.name);
     setUserEmailInput(user.email);
     setUserRoleInput(user.role);
+    setUserMenuAccessInput(getUserMenuAccess(user));
+    setUserProviderAccessAllInput(userHasAllProviderAccess(user));
+    setUserProviderAccessIdsInput(parseProviderAccess(user.provider_access).filter(item => item !== "ALL"));
     setUserActiveInput(user.active);
+  };
+
+  const handleUserRoleChange = (role: UserRole) => {
+    setUserRoleInput(role);
+    setUserMenuAccessInput(ROLE_DEFAULT_MENU_ACCESS[role]);
+  };
+
+  const toggleUserMenuAccess = (menuId: MenuAccessId) => {
+    setUserMenuAccessInput(prev =>
+      prev.includes(menuId)
+        ? prev.filter(item => item !== menuId)
+        : [...prev, menuId]
+    );
+  };
+
+  const toggleUserProviderAccess = (providerId: string) => {
+    setUserProviderAccessIdsInput(prev =>
+      prev.includes(providerId)
+        ? prev.filter(item => item !== providerId)
+        : [...prev, providerId]
+    );
   };
 
   const handleSaveUser = async () => {
     if (!userNameInput.trim() || !userEmailInput.trim() || !userRoleInput) {
       notify("Name, email and role are required.", "warning");
+      return;
+    }
+    if (userMenuAccessInput.length === 0) {
+      notify(isEnglish ? "Select at least one menu option for this user." : "Selecciona al menos una opción de menú para este usuario.", "warning");
+      return;
+    }
+    if (!userProviderAccessAllInput && userProviderAccessIdsInput.length === 0) {
+      notify(isEnglish ? "Select at least one provider or allow all providers." : "Selecciona al menos un provider o permite todos los providers.", "warning");
       return;
     }
 
@@ -1117,6 +1209,8 @@ export default function App() {
       name: userNameInput.trim(),
       email: userEmailInput.trim().toLowerCase(),
       role: userRoleInput,
+      menu_access: serializeMenuAccess(userMenuAccessInput),
+      provider_access: serializeProviderAccess(userProviderAccessIdsInput, userProviderAccessAllInput),
       active: userActiveInput
     };
 
@@ -1201,14 +1295,14 @@ export default function App() {
   // Trigger quick physician payout recording from Balances view
   const handleRecordPhysicianPayout = async (providerId: string, amount: number) => {
     if (amount <= 0) {
-      notify("Ingresa un monto válido.", "warning");
+      notify(isEnglish ? "Enter a valid amount." : "Ingresa un monto válido.", "warning");
       return;
     }
     // Find all paid/partially paid claims for this provider that have ENDING AP > 0,
     // and apply payouts to them.
-    const providerClaims = claims.filter(c => c.provider_id === providerId && c.ending_ap_to_physician > 0);
+    const providerClaims = visibleClaims.filter(c => c.provider_id === providerId && c.ending_ap_to_physician > 0);
     if (providerClaims.length === 0) {
-      notify("No hay saldos pendientes (Ending A/P) por pagar a este médico.", "warning");
+      notify(isEnglish ? "There are no pending Ending A/P balances to pay this provider." : "No hay saldos pendientes (Ending A/P) por pagar a este médico.", "warning");
       return;
     }
 
@@ -1229,12 +1323,17 @@ export default function App() {
       remainingPayout -= toPay;
     }
 
-    notify(`Se registraron distribuciones de pago por un total de $${amount} entre los claims del médico.`, "success");
+    notify(
+      isEnglish
+        ? `Recorded payout distributions totaling $${amount} across this provider's claims.`
+        : `Se registraron distribuciones de pago por un total de $${amount} entre los claims del médico.`,
+      "success"
+    );
     await fetchAllData();
   };
 
   // Filtering claims based on current FilterState
-  const filteredClaims = claims.filter((claim) => {
+  const filteredClaims = visibleClaims.filter((claim) => {
     // Search
     if (filters.search) {
       const searchLower = toText(filters.search).toLowerCase();
@@ -1268,7 +1367,7 @@ export default function App() {
   });
 
   // List of unique service types from claims for filters
-  const availableServiceTypes = Array.from(new Set(claims.map((c) => toText(c.service_type)).filter(Boolean))) as string[];
+  const availableServiceTypes = Array.from(new Set(visibleClaims.map((c) => toText(c.service_type)).filter(Boolean))) as string[];
 
   // Clickable KPI card trigger helper
   const handleKPICardClick = (field: keyof FilterState, value: string) => {
@@ -1287,7 +1386,7 @@ export default function App() {
   // Export claims helper
   const handleExportClaimsCSV = () => {
     if (filteredClaims.length === 0) {
-      notify("No hay registros filtrados para exportar.", "warning");
+      notify(isEnglish ? "There are no filtered records to export." : "No hay registros filtrados para exportar.", "warning");
       return;
     }
     const headers = Object.keys(filteredClaims[0]).join(",");
@@ -1387,7 +1486,7 @@ export default function App() {
           const nextPath = VIEW_PATHS[view];
           if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
         }}
-        userRole={currentUser.role}
+        currentUser={currentUser}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
       />
@@ -1468,7 +1567,7 @@ export default function App() {
                 filters={filters}
                 onChange={(updates) => setFilters({ ...filters, ...updates })}
                 onReset={() => setFilters(INITIAL_FILTERS)}
-                providers={providers}
+                providers={visibleProviders}
                 payers={payers}
                 availableServiceTypes={availableServiceTypes}
               />
@@ -1511,10 +1610,10 @@ export default function App() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-                  Control de Cobros (Payments Log)
+                  {isEnglish ? "Payment Control (Payments Log)" : "Control de Cobros (Payments Log)"}
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Historial de depósitos de aseguradoras y cobros aplicados a los claims
+                  {isEnglish ? "History of insurance deposits and collections applied to claims" : "Historial de depósitos de aseguradoras y cobros aplicados a los claims"}
                 </p>
               </div>
 
@@ -1523,18 +1622,18 @@ export default function App() {
                 <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex gap-3 text-xs text-amber-800">
                   <AlertTriangle className="w-4.5 h-4.5 text-accent-orange shrink-0 mt-0.5 animate-bounce-subtle" />
                   <div>
-                    <h5 className="font-bold">Claims Pagados sin ERA Electrónico</h5>
+                    <h5 className="font-bold">{isEnglish ? "Paid Claims Missing Electronic ERA" : "Claims Pagados sin ERA Electrónico"}</h5>
                     <p className="mt-0.5 leading-relaxed font-semibold">
-                      Hay claims que registran pago por banco pero carecen del archivo ERA de validación. Revise claims con clasificación "Missing ERA".
+                      {isEnglish ? "Some claims have bank payments but no validating ERA file. Review claims classified as \"Missing ERA\"." : "Hay claims que registran pago por banco pero carecen del archivo ERA de validación. Revise claims con clasificación \"Missing ERA\"."}
                     </p>
                   </div>
                 </div>
                 <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl flex gap-3 text-xs text-rose-800">
                   <AlertTriangle className="w-4.5 h-4.5 text-rose-600 shrink-0 mt-0.5" />
                   <div>
-                    <h5 className="font-bold">Discordancias de Montos (Payment Mismatch)</h5>
+                    <h5 className="font-bold">{isEnglish ? "Amount Mismatches (Payment Mismatch)" : "Discordancias de Montos (Payment Mismatch)"}</h5>
                     <p className="mt-0.5 leading-relaxed font-semibold">
-                      Existen 2 depósitos donde el valor pagado discrepa del monto permitido contractualmente. Revise claims clasificados con "Payment Mismatch".
+                      {isEnglish ? "Some deposits differ from the contractual allowed amount. Review claims classified as \"Payment Mismatch\"." : "Existen 2 depósitos donde el valor pagado discrepa del monto permitido contractualmente. Revise claims clasificados con \"Payment Mismatch\"."}
                     </p>
                   </div>
                 </div>
@@ -1543,23 +1642,23 @@ export default function App() {
               {/* Payments History Table */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-                  <h4 className="font-bold text-slate-800 text-sm">Cobros Históricos Registrados</h4>
-                  <span className="text-xs text-slate-500 font-mono">Total cobrado: {formatUSD(payments.reduce((acc, p) => acc + p.amount, 0))}</span>
+                  <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Recorded Payment History" : "Cobros Históricos Registrados"}</h4>
+                  <span className="text-xs text-slate-500 font-mono">{isEnglish ? "Total collected" : "Total cobrado"}: {formatUSD(payments.reduce((acc, p) => acc + p.amount, 0))}</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">ID Depósito</th>
+                        <th className="p-3.5">{isEnglish ? "Deposit ID" : "ID Depósito"}</th>
                         <th className="p-3.5">ID Claim</th>
-                        <th className="p-3.5">Fecha</th>
-                        <th className="p-3.5">Canal / Recibido por</th>
-                        <th className="p-3.5">Aseguradora</th>
-                        <th className="p-3.5 text-right">Monto Cobrado</th>
+                        <th className="p-3.5">{isEnglish ? "Date" : "Fecha"}</th>
+                        <th className="p-3.5">{isEnglish ? "Channel / Received By" : "Canal / Recibido por"}</th>
+                        <th className="p-3.5">{isEnglish ? "Insurance" : "Aseguradora"}</th>
+                        <th className="p-3.5 text-right">{isEnglish ? "Amount Collected" : "Monto Cobrado"}</th>
                         <th className="p-3.5">Cheque / EFT #</th>
                         <th className="p-3.5">ERA ID</th>
                         <th className="p-3.5">EOB ID</th>
-                        <th className="p-3.5">Comentarios</th>
+                        <th className="p-3.5">{isEnglish ? "Comments" : "Comentarios"}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
@@ -1593,37 +1692,37 @@ export default function App() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-                  Reporte de Denegaciones (Denial Audits)
+                  {isEnglish ? "Denials Report (Denial Audits)" : "Reporte de Denegaciones (Denial Audits)"}
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Análisis y corrección de reclamaciones rechazadas o denegadas por las aseguradoras
+                  {isEnglish ? "Analysis and correction of rejected or denied claims from insurance payers" : "Análisis y corrección de reclamaciones rechazadas o denegadas por las aseguradoras"}
                 </p>
               </div>
 
               {/* Metrics blocks */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-white p-5 border border-slate-200 rounded-xl">
-                  <span className="text-xs font-semibold text-slate-500 block">Total Claims Denegados</span>
+                  <span className="text-xs font-semibold text-slate-500 block">{isEnglish ? "Total Denied Claims" : "Total Claims Denegados"}</span>
                   <span className="text-2xl font-bold text-rose-600 block mt-2 font-display">
-                    {claims.filter(c => c.claim_status === ClaimStatus.Denied).length}
+                    {visibleClaims.filter(c => c.claim_status === ClaimStatus.Denied).length}
                   </span>
                 </div>
                 <div className="bg-white p-5 border border-slate-200 rounded-xl">
-                  <span className="text-xs font-semibold text-slate-500 block">Monto Total Denegado</span>
+                  <span className="text-xs font-semibold text-slate-500 block">{isEnglish ? "Total Denied Amount" : "Monto Total Denegado"}</span>
                   <span className="text-2xl font-bold text-rose-600 block mt-2 font-mono">
-                    {formatUSD(claims.reduce((acc, c) => acc + c.denied_amount, 0))}
+                    {formatUSD(visibleClaims.reduce((acc, c) => acc + c.denied_amount, 0))}
                   </span>
                 </div>
                 <div className="bg-white p-5 border border-slate-200 rounded-xl">
-                  <span className="text-xs font-semibold text-slate-500 block">Pendiente de Corrección</span>
+                  <span className="text-xs font-semibold text-slate-500 block">{isEnglish ? "Pending Correction" : "Pendiente de Corrección"}</span>
                   <span className="text-2xl font-bold text-amber-600 block mt-2 font-display">
-                    {claims.filter(c => c.claim_status === ClaimStatus.Denied && c.correction_status === "Pending").length}
+                    {visibleClaims.filter(c => c.claim_status === ClaimStatus.Denied && c.correction_status === "Pending").length}
                   </span>
                 </div>
                 <div className="bg-white p-5 border border-slate-200 rounded-xl">
-                  <span className="text-xs font-semibold text-slate-500 block">Castigos de Denegación (Write-offs)</span>
+                  <span className="text-xs font-semibold text-slate-500 block">{isEnglish ? "Denial Write-offs" : "Castigos de Denegación (Write-offs)"}</span>
                   <span className="text-2xl font-bold text-slate-700 block mt-2 font-mono">
-                    {formatUSD(claims.reduce((acc, c) => acc + c.write_off_amount, 0))}
+                    {formatUSD(visibleClaims.reduce((acc, c) => acc + c.write_off_amount, 0))}
                   </span>
                 </div>
               </div>
@@ -1631,26 +1730,26 @@ export default function App() {
               {/* Denials Breakdown table */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b border-slate-100">
-                  <h4 className="font-bold text-slate-800 text-sm">Listado de Claims Denegados / Rechazados</h4>
+                  <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Denied / Rejected Claims List" : "Listado de Claims Denegados / Rechazados"}</h4>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
                         <th className="p-3.5">ID Claim</th>
-                        <th className="p-3.5">Médico</th>
-                        <th className="p-3.5">Aseguradora</th>
+                        <th className="p-3.5">{isEnglish ? "Provider" : "Médico"}</th>
+                        <th className="p-3.5">{isEnglish ? "Insurance" : "Aseguradora"}</th>
                         <th className="p-3.5">CPT</th>
-                        <th className="p-3.5 text-right font-mono">Monto Cargo</th>
+                        <th className="p-3.5 text-right font-mono">{isEnglish ? "Billed Charge" : "Monto Cargo"}</th>
                         <th className="p-3.5 font-mono">CARC</th>
                         <th className="p-3.5 font-mono">RARC</th>
-                        <th className="p-3.5">Motivo / Causa del Payer</th>
-                        <th className="p-3.5">Fase Corrección</th>
-                        <th className="p-3.5 text-center">Acción</th>
+                        <th className="p-3.5">{isEnglish ? "Payer Reason / Cause" : "Motivo / Causa del Payer"}</th>
+                        <th className="p-3.5">{isEnglish ? "Correction Phase" : "Fase Corrección"}</th>
+                        <th className="p-3.5 text-center">{isEnglish ? "Action" : "Acción"}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
-                      {claims.filter(c => c.claim_status === ClaimStatus.Denied || c.claim_status === ClaimStatus.Rejected).map((c) => (
+                      {visibleClaims.filter(c => c.claim_status === ClaimStatus.Denied || c.claim_status === ClaimStatus.Rejected).map((c) => (
                         <tr key={c.claim_id} className="hover:bg-slate-50">
                           <td className="p-3.5 font-bold text-rose-700 font-mono">{c.claim_id}</td>
                           <td className="p-3.5 font-semibold">{c.provider_name}</td>
@@ -1659,10 +1758,10 @@ export default function App() {
                           <td className="p-3.5 text-right font-bold font-mono text-slate-900">{formatUSD(c.billed_charge)}</td>
                           <td className="p-3.5 font-mono text-slate-800 font-semibold">{c.carc_code || "-"}</td>
                           <td className="p-3.5 font-mono text-slate-800 font-semibold">{c.rarc_code || "-"}</td>
-                          <td className="p-3.5 text-slate-500 font-medium max-w-xs truncate" title={c.denial_reason}>{c.denial_reason || "No especificado"}</td>
+                          <td className="p-3.5 text-slate-500 font-medium max-w-xs truncate" title={c.denial_reason}>{c.denial_reason || (isEnglish ? "Not specified" : "No especificado")}</td>
                           <td className="p-3.5">
                             <span className="px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-semibold text-[10px]">
-                              {c.correction_status || "Sin clasificar"}
+                              {c.correction_status || (isEnglish ? "Unclassified" : "Sin clasificar")}
                             </span>
                           </td>
                           <td className="p-3.5 text-center">
@@ -1670,7 +1769,7 @@ export default function App() {
                               onClick={() => setSelectedClaim(c)}
                               className="px-2.5 py-1 border border-slate-200 rounded-lg bg-slate-50 text-[10px] hover:bg-slate-200 font-bold text-slate-700"
                             >
-                              Corregir
+                              {isEnglish ? "Correct" : "Corregir"}
                             </button>
                           </td>
                         </tr>
@@ -1687,35 +1786,35 @@ export default function App() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-                  Claims Bloqueados por Errores (Claims in Hold)
+                  {isEnglish ? "Claims Blocked by Errors (Claims in Hold)" : "Claims Bloqueados por Errores (Claims in Hold)"}
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Expedientes retenidos por validaciones de facturación que impiden su presentación o cobro
+                  {isEnglish ? "Records held by billing validations that prevent submission or collection" : "Expedientes retenidos por validaciones de facturación que impiden su presentación o cobro"}
                 </p>
               </div>
 
               {/* Errors list */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b border-slate-100">
-                  <h4 className="font-bold text-slate-800 text-sm">Bandeja de Errores Activos</h4>
+                  <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Active Errors Queue" : "Bandeja de Errores Activos"}</h4>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
                         <th className="p-3.5">ID Claim</th>
-                        <th className="p-3.5">Paciente</th>
-                        <th className="p-3.5">Médico / Clínica</th>
+                        <th className="p-3.5">{isEnglish ? "Patient" : "Paciente"}</th>
+                        <th className="p-3.5">{isEnglish ? "Provider / Clinic" : "Médico / Clínica"}</th>
                         <th className="p-3.5">CPT</th>
-                        <th className="p-3.5 font-mono text-right">Cargo</th>
-                        <th className="p-3.5">Categoría de Error</th>
-                        <th className="p-3.5">Detalle del Bloqueo / Lock Reason</th>
-                        <th className="p-3.5">Fase de Corrección</th>
-                        <th className="p-3.5 text-center">Acción</th>
+                        <th className="p-3.5 font-mono text-right">{isEnglish ? "Charge" : "Cargo"}</th>
+                        <th className="p-3.5">{isEnglish ? "Error Category" : "Categoría de Error"}</th>
+                        <th className="p-3.5">{isEnglish ? "Block Detail / Lock Reason" : "Detalle del Bloqueo / Lock Reason"}</th>
+                        <th className="p-3.5">{isEnglish ? "Correction Phase" : "Fase de Corrección"}</th>
+                        <th className="p-3.5 text-center">{isEnglish ? "Action" : "Acción"}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
-                      {claims.filter(c => c.error_flag || c.locked).map((c) => (
+                      {visibleClaims.filter(c => c.error_flag || c.locked).map((c) => (
                         <tr key={c.claim_id} className="hover:bg-slate-50 bg-rose-50/10">
                           <td className="p-3.5 font-bold text-slate-900 font-mono">
                             <div className="flex items-center gap-1">
@@ -1727,11 +1826,11 @@ export default function App() {
                           <td className="p-3.5">{c.provider_name}</td>
                           <td className="p-3.5 font-mono">{c.cpt_hcpcs}</td>
                           <td className="p-3.5 text-right font-bold font-mono text-slate-900">{formatUSD(c.billed_charge)}</td>
-                          <td className="p-3.5 font-bold text-rose-700 font-sans">{c.error_category || "Error General"}</td>
+                          <td className="p-3.5 font-bold text-rose-700 font-sans">{c.error_category || (isEnglish ? "General Error" : "Error General")}</td>
                           <td className="p-3.5 text-slate-500 max-w-xs truncate" title={c.lock_reason}>{c.lock_reason || "Blocked in claim scrubbing."}</td>
                           <td className="p-3.5">
                             <span className="px-2 py-0.5 bg-rose-100 text-rose-800 rounded font-semibold text-[10px]">
-                              {c.correction_status || "Por revisar"}
+                              {c.correction_status || (isEnglish ? "Needs review" : "Por revisar")}
                             </span>
                           </td>
                           <td className="p-3.5 text-center">
@@ -1739,7 +1838,7 @@ export default function App() {
                               onClick={() => setSelectedClaim(c)}
                               className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-700"
                             >
-                              Resolver
+                              {isEnglish ? "Resolve" : "Resolver"}
                             </button>
                           </td>
                         </tr>
@@ -1756,39 +1855,39 @@ export default function App() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-                  Balances y Liquidaciones de Médicos (Providers Report)
+                  {isEnglish ? "Physician Balances and Settlements (Providers Report)" : "Balances y Liquidaciones de Médicos (Providers Report)"}
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Reporte de conciliación de haberes y cuentas por pagar a los médicos según contratos de servicios de Digital Care
+                  {isEnglish ? "Reconciliation report for physician earnings and payables under Digital Care service contracts" : "Reporte de conciliación de haberes y cuentas por pagar a los médicos según contratos de servicios de Digital Care"}
                 </p>
               </div>
 
               {/* Provider calculations table */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b border-slate-100">
-                  <h4 className="font-bold text-slate-800 text-sm">Resumen de Cuentas por Médico (70/30 Share)</h4>
+                  <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Physician Account Summary (70/30 Share)" : "Resumen de Cuentas por Médico (70/30 Share)"}</h4>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">Médico / Clinic</th>
+                        <th className="p-3.5">{isEnglish ? "Provider / Clinic" : "Médico / Clinic"}</th>
                         <th className="p-3.5">NPI</th>
                         <th className="p-3.5 text-right font-mono">Total Claims</th>
                         <th className="p-3.5 text-right font-mono">Total Billed</th>
-                        <th className="p-3.5 text-right font-mono">Cobros ITERA</th>
-                        <th className="p-3.5 text-right font-mono">Cobros Provider</th>
-                        <th className="p-3.5 text-right font-mono">Saldos A/R</th>
-                        <th className="p-3.5 text-right font-mono">AP Payable (Médico Share)</th>
-                        <th className="p-3.5 text-right font-mono">Pagos Distribuidos</th>
-                        <th className="p-3.5 text-right font-mono">Ending AP / Saldo</th>
-                        <th className="p-3.5 text-center">Acciones</th>
+                        <th className="p-3.5 text-right font-mono">{isEnglish ? "ITERA Collections" : "Cobros ITERA"}</th>
+                        <th className="p-3.5 text-right font-mono">{isEnglish ? "Provider Collections" : "Cobros Provider"}</th>
+                        <th className="p-3.5 text-right font-mono">{isEnglish ? "A/R Balances" : "Saldos A/R"}</th>
+                        <th className="p-3.5 text-right font-mono">{isEnglish ? "AP Payable (Provider Share)" : "AP Payable (Médico Share)"}</th>
+                        <th className="p-3.5 text-right font-mono">{isEnglish ? "Distributed Payments" : "Pagos Distribuidos"}</th>
+                        <th className="p-3.5 text-right font-mono">{isEnglish ? "Ending AP / Balance" : "Ending AP / Saldo"}</th>
+                        <th className="p-3.5 text-center">{isEnglish ? "Actions" : "Acciones"}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
-                      {providers.map((p) => {
+                      {visibleProviders.map((p) => {
                         // Calculate provider specific aggregates
-                        const pClaims = claims.filter(c => c.provider_id === p.provider_id);
+                        const pClaims = visibleClaims.filter(c => c.provider_id === p.provider_id);
                         const cCount = pClaims.length;
                         const billed = pClaims.reduce((acc, c) => acc + c.billed_charge, 0);
                         const itColl = pClaims.reduce((acc, c) => acc + c.itera_direct_collection, 0);
@@ -1816,12 +1915,12 @@ export default function App() {
                               <button
                                 onClick={async () => {
                                   const amtStr = await promptAction({
-                                    title: "Registrar pago al médico",
-                                    message: `${p.provider_name} tiene un saldo pendiente de ${formatUSD(ending)}.`,
-                                    inputLabel: "Monto a distribuir",
+                                    title: isEnglish ? "Record physician payout" : "Registrar pago al médico",
+                                    message: isEnglish ? `${p.provider_name} has a pending balance of ${formatUSD(ending)}.` : `${p.provider_name} tiene un saldo pendiente de ${formatUSD(ending)}.`,
+                                    inputLabel: isEnglish ? "Amount to distribute" : "Monto a distribuir",
                                     placeholder: "0.00",
                                     inputType: "number",
-                                    confirmLabel: "Registrar pago"
+                                    confirmLabel: isEnglish ? "Record payout" : "Registrar pago"
                                   });
                                   if (amtStr) {
                                     handleRecordPhysicianPayout(p.provider_id, Number(amtStr));
@@ -1829,7 +1928,7 @@ export default function App() {
                                 }}
                                 className="px-2.5 py-1 bg-indigo-50 border border-indigo-200 rounded text-[10px] hover:bg-indigo-600 hover:text-white font-bold text-indigo-700 transition-colors"
                               >
-                                Registrar Pago
+                                {isEnglish ? "Record Payment" : "Registrar Pago"}
                               </button>
                             </td>
                           </tr>
@@ -1847,32 +1946,32 @@ export default function App() {
             <div className="space-y-6">
               <div>
                 <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-                  Log de Auditoría de Seguridad HIPAA
+                  {isEnglish ? "HIPAA Security Audit Log" : "Log de Auditoría de Seguridad HIPAA"}
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Bitácora inalterable de acceso y modificaciones de claims requerida para el cumplimiento normativo de datos médicos
+                  {isEnglish ? "Immutable access and claim modification log required for medical data compliance" : "Bitácora inalterable de acceso y modificaciones de claims requerida para el cumplimiento normativo de datos médicos"}
                 </p>
               </div>
 
               {/* Audit history */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b border-slate-100 flex justify-between items-center">
-                  <h4 className="font-bold text-slate-800 text-sm">Registros de Seguridad Registrados</h4>
-                  <span className="text-xs text-slate-400 font-mono">{auditLogs.length} acciones guardadas</span>
+                  <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Recorded Security Events" : "Registros de Seguridad Registrados"}</h4>
+                  <span className="text-xs text-slate-400 font-mono">{auditLogs.length} {isEnglish ? "saved actions" : "acciones guardadas"}</span>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
                         <th className="p-3.5">ID Log</th>
-                        <th className="p-3.5">Fecha y Hora</th>
-                        <th className="p-3.5">Usuario Auditor</th>
+                        <th className="p-3.5">{isEnglish ? "Date and Time" : "Fecha y Hora"}</th>
+                        <th className="p-3.5">{isEnglish ? "Audit User" : "Usuario Auditor"}</th>
                         <th className="p-3.5">ID Claim</th>
-                        <th className="p-3.5 font-mono">Tipo Acción</th>
-                        <th className="p-3.5">Campo Alterado</th>
-                        <th className="p-3.5">Valor Previo</th>
-                        <th className="p-3.5">Valor Nuevo</th>
-                        <th className="p-3.5">Motivo / Justificación</th>
+                        <th className="p-3.5 font-mono">{isEnglish ? "Action Type" : "Tipo Acción"}</th>
+                        <th className="p-3.5">{isEnglish ? "Changed Field" : "Campo Alterado"}</th>
+                        <th className="p-3.5">{isEnglish ? "Previous Value" : "Valor Previo"}</th>
+                        <th className="p-3.5">{isEnglish ? "New Value" : "Valor Nuevo"}</th>
+                        <th className="p-3.5">{isEnglish ? "Reason / Justification" : "Motivo / Justificación"}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
@@ -1907,8 +2006,8 @@ export default function App() {
           {/* VIEW: REPORTS MODULE */}
           {currentView === "reports" && (
             <ReportsPage
-              claims={claims}
-              providers={providers}
+              claims={visibleClaims}
+              providers={visibleProviders}
               payers={payers}
               feeSchedules={feeSchedules}
               eligibilityCoverage={eligibilityCoverage}
@@ -2021,8 +2120,8 @@ export default function App() {
                     </label>
                     <div className="grid gap-3 sm:grid-cols-2">
                       {([
-                        { code: "en", name: "English", detail: "Default language" },
-                        { code: "es", name: "Español", detail: "Idioma alternativo" }
+                        { code: "en", name: "English", detail: isEnglish ? "Default language" : "Idioma predeterminado" },
+                        { code: "es", name: "Español", detail: isEnglish ? "Spanish interface" : "Interfaz en español" }
                       ] as Array<{ code: AppLanguage; name: string; detail: string }>).map(option => {
                         const selected = language === option.code;
                         return (
@@ -2111,7 +2210,7 @@ export default function App() {
                       <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">Role</label>
                       <select
                         value={userRoleInput}
-                        onChange={(e) => setUserRoleInput(e.target.value as UserRole)}
+                        onChange={(e) => handleUserRoleChange(e.target.value as UserRole)}
                         className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold"
                       >
                         {Object.values(UserRole).map(role => (
@@ -2148,10 +2247,87 @@ export default function App() {
                         </button>
                       )}
                     </div>
+                    <div className="lg:col-span-6 grid gap-3 border-t border-blue-100 pt-3 lg:grid-cols-2">
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                            {isEnglish ? "Menu access" : "Acceso al menú"}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setUserMenuAccessInput(ROLE_DEFAULT_MENU_ACCESS[userRoleInput])}
+                            className="text-[9px] font-bold text-primary-blue hover:text-dark-blue"
+                          >
+                            {isEnglish ? "Role default" : "Default del rol"}
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {MENU_ACCESS_IDS.map(menuId => {
+                            const labels: Record<MenuAccessId, string> = {
+                              dashboard: isEnglish ? "Dashboard" : "Tablero",
+                              claims: isEnglish ? "Claims Worklist" : "Worklist de Claims",
+                              payments: isEnglish ? "Payment Control" : "Control de Pagos",
+                              denials: isEnglish ? "Denials Report" : "Reporte de Denials",
+                              errors: isEnglish ? "Claims with Errors" : "Claims con Errores",
+                              providers: isEnglish ? "Physician Balances" : "Balance de Médicos",
+                              reports: isEnglish ? "Reports" : "Reportes",
+                              settings: isEnglish ? "Settings" : "Configuración",
+                              "audit-log": isEnglish ? "Audit Log" : "Log de Auditoría"
+                            };
+                            return (
+                              <label key={menuId} className="flex items-center gap-2 rounded-md border border-slate-100 px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={userMenuAccessInput.includes(menuId)}
+                                  onChange={() => toggleUserMenuAccess(menuId)}
+                                  className="h-3.5 w-3.5 accent-primary-blue"
+                                />
+                                <span>{labels[menuId]}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                            {isEnglish ? "Provider access" : "Acceso a providers"}
+                          </label>
+                          <label className="flex items-center gap-1.5 text-[10px] font-bold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={userProviderAccessAllInput}
+                              onChange={(event) => setUserProviderAccessAllInput(event.target.checked)}
+                              className="h-3.5 w-3.5 accent-primary-blue"
+                            />
+                            {isEnglish ? "All providers" : "Todos los providers"}
+                          </label>
+                        </div>
+                        <div className={`grid max-h-32 grid-cols-1 gap-1.5 overflow-y-auto pr-1 ${userProviderAccessAllInput ? "opacity-45" : ""}`}>
+                          {providers.map(provider => (
+                            <label key={provider.provider_id} className="flex items-center gap-2 rounded-md border border-slate-100 px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                              <input
+                                type="checkbox"
+                                disabled={userProviderAccessAllInput}
+                                checked={userProviderAccessIdsInput.includes(provider.provider_id)}
+                                onChange={() => toggleUserProviderAccess(provider.provider_id)}
+                                className="h-3.5 w-3.5 accent-primary-blue disabled:opacity-40"
+                              />
+                              <span className="truncate">{provider.provider_name}</span>
+                              <span className="ml-auto font-mono text-[9px] text-slate-400">{provider.provider_id}</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-[10px] text-slate-500">
-                    <span className="font-bold text-slate-700">Role access:</span> Admin/Billing Manager can access Settings. Reconciliation Specialist manages claims and reports. Provider Viewer has read-oriented provider access. Auditor focuses on logs and review.
+                    <span className="font-bold text-slate-700">{isEnglish ? "Access model:" : "Modelo de acceso:"}</span>{" "}
+                    {isEnglish
+                      ? "Role still controls the maximum capability. Menu access controls visible sections, and provider access limits which patients/claims the user can see."
+                      : "El rol controla la capacidad máxima. El acceso al menú controla las secciones visibles y el acceso a providers limita qué pacientes/claims puede ver el usuario."}
                   </div>
 
                   <div className="overflow-x-auto">
@@ -2162,6 +2338,8 @@ export default function App() {
                           <th className="p-3">{isEnglish ? "User" : "Usuario"}</th>
                           <th className="p-3">Email</th>
                           <th className="p-3">Role</th>
+                          <th className="p-3">{isEnglish ? "Menu Access" : "Acceso menú"}</th>
+                          <th className="p-3">{isEnglish ? "Providers" : "Providers"}</th>
                           <th className="p-3">Status</th>
                           <th className="p-3 text-right">{isEnglish ? "Actions" : "Acciones"}</th>
                         </tr>
@@ -2178,6 +2356,14 @@ export default function App() {
                                 <span className="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[9px] font-bold text-dark-blue">
                                   {user.role}
                                 </span>
+                              </td>
+                              <td className="p-3 text-[10px] text-slate-500">
+                                {getUserMenuAccess(user).length} {isEnglish ? "sections" : "secciones"}
+                              </td>
+                              <td className="p-3 text-[10px] text-slate-500">
+                                {userHasAllProviderAccess(user)
+                                  ? (isEnglish ? "All providers" : "Todos")
+                                  : parseProviderAccess(user.provider_access).join(", ")}
                               </td>
                               <td className="p-3">
                                 <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${user.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-500"}`}>
@@ -2587,7 +2773,9 @@ export default function App() {
                       </div>
                       <div>
                         <h4 className="font-bold text-slate-900 text-sm">FCSO-style CPT Fee Schedules Configuration Manager</h4>
-                        <p className="text-[10px] text-slate-500 mt-0.5">Define los honorarios oficiales por cada semestre para automatizar el cálculo de cargos facturados (Billed Charge).</p>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          {isEnglish ? "Define official semester rates to automate billed charge calculation." : "Define los honorarios oficiales por cada semestre para automatizar el cálculo de cargos facturados (Billed Charge)."}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
@@ -2595,7 +2783,7 @@ export default function App() {
                         <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
                         <input
                           type="text"
-                          placeholder="Buscar CPT..."
+                          placeholder={isEnglish ? "Search CPT..." : "Buscar CPT..."}
                           value={fsSearchTerm}
                           onChange={(e) => setFsSearchTerm(e.target.value)}
                           className="pl-8 pr-3 py-1.5 border border-slate-200 bg-slate-50 rounded-lg text-[11px] w-40 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-blue transition-all"
@@ -2606,7 +2794,7 @@ export default function App() {
                         className="flex items-center gap-1 bg-primary-blue hover:bg-dark-blue text-white text-[11px] font-bold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        Nueva Tarifa
+                        {isEnglish ? "New Fee" : "Nueva Tarifa"}
                       </button>
                     </div>
                   </div>
@@ -2615,13 +2803,13 @@ export default function App() {
                     <table className="w-full text-left border-collapse text-[11px]">
                       <thead>
                         <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider bg-slate-50 text-[10px]">
-                          <th className="p-3">Cód. CPT</th>
-                          <th className="p-3">Año</th>
-                          <th className="p-3">Tarifa Semestre 1 (Ene-Jun)</th>
-                          <th className="p-3">Tarifa Semestre 2 (Jul-Dic)</th>
+                          <th className="p-3">{isEnglish ? "CPT Code" : "Cód. CPT"}</th>
+                          <th className="p-3">{isEnglish ? "Year" : "Año"}</th>
+                          <th className="p-3">{isEnglish ? "Semester 1 Rate (Jan-Jun)" : "Tarifa Semestre 1 (Ene-Jun)"}</th>
+                          <th className="p-3">{isEnglish ? "Semester 2 Rate (Jul-Dec)" : "Tarifa Semestre 2 (Jul-Dic)"}</th>
                           <th className="p-3 text-center">Max/DOS</th>
-                          <th className="p-3">Descripción Oficial</th>
-                          <th className="p-3 text-right">Acciones</th>
+                          <th className="p-3">{isEnglish ? "Official Description" : "Descripción Oficial"}</th>
+                          <th className="p-3 text-right">{isEnglish ? "Actions" : "Acciones"}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -2639,20 +2827,20 @@ export default function App() {
                                   <button
                                     onClick={() => handleOpenEditFeeSchedule(fs.source)}
                                     className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded transition-colors"
-                                    title="Editar"
+                                    title={isEnglish ? "Edit" : "Editar"}
                                   >
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </button>
                                   <button
                                     onClick={() => {
                                       if (!fs.id) {
-                                        notify("Esta tarifa no tiene ID válido para eliminar. Edítela y guárdela primero.", "warning");
+                                        notify(isEnglish ? "This fee has no valid ID to delete. Edit and save it first." : "Esta tarifa no tiene ID válido para eliminar. Edítela y guárdela primero.", "warning");
                                         return;
                                       }
                                       handleDeleteFeeSchedule(fs.id);
                                     }}
                                     className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded transition-colors"
-                                    title="Eliminar"
+                                    title={isEnglish ? "Delete" : "Eliminar"}
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -2663,7 +2851,9 @@ export default function App() {
                         {visibleFeeSchedules.length === 0 && (
                           <tr>
                             <td colSpan={7} className="p-6 text-center text-slate-400">
-                              {feeScheduleSearch ? "No se encontraron tarifas con ese criterio." : "No hay tarifas configuradas en el Fee Schedule."}
+                              {feeScheduleSearch
+                                ? (isEnglish ? "No fees matched that search." : "No se encontraron tarifas con ese criterio.")
+                                : (isEnglish ? "No fees are configured in the Fee Schedule." : "No hay tarifas configuradas en el Fee Schedule.")}
                             </td>
                           </tr>
                         )}
@@ -2680,15 +2870,17 @@ export default function App() {
                       <Sliders className="w-5 h-5" />
                     </div>
                     <div>
-                      <h4 className="font-bold text-slate-900 text-sm">Reglas Contractuales de Reparto de Ingresos (Shares)</h4>
-                      <p className="text-[10px] text-slate-500 mt-0.5">Configura los porcentajes acordados y la base de conciliación de pagos para la red de médicos de ITERA.</p>
+                      <h4 className="font-bold text-slate-900 text-sm">{isEnglish ? "Contract Revenue Share Rules" : "Reglas Contractuales de Reparto de Ingresos (Shares)"}</h4>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        {isEnglish ? "Configure agreed shares and the payment reconciliation basis for ITERA's physician network." : "Configura los porcentajes acordados y la base de conciliación de pagos para la red de médicos de ITERA."}
+                      </p>
                     </div>
                   </div>
                   
                   <div className="space-y-6 max-w-xl text-xs pt-2">
                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">PORCENTAJE PARA EL MÉDICO (%)</label>
+                        <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">{isEnglish ? "Physician share percentage (%)" : "PORCENTAJE PARA EL MÉDICO (%)"}</label>
                         <div className="relative">
                           <input
                             type="number"
@@ -2700,12 +2892,12 @@ export default function App() {
                           />
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                          Parte proporcional de cobros que le corresponde al médico. Por defecto es 70%.
+                          {isEnglish ? "Share of collections owed to the physician. Default is 70%." : "Parte proporcional de cobros que le corresponde al médico. Por defecto es 70%."}
                         </p>
                       </div>
 
                       <div>
-                        <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">PORCENTAJE ITERA HEALTH (%)</label>
+                        <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">{isEnglish ? "ITERA HEALTH share percentage (%)" : "PORCENTAJE ITERA HEALTH (%)"}</label>
                         <div className="relative">
                           <input
                             type="number"
@@ -2717,23 +2909,23 @@ export default function App() {
                           />
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                          Cobro de plataforma retenido por ITERA HEALTH. Por defecto es 30%.
+                          {isEnglish ? "Platform share retained by ITERA HEALTH. Default is 30%." : "Cobro de plataforma retenido por ITERA HEALTH. Por defecto es 30%."}
                         </p>
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">CRITERIO DE RECONCILIACIÓN (Basis)</label>
+                      <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">{isEnglish ? "Reconciliation basis" : "CRITERIO DE RECONCILIACIÓN (Basis)"}</label>
                       <select
                         defaultValue={settings.find(s => s.setting_key === "PAYMENT_BASIS")?.setting_value || "COLLECTIONS"}
                         onChange={(e) => handleUpdateSetting("PAYMENT_BASIS", e.target.value)}
                         className="p-2.5 border border-slate-200 bg-slate-50 rounded-lg text-slate-700 font-semibold w-full focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary-blue"
                       >
-                        <option value="COLLECTIONS">COLLECTIONS (Se liquida al médico solo sobre cobro cobrado real en banco)</option>
-                        <option value="BILLED">BILLED (Se liquida sobre cargo facturado neto contractual independientemente de cobros)</option>
+                        <option value="COLLECTIONS">{isEnglish ? "COLLECTIONS (Physician is paid only on actual bank collections)" : "COLLECTIONS (Se liquida al médico solo sobre cobro cobrado real en banco)"}</option>
+                        <option value="BILLED">{isEnglish ? "BILLED (Physician is paid on net contractual billed charges regardless of collections)" : "BILLED (Se liquida sobre cargo facturado neto contractual independientemente de cobros)"}</option>
                       </select>
                       <p className="text-[10px] text-slate-400 mt-1 leading-normal">
-                        Determina cómo se liquida el saldo a favor del médico en los reportes de balance mensuales.
+                        {isEnglish ? "Determines how physician balances are settled in monthly balance reports." : "Determina cómo se liquida el saldo a favor del médico en los reportes de balance mensuales."}
                       </p>
                     </div>
                   </div>
@@ -2750,7 +2942,7 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden">
             <div className="bg-dark-blue p-5 text-white flex items-center justify-between">
-              <h4 className="font-bold font-display text-sm">Crear Nuevo Claim de Digital Care</h4>
+              <h4 className="font-bold font-display text-sm">{isEnglish ? "Create New Digital Care Claim" : "Crear Nuevo Claim de Digital Care"}</h4>
               <button onClick={() => setIsCreateOpen(false)} className="p-1 hover:bg-white/10 rounded-full text-white">
                 <X className="w-4.5 h-4.5" />
               </button>
@@ -2758,24 +2950,24 @@ export default function App() {
             <form onSubmit={handleCreateClaimManually} className="max-h-[82vh] overflow-y-auto p-6 space-y-4 text-xs font-sans">
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-[1.2fr_0.8fr]">
                 <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                  <label className="block text-primary-blue mb-1 font-bold uppercase tracking-wider text-[9px]">Claim ID — Vista previa</label>
+                  <label className="block text-primary-blue mb-1 font-bold uppercase tracking-wider text-[9px]">{isEnglish ? "Claim ID - Preview" : "Claim ID - Vista previa"}</label>
                   <div className="font-mono font-bold text-dark-blue text-[11px] break-all">
                     CLM-{newPatientId ? newPatientId.trim().toUpperCase().replace(/^MRN[-_\s]*/i, "").replace(/[^A-Z0-9]+/g, "") || "MRN" : "MRN"}
-                    -{newDos ? newDos.replace(/-/g, "") : "AAAAMMDD"}
+                    -{newDos ? newDos.replace(/-/g, "") : (isEnglish ? "YYYYMMDD" : "AAAAMMDD")}
                     -<span className="text-slate-400">###</span>
                   </div>
-                  <p className="mt-1 text-[9px] text-slate-500">El consecutivo se asigna al guardar.</p>
+                  <p className="mt-1 text-[9px] text-slate-500">{isEnglish ? "The sequence number is assigned when saved." : "El consecutivo se asigna al guardar."}</p>
                 </div>
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
                   <label className="block text-emerald-700 mb-1 font-bold uppercase tracking-wider text-[9px]">Total Billed Charge</label>
                   <div className="font-mono text-lg font-bold text-emerald-800">${newClaimTotalCharge.toFixed(2)}</div>
-                  <p className="mt-1 text-[9px] text-emerald-700">Autocalculado desde Fee Schedules por CPT.</p>
+                  <p className="mt-1 text-[9px] text-emerald-700">{isEnglish ? "Auto-calculated from Fee Schedules by CPT." : "Autocalculado desde Fee Schedules por CPT."}</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-500 mb-1">Nombre del Paciente</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Patient Name" : "Nombre del Paciente"}</label>
                   <input
                     type="text"
                     required
@@ -2786,7 +2978,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1">MRN (ID de Paciente)</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "MRN (Patient ID)" : "MRN (ID de Paciente)"}</label>
                   <input
                     type="text"
                     required
@@ -2800,19 +2992,19 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-500 mb-1">Médico (Provider)</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Provider" : "Médico (Provider)"}</label>
                   <select
                     value={newProviderId}
                     onChange={(e) => setNewProviderId(e.target.value)}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 text-slate-700"
                   >
-                    {providers.map(p => (
+                    {visibleProviders.map(p => (
                       <option key={p.provider_id} value={p.provider_id}>{p.provider_name}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1">Aseguradora (Payer)</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Insurance (Payer)" : "Aseguradora (Payer)"}</label>
                   <select
                     value={newPayerId}
                     onChange={(e) => setNewPayerId(e.target.value)}
@@ -2827,7 +3019,7 @@ export default function App() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-slate-500 mb-1">Fecha de Servicio (DOS)</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Date of Service (DOS)" : "Fecha de Servicio (DOS)"}</label>
                   <input
                     type="date"
                     required
@@ -2853,7 +3045,7 @@ export default function App() {
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <h5 className="text-[11px] font-bold text-slate-900">CPT / Service Lines</h5>
-                    <p className="text-[9px] text-slate-500">Añade varios CPT en el mismo claim, incluso si pertenecen a servicios diferentes.</p>
+                    <p className="text-[9px] text-slate-500">{isEnglish ? "Add multiple CPTs to the same claim, even when they belong to different services." : "Añade varios CPT en el mismo claim, incluso si pertenecen a servicios diferentes."}</p>
                   </div>
                   <button
                     type="button"
@@ -2861,12 +3053,12 @@ export default function App() {
                     className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    Añadir CPT
+                    {isEnglish ? "Add CPT" : "Añadir CPT"}
                   </button>
                 </div>
                 <div className="space-y-2">
                   <div className="grid grid-cols-[112px_minmax(0,1fr)_120px_34px] gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
-                    <span>Servicio</span>
+                    <span>{isEnglish ? "Service" : "Servicio"}</span>
                     <span>CPT Code</span>
                     <span>Charge</span>
                     <span></span>
@@ -2892,7 +3084,7 @@ export default function App() {
                           }}
                           className="w-full rounded-lg border border-slate-200 bg-white p-2 text-[11px] font-mono text-slate-700"
                         >
-                          <option value="" disabled>Servicio</option>
+                          <option value="" disabled>{isEnglish ? "Service" : "Servicio"}</option>
                           {getServiceTypeOptions().map(service => (
                             <option key={service} value={service}>{service}</option>
                           ))}
@@ -2905,7 +3097,11 @@ export default function App() {
                           className="w-full rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           <option value="" disabled>
-                            {!line.serviceType ? "Selecciona servicio primero" : cptOptions.length === 0 ? "Sin CPT configurados" : "Selecciona CPT"}
+                            {!line.serviceType
+                              ? (isEnglish ? "Select service first" : "Selecciona servicio primero")
+                              : cptOptions.length === 0
+                                ? (isEnglish ? "No CPTs configured" : "Sin CPT configurados")
+                                : (isEnglish ? "Select CPT" : "Selecciona CPT")}
                           </option>
                           {cptOptions.map(option => (
                             <option key={`${option.serviceType}-${option.cpt}`} value={option.cpt}>
@@ -2921,7 +3117,7 @@ export default function App() {
                           onClick={() => setNewClaimLines(prev => prev.length === 1 ? prev : prev.filter(item => item.id !== line.id))}
                           disabled={newClaimLines.length === 1}
                           className="flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:border-rose-200 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
-                          title="Eliminar línea"
+                          title={isEnglish ? "Remove line" : "Eliminar línea"}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -2937,13 +3133,13 @@ export default function App() {
                   onClick={() => setIsCreateOpen(false)}
                   className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl font-semibold text-slate-600 transition-colors"
                 >
-                  Cancelar
+                  {isEnglish ? "Cancel" : "Cancelar"}
                 </button>
                 <button
                   type="submit"
                   className="bg-primary-blue hover:bg-secondary-blue text-white px-5 py-2 rounded-xl font-bold transition-all shadow-md"
                 >
-                  Guardar y Conciliar
+                  {isEnglish ? "Save and Reconcile" : "Guardar y Conciliar"}
                 </button>
               </div>
             </form>
@@ -2982,7 +3178,9 @@ export default function App() {
           <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
             <div className="bg-dark-blue p-5 text-white flex items-center justify-between">
               <h4 className="font-bold font-display text-sm">
-                {editingFs ? "Editar Tarifa Fee Schedule" : "Nueva Tarifa en Fee Schedule"}
+                {editingFs
+                  ? (isEnglish ? "Edit Fee Schedule Rate" : "Editar Tarifa Fee Schedule")
+                  : (isEnglish ? "New Fee Schedule Rate" : "Nueva Tarifa en Fee Schedule")}
               </h4>
               <button onClick={() => setIsFsModalOpen(false)} className="p-1 hover:bg-white/10 rounded-full text-white">
                 <X className="w-4.5 h-4.5" />
@@ -2991,7 +3189,7 @@ export default function App() {
             <div className="p-6 space-y-4 text-xs font-sans">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-500 mb-1 font-semibold">Código CPT</label>
+                  <label className="block text-slate-500 mb-1 font-semibold">{isEnglish ? "CPT Code" : "Código CPT"}</label>
                   <input
                     type="text"
                     required
@@ -3002,7 +3200,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1 font-semibold font-sans">Año</label>
+                  <label className="block text-slate-500 mb-1 font-semibold font-sans">{isEnglish ? "Year" : "Año"}</label>
                   <input
                     type="number"
                     required
@@ -3016,7 +3214,7 @@ export default function App() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-slate-500 mb-1 font-semibold">Semestre 1 Rate ($)</label>
+                  <label className="block text-slate-500 mb-1 font-semibold">{isEnglish ? "Semester 1 Rate ($)" : "Semestre 1 Rate ($)"}</label>
                   <input
                     type="number"
                     step="0.01"
@@ -3028,7 +3226,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1 font-semibold">Semestre 2 Rate ($)</label>
+                  <label className="block text-slate-500 mb-1 font-semibold">{isEnglish ? "Semester 2 Rate ($)" : "Semestre 2 Rate ($)"}</label>
                   <input
                     type="number"
                     step="0.01"
@@ -3040,7 +3238,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1 font-semibold">Max por DOS</label>
+                  <label className="block text-slate-500 mb-1 font-semibold">{isEnglish ? "Max per DOS" : "Max por DOS"}</label>
                   <input
                     type="number"
                     min="1"
@@ -3054,7 +3252,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-slate-500 mb-1 font-semibold">Descripción del Servicio</label>
+                <label className="block text-slate-500 mb-1 font-semibold">{isEnglish ? "Service Description" : "Descripción del Servicio"}</label>
                 <textarea
                   placeholder="RPM - Device supply and daily recordings..."
                   value={fsDescription}
@@ -3069,13 +3267,15 @@ export default function App() {
                   onClick={() => setIsFsModalOpen(false)}
                   className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl font-semibold text-slate-600 transition-colors"
                 >
-                  Cancelar
+                  {isEnglish ? "Cancel" : "Cancelar"}
                 </button>
                 <button
                   onClick={handleSaveFeeSchedule}
                   className="bg-primary-blue hover:bg-secondary-blue text-white px-5 py-2 rounded-xl font-bold transition-all shadow-md cursor-pointer"
                 >
-                  {editingFs ? "Actualizar Tarifa" : "Agregar Tarifa"}
+                  {editingFs
+                    ? (isEnglish ? "Update Rate" : "Actualizar Tarifa")
+                    : (isEnglish ? "Add Rate" : "Agregar Tarifa")}
                 </button>
               </div>
             </div>

@@ -18,8 +18,9 @@ import {
   ChevronRight,
   BarChart3
 } from "lucide-react";
-import { UserRole } from "../types";
+import { User, UserRole } from "../types";
 import { useLanguage } from "./LanguageProvider";
+import { canUserAccessMenu } from "../accessControl";
 
 export type ViewType =
   | "dashboard"
@@ -35,12 +36,12 @@ export type ViewType =
 interface SidebarProps {
   currentView: ViewType;
   onViewChange: (view: ViewType) => void;
-  userRole: UserRole;
+  currentUser: User;
   isCollapsed: boolean;
   onToggleCollapse: () => void;
 }
 
-export function Sidebar({ currentView, onViewChange, userRole, isCollapsed, onToggleCollapse }: SidebarProps) {
+export function Sidebar({ currentView, onViewChange, currentUser, isCollapsed, onToggleCollapse }: SidebarProps) {
   const { language } = useLanguage();
   const isEnglish = language === "en";
   // Navigation tabs with role access restrictions
@@ -102,7 +103,9 @@ export function Sidebar({ currentView, onViewChange, userRole, isCollapsed, onTo
   ];
 
   // Filter based on user roles
-  const allowedItems = navigationItems.filter((item) => item.roles.includes(userRole));
+  const allowedItems = navigationItems.filter((item) =>
+    item.roles.includes(currentUser.role) && canUserAccessMenu(currentUser, item.id)
+  );
 
   return (
     <aside className={`${isCollapsed ? "w-16" : "w-56"} bg-dark-blue text-white flex flex-col h-full shrink-0 border-r border-secondary-blue shadow-md transition-all duration-300`}>

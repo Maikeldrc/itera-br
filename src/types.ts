@@ -223,6 +223,8 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  menu_access?: string;
+  provider_access?: string;
   active: boolean;
 }
 
