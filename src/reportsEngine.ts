@@ -163,6 +163,10 @@ function splitCpts(claim: Claim) {
   return claim.cpt_hcpcs.split(/[\s,]+/).map(value => value.trim()).filter(Boolean);
 }
 
+function textValue(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 function feeScheduleFor(
   claim: Claim,
   cptCode: string,
@@ -170,9 +174,9 @@ function feeScheduleFor(
   reportFeeSchedules: ReportFeeSchedule[]
 ) {
   const reportSchedule = reportFeeSchedules
-    .filter(item => item.active && item.cpt_hcpcs === cptCode)
-    .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
-    .find(item => !item.effective_date || item.effective_date <= claim.date_of_service_from);
+    .filter(item => item.active && textValue(item.cpt_hcpcs) === cptCode)
+    .sort((a, b) => textValue(b.effective_date).localeCompare(textValue(a.effective_date)))
+    .find(item => !item.effective_date || textValue(item.effective_date) <= claim.date_of_service_from);
   if (reportSchedule) {
     return {
       description: reportSchedule.cpt_description,
@@ -183,7 +187,7 @@ function feeScheduleFor(
 
   const year = Number(claim.date_of_service_from?.slice(0, 4)) || new Date().getFullYear();
   const month = Number(claim.date_of_service_from?.slice(5, 7)) || 1;
-  const schedule = feeSchedules.find(item => item.cpt_code === cptCode && item.year === year);
+  const schedule = feeSchedules.find(item => textValue(item.cpt_code) === cptCode && Number(item.year) === year);
   return {
     description: schedule?.description || claim.cpt_description || "",
     unitPrice: schedule ? (month <= 6 ? schedule.semester1_rate : schedule.semester2_rate) : 0,

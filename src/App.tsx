@@ -88,9 +88,11 @@ type ServiceCptOption = {
   description: string;
 };
 
-const normalizeServiceType = (value: string) => value.trim().toUpperCase();
+const toText = (value: unknown) => String(value ?? "").trim();
 
-const serviceTypeFromDescription = (description: string) => normalizeServiceType(description.split(" - ")[0] || "");
+const normalizeServiceType = (value: unknown) => toText(value).toUpperCase();
+
+const serviceTypeFromDescription = (description: unknown) => normalizeServiceType(toText(description).split(" - ")[0] || "");
 
 function LoginScreen({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) {
   const [email, setEmail] = useState("");
@@ -367,11 +369,12 @@ export default function App() {
       .filter(item => item.active !== false && item.cpt_hcpcs && item.service_type)
       .forEach(item => {
         const serviceType = normalizeServiceType(item.service_type);
-        const cpt = item.cpt_hcpcs.trim();
+        const cpt = toText(item.cpt_hcpcs);
+        const description = toText(item.cpt_description) || `${serviceType} - ${cpt}`;
         options.set(`${serviceType}:${cpt}`, {
           cpt,
           serviceType,
-          description: item.cpt_description || `${serviceType} - ${cpt}`
+          description
         });
       });
 
@@ -380,13 +383,13 @@ export default function App() {
       .forEach(item => {
         const serviceType = serviceTypeFromDescription(item.description);
         if (!serviceType) return;
-        const cpt = item.cpt_code.trim();
+        const cpt = toText(item.cpt_code);
         const key = `${serviceType}:${cpt}`;
         if (!options.has(key)) {
           options.set(key, {
             cpt,
             serviceType,
-            description: item.description
+            description: toText(item.description)
           });
         }
       });
@@ -405,19 +408,19 @@ export default function App() {
   };
 
   const isCptAllowedForService = (serviceType: string, cpt: string) => {
-    const normalizedCpt = cpt.trim();
+    const normalizedCpt = toText(cpt);
     return getCptOptionsForService(serviceType).some(option => option.cpt === normalizedCpt);
   };
 
   const getFirstAvailableCptForService = (serviceType: string, excludedCpts: string[] = []) => {
-    const excluded = new Set(excludedCpts.map(cpt => cpt.trim()).filter(Boolean));
+    const excluded = new Set(excludedCpts.map(cpt => toText(cpt)).filter(Boolean));
     return getCptOptionsForService(serviceType).find(option => !excluded.has(option.cpt))?.cpt
       || getCptOptionsForService(serviceType)[0]?.cpt
       || "";
   };
 
   const getManualClaimLineCharge = (line: NewClaimServiceLine) => {
-    const cpt = line.cpt.trim();
+    const cpt = toText(line.cpt);
     const serviceType = normalizeServiceType(line.serviceType);
     const year = Number(newDos.slice(0, 4)) || new Date().getFullYear();
     const month = Number(newDos.slice(5, 7)) || 1;
@@ -425,20 +428,20 @@ export default function App() {
     const reportSchedule = reportFeeSchedules
       .filter(item =>
         item.active !== false
-        && item.cpt_hcpcs === cpt
+        && toText(item.cpt_hcpcs) === cpt
         && normalizeServiceType(item.service_type) === serviceType
       )
-      .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
-      .find(item => !item.effective_date || item.effective_date <= newDos);
+      .sort((a, b) => toText(b.effective_date).localeCompare(toText(a.effective_date)))
+      .find(item => !item.effective_date || toText(item.effective_date) <= newDos);
     if (reportSchedule) return Number(reportSchedule.unit_price || 0);
 
     const schedule = feeSchedules.find(item =>
-      item.cpt_code === cpt
-      && item.year === year
+      toText(item.cpt_code) === cpt
+      && Number(item.year) === year
       && serviceTypeFromDescription(item.description) === serviceType
     );
     if (!schedule) return 0;
-    return Number((month >= 7 ? schedule.semester2_rate : schedule.semester1_rate).toFixed(2));
+    return Number(Number(month >= 7 ? schedule.semester2_rate : schedule.semester1_rate).toFixed(2));
   };
 
   const getNormalizedNewClaimLines = () => newClaimLines

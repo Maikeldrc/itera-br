@@ -36,6 +36,10 @@ function columnIndex(cellRef: string) {
   return letters.split("").reduce((acc, char) => acc * 26 + char.charCodeAt(0) - 64, 0) - 1;
 }
 
+function textValue(value: unknown) {
+  return String(value ?? "").trim();
+}
+
 function readZipEntries(buffer: Buffer): Record<string, Buffer> {
   const entries: Record<string, Buffer> = {};
   const eocdSig = 0x06054b50;
@@ -336,7 +340,7 @@ async function startServer() {
         const isSemester2 = month >= 7 && month <= 12;
 
         const feeSchedules = await sheetsService.getFeeSchedules();
-        const matched = feeSchedules.find(f => f.cpt_code === rawClaim.cpt_hcpcs && f.year === year);
+        const matched = feeSchedules.find(f => textValue(f.cpt_code) === textValue(rawClaim.cpt_hcpcs) && Number(f.year) === year);
         if (matched) {
           const rate = isSemester2 ? matched.semester2_rate : matched.semester1_rate;
           rawClaim.billed_charge = rate * (Number(rawClaim.units) || 1);
@@ -834,7 +838,7 @@ async function startServer() {
           }, {});
           const uniqueCodes = Object.keys(unitsByCode);
           const serviceLines = uniqueCodes.map(code => {
-            const fee = feeSchedules.find(item => item.cpt_code === code && Number(item.year) === year);
+            const fee = feeSchedules.find(item => textValue(item.cpt_code) === code && Number(item.year) === year);
             if (!fee) {
               rowErrors.push(`Fee Schedule missing for CPT ${code} year ${year}.`);
               return null;
