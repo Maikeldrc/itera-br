@@ -678,6 +678,18 @@ async function startServer() {
     }
   });
 
+  app.post("/api/payers/import-pverify", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+    try {
+      const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
+      if (rows.length === 0) {
+        return res.status(400).json({ error: "Rows are required for pVerify payer import." });
+      }
+      res.json(await sheetsService.importPverifyPayers(rows));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to import pVerify payers." });
+    }
+  });
+
   app.put("/api/payers/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
     try {
       res.json(await sheetsService.updatePayer(req.params.id, req.body));

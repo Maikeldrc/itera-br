@@ -211,6 +211,10 @@ export interface Payer {
   payer_id: string;
   payer_name: string;
   payer_type: string; // Medicare, Medicaid, Commercial, etc.
+  pverify_payer_code?: string;
+  eligibility_supported?: boolean | string;
+  claim_status_supported?: boolean | string;
+  dental_eligibility_supported?: boolean | string;
   active: boolean;
 }
 

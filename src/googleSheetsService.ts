@@ -580,6 +580,54 @@ export class GoogleSheetsService {
     return this.payers[index];
   }
 
+  public async importPverifyPayers(rows: Array<Record<string, unknown>>): Promise<{ created: number; updated: number; skipped: number; totalPayers: number }> {
+    const byId = new Map(this.payers.map(item => [String(item.payer_id || "").trim(), item]));
+    let created = 0;
+    let updated = 0;
+    let skipped = 0;
+
+    for (const row of rows) {
+      const payerCode = String(row["Payer Code"] ?? "").trim();
+      const payerName = String(row["Payer Name"] ?? "").trim();
+      if (!payerCode || !payerName) {
+        skipped++;
+        continue;
+      }
+
+      const next: Payer = {
+        payer_id: payerCode,
+        payer_name: payerName,
+        payer_type: String(row.Type ?? "").trim() || "Other",
+        pverify_payer_code: payerCode,
+        eligibility_supported: /^yes$/i.test(String(row.Eligibility ?? "").trim()),
+        claim_status_supported: /^yes$/i.test(String(row["Claim Status"] ?? "").trim()),
+        dental_eligibility_supported: /^yes$/i.test(String(row["Dental Eligibility"] ?? "").trim()),
+        active: true
+      };
+
+      if (byId.has(payerCode)) {
+        byId.set(payerCode, { ...byId.get(payerCode)!, ...next });
+        updated++;
+      } else {
+        byId.set(payerCode, next);
+        created++;
+      }
+    }
+
+    this.payers = Array.from(byId.values()).sort((a, b) => {
+      const aPverify = String(a.pverify_payer_code || "").trim();
+      const bPverify = String(b.pverify_payer_code || "").trim();
+      if (!!aPverify !== !!bPverify) return aPverify ? 1 : -1;
+      return a.payer_name.localeCompare(b.payer_name) || a.payer_id.localeCompare(b.payer_id);
+    });
+
+    if (this.isConfigured) {
+      await this.overwriteTab("Payers", PAYERS_HEADERS, this.payers.map(item => mapObjectToRow("Payers", item)));
+    }
+
+    return { created, updated, skipped, totalPayers: this.payers.length };
+  }
+
   public async deletePayer(payerId: string): Promise<void> {
     const index = this.payers.findIndex(item => item.payer_id === payerId);
     if (index === -1) throw new Error("Payer not found.");
@@ -919,7 +967,8 @@ const PROVIDERS_HEADERS = [
 ];
 
 const PAYERS_HEADERS = [
-  "payer_id", "payer_name", "payer_type", "active"
+  "payer_id", "payer_name", "payer_type", "pverify_payer_code",
+  "eligibility_supported", "claim_status_supported", "dental_eligibility_supported", "active"
 ];
 
 const USERS_HEADERS = [
@@ -974,7 +1023,7 @@ function mapRowToObject(tabName: string, headers: string[], row: string[]): any 
       obj[header] = false;
     } else if (rawVal === "") {
       obj[header] = "";
-    } else if (/^\d+(\.\d+)?$/.test(rawVal) && !["claim_id", "patient_id", "provider_npi", "npi", "check_or_eft_number", "carc_code", "rarc_code", "corrected_claim_reference"].includes(header)) {
+    } else if (/^\d+(\.\d+)?$/.test(rawVal) && !["claim_id", "patient_id", "provider_npi", "npi", "check_or_eft_number", "carc_code", "rarc_code", "corrected_claim_reference", "payer_id", "pverify_payer_code"].includes(header)) {
       obj[header] = Number(rawVal);
     } else {
       obj[header] = rawVal;

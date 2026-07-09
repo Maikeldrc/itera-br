@@ -247,6 +247,10 @@ export default function App() {
   const [payerIdInput, setPayerIdInput] = useState("");
   const [payerNameInput, setPayerNameInput] = useState("");
   const [payerTypeInput, setPayerTypeInput] = useState("Commercial");
+  const [payerPverifyCodeInput, setPayerPverifyCodeInput] = useState("");
+  const [payerEligibilityInput, setPayerEligibilityInput] = useState(false);
+  const [payerClaimStatusInput, setPayerClaimStatusInput] = useState(false);
+  const [payerDentalEligibilityInput, setPayerDentalEligibilityInput] = useState(false);
   const [payerActiveInput, setPayerActiveInput] = useState(true);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [providerSearchTerm, setProviderSearchTerm] = useState("");
@@ -917,14 +921,24 @@ export default function App() {
     setPayerIdInput("");
     setPayerNameInput("");
     setPayerTypeInput("Commercial");
+    setPayerPverifyCodeInput("");
+    setPayerEligibilityInput(false);
+    setPayerClaimStatusInput(false);
+    setPayerDentalEligibilityInput(false);
     setPayerActiveInput(true);
   };
+
+  const toBooleanFlag = (value: unknown) => value === true || String(value ?? "").toLowerCase() === "true" || String(value ?? "").toLowerCase() === "yes";
 
   const handleEditPayer = (payer: Payer) => {
     setEditingPayer(payer);
     setPayerIdInput(payer.payer_id);
     setPayerNameInput(payer.payer_name);
     setPayerTypeInput(payer.payer_type);
+    setPayerPverifyCodeInput(toText(payer.pverify_payer_code));
+    setPayerEligibilityInput(toBooleanFlag(payer.eligibility_supported));
+    setPayerClaimStatusInput(toBooleanFlag(payer.claim_status_supported));
+    setPayerDentalEligibilityInput(toBooleanFlag(payer.dental_eligibility_supported));
     setPayerActiveInput(payer.active);
   };
 
@@ -938,6 +952,10 @@ export default function App() {
       payer_id: payerIdInput.trim().toUpperCase(),
       payer_name: payerNameInput.trim(),
       payer_type: payerTypeInput.trim(),
+      pverify_payer_code: payerPverifyCodeInput.trim(),
+      eligibility_supported: payerEligibilityInput,
+      claim_status_supported: payerClaimStatusInput,
+      dental_eligibility_supported: payerDentalEligibilityInput,
       active: payerActiveInput
     };
 
@@ -2391,7 +2409,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 lg:grid-cols-[150px_1fr_180px_120px_auto]">
+                  <div className="grid gap-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4 lg:grid-cols-[140px_140px_1fr_150px_220px_120px_auto]">
                     <div>
                       <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">Payer ID</label>
                       <input
@@ -2400,6 +2418,15 @@ export default function App() {
                         onChange={(e) => setPayerIdInput(e.target.value)}
                         placeholder="PAY_06"
                         className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-mono font-bold disabled:bg-slate-100 disabled:text-slate-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">pVerify Code</label>
+                      <input
+                        value={payerPverifyCodeInput}
+                        onChange={(e) => setPayerPverifyCodeInput(e.target.value)}
+                        placeholder="00283"
+                        className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-mono font-bold"
                       />
                     </div>
                     <div>
@@ -2424,8 +2451,30 @@ export default function App() {
                         <option>Medicare Advantage</option>
                         <option>Workers Comp</option>
                         <option>Self Pay</option>
+                        <option>EDI</option>
+                        <option>Non-EDI</option>
                         <option>Other</option>
                       </select>
+                    </div>
+                    <div>
+                      <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">pVerify Support</label>
+                      <div className="grid grid-cols-3 gap-1">
+                        {[
+                          ["Elig.", payerEligibilityInput, setPayerEligibilityInput],
+                          ["Claim", payerClaimStatusInput, setPayerClaimStatusInput],
+                          ["Dental", payerDentalEligibilityInput, setPayerDentalEligibilityInput]
+                        ].map(([label, checked, setter]) => (
+                          <label key={String(label)} className="flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1.5 text-[10px] font-bold text-slate-600">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(checked)}
+                              onChange={(event) => (setter as React.Dispatch<React.SetStateAction<boolean>>)(event.target.checked)}
+                              className="h-3 w-3"
+                            />
+                            {String(label)}
+                          </label>
+                        ))}
+                      </div>
                     </div>
                     <div>
                       <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">Status</label>
@@ -2463,20 +2512,39 @@ export default function App() {
                       <thead>
                         <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider bg-slate-50 text-[10px]">
                           <th className="p-3">Payer ID</th>
+                          <th className="p-3">pVerify</th>
                           <th className="p-3">{isEnglish ? "Insurance" : "Aseguradora"}</th>
                           <th className="p-3">Type</th>
+                          <th className="p-3">Support</th>
                           <th className="p-3">Status</th>
                           <th className="p-3 text-right">{isEnglish ? "Actions" : "Acciones"}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
                         {payers
-                          .filter(payer => `${payer.payer_id} ${payer.payer_name} ${payer.payer_type}`.toLowerCase().includes(payerSearchTerm.toLowerCase()))
+                          .filter(payer => `${payer.payer_id} ${payer.payer_name} ${payer.payer_type} ${payer.pverify_payer_code || ""}`.toLowerCase().includes(payerSearchTerm.toLowerCase()))
                           .map(payer => (
                             <tr key={payer.payer_id} className="hover:bg-slate-50/60">
                               <td className="p-3 font-mono font-bold text-primary-blue">{payer.payer_id}</td>
+                              <td className="p-3 font-mono text-slate-500">{payer.pverify_payer_code || "-"}</td>
                               <td className="p-3 font-semibold text-slate-800">{payer.payer_name}</td>
                               <td className="p-3 text-slate-500">{payer.payer_type}</td>
+                              <td className="p-3">
+                                <div className="flex flex-wrap gap-1">
+                                  {[
+                                    ["ELIG", payer.eligibility_supported],
+                                    ["CLAIM", payer.claim_status_supported],
+                                    ["DENTAL", payer.dental_eligibility_supported]
+                                  ].map(([label, value]) => (
+                                    <span
+                                      key={String(label)}
+                                      className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold ${toBooleanFlag(value) ? "border-blue-200 bg-blue-50 text-blue-700" : "border-slate-200 bg-slate-50 text-slate-400"}`}
+                                    >
+                                      {String(label)}
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
                               <td className="p-3">
                                 <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${payer.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-500"}`}>
                                   {payer.active ? "Active" : "Inactive"}

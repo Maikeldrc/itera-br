@@ -97,14 +97,15 @@ const TABLES = [
     name: "Payers",
     frozenColumns: 1,
     headers: [
-      "payer_id", "payer_name", "payer_type", "active"
+      "payer_id", "payer_name", "payer_type", "pverify_payer_code",
+      "eligibility_supported", "claim_status_supported", "dental_eligibility_supported", "active"
     ],
     seedRows: [
-      ["PAY_01", "Medicare Texas (Novitas)", "Medicare", true],
-      ["PAY_02", "Blue Cross Blue Shield (BCBS)", "Commercial", true],
-      ["PAY_03", "Aetna Health", "Commercial", true],
-      ["PAY_04", "UnitedHealthcare (UHC)", "Commercial", true],
-      ["PAY_05", "Cigna Health", "Commercial", true]
+      ["PAY_01", "Medicare Texas (Novitas)", "Medicare", "", false, false, false, true],
+      ["PAY_02", "Blue Cross Blue Shield (BCBS)", "Commercial", "", false, false, false, true],
+      ["PAY_03", "Aetna Health", "Commercial", "", false, false, false, true],
+      ["PAY_04", "UnitedHealthcare (UHC)", "Commercial", "", false, false, false, true],
+      ["PAY_05", "Cigna Health", "Commercial", "", false, false, false, true]
     ]
   },
   {
