@@ -485,7 +485,7 @@ export function ClaimsTable({
           const finalAllowed = Math.max(0, line.charged - lineAdj);
           const finalPaid = actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment"
             ? Math.min(Math.max(0, linePaid || finalAllowed - linePatResp), finalAllowed)
-            : Math.max(0, finalAllowed - linePatResp);
+            : 0;
 
           return {
             ...line,
