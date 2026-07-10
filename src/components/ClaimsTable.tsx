@@ -24,11 +24,20 @@ import {
   FileText,
   Check
 } from "lucide-react";
-import { Claim, ClaimStatus, ClaimClassification, User, UserRole } from "../types";
+import { Claim, ClaimStatus, ClaimClassification, UserRole, type User as AppUser } from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
+import {
+  CARC_CATALOG,
+  RARC_CATALOG,
+  buildIssueCodes,
+  getCarcOptionsForGroup,
+  getDefaultCarcForGroup,
+  normalizeIssueCombination,
+  type IssueGroupCode
+} from "../registerIssueCoding";
 
 interface ClaimsTableProps {
   claims: Claim[];
@@ -40,7 +49,7 @@ interface ClaimsTableProps {
   onSaveServiceLineNotes?: (serviceLinesJson: string, targetClaimId?: string) => Promise<void>;
   onDeleteClaim?: (claim: Claim, reason: string) => Promise<void>;
   userRole?: UserRole | string;
-  allUsers?: User[];
+  allUsers?: AppUser[];
 }
 
 interface ServiceLineRow {
@@ -217,35 +226,6 @@ function normalizePaymentServiceLine(line: any) {
     hasSecondaryPayment: Boolean(line.hasSecondaryPayment) || secondaryPaid > 0
   };
 }
-
-const CARC_CATALOG = [
-  { code: "CO-16", description: "Claim lacks information or has submission errors." },
-  { code: "CO-18", description: "Duplicate claim or service." },
-  { code: "CO-22", description: "Coordination of Benefits (COB) issue." },
-  { code: "CO-27", description: "Expenses incurred after coverage terminated." },
-  { code: "CO-50", description: "Non-covered service; not medically necessary." },
-  { code: "CO-97", description: "Procedure/revenue code bundled/inclusive." },
-  { code: "CO-109", description: "Claim/service not covered by this payer." },
-  { code: "CO-119", description: "Benefit maximum has been reached." },
-  { code: "PR-1", description: "Deductible." },
-  { code: "PR-2", description: "Coinsurance." },
-  { code: "PR-3", description: "Copayment." },
-  { code: "PR-204", description: "Service not covered under current benefit plan." },
-  { code: "OA-18", description: "Duplicate claim/service (Other Adjustment)." },
-  { code: "OA-23", description: "Impact of prior payer adjudication." },
-  { code: "PI-204", description: "Service not covered (Payer Initiated)." },
-];
-
-const RARC_CATALOG = [
-  { code: "N105", description: "This is a Railroad Medicare claim." },
-  { code: "N781", description: "Patient is a Qualified Medicare Beneficiary (QMB). Medicaid cost-sharing limitations apply." },
-  { code: "N782", description: "Co-insurance/deductible not collectable from patient under Medicaid regulations." },
-  { code: "N783", description: "Patient responsibility must be billed to Medicaid as QMB." },
-  { code: "N115", description: "Decision based on Local Coverage Determination (LCD)." },
-  { code: "N30", description: "Patient ineligible for this service." },
-  { code: "N29", description: "Missing documentation/notes/orders." },
-  { code: "N130", description: "Consult plan benefit documents for details." },
-];
 
 const STATUS_CATEGORY_CATALOG = [
   { code: "A0", description: "Acknowledgement/Forwarded - The claim/encounter has been forwarded to the next entity." },
@@ -443,12 +423,11 @@ export function ClaimsTable({
           let nextCodes = [...(line.codes || [])];
           if (actualStatus === "Denied" || actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment") {
             if (codingMode === "advanced") {
-              denialCombinations.forEach(comb => {
-                if (comb.level === "Claim" || comb.cpt === line.cpt) {
-                  if (comb.carc) nextCodes.push(comb.carc);
-                  if (comb.rarcs) nextCodes.push(...comb.rarcs);
-                }
-              });
+              nextCodes.push(...buildIssueCodes(
+                denialCombinations
+                  .filter(comb => comb.level === "Claim" || comb.cpt === line.cpt)
+                  .map(comb => ({ groupCode: comb.groupCode, carc: comb.carc, rarcs: comb.rarcs }))
+              ));
             } else {
               // Quick Mode defaults based on internal category
               if (internalCategory === "Eligibility / Coverage") nextCodes.push("CO-16", "PR-204");
@@ -533,7 +512,10 @@ export function ClaimsTable({
       else if (actualStatus === "Pending / Additional Information Needed") targetClaimStatus = ClaimStatus.Pending;
 
       const codesSummary = codingMode === "advanced" 
-        ? denialCombinations.map(c => `${c.groupCode}-${c.carc} (${c.rarcs.join(",")})`).join("; ")
+        ? denialCombinations.map(c => {
+            const normalized = normalizeIssueCombination({ groupCode: c.groupCode, carc: c.carc, rarcs: c.rarcs });
+            return `${normalized.carc}${normalized.rarcs.length > 0 ? ` (${normalized.rarcs.join(",")})` : ""}`;
+          }).join("; ")
         : (actualStatus === "Rejected" ? `Rejection: ${rejectionData.statusCode || "Custom"}` : "Quick Issue");
       const assignedUser = getAssignedUser(nextActionData.assignedTo);
       const assignedSummary = assignedUser
@@ -1725,8 +1707,15 @@ export function ClaimsTable({
           setDenialCombinations(prev => prev.map(c => {
             if (c.id === id) {
               const updated = { ...c, [field]: value };
+              if (field === "groupCode") {
+                updated.groupCode = value as IssueGroupCode;
+                updated.carc = getDefaultCarcForGroup(updated.groupCode);
+              }
+              if (field === "carc") {
+                updated.carc = value;
+              }
               // Smart suggestions based on RARC/CARC
-              if (field === "carc" && value === "CO-109") {
+              if (updated.carc === "CO-109") {
                 setInternalCategory("Incorrect Payer");
               }
               if (field === "rarcs") {
@@ -2377,7 +2366,7 @@ export function ClaimsTable({
                                         onChange={(e) => handleUpdateCombination(comb.id, "carc", e.target.value)}
                                         className="w-full py-1 px-1 bg-white border border-slate-200 rounded text-[10px] font-bold"
                                       >
-                                        {CARC_CATALOG.map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
+                                        {getCarcOptionsForGroup(comb.groupCode).map(c => <option key={c.code} value={c.code}>{c.code}</option>)}
                                       </select>
                                     </div>
                                   </div>
