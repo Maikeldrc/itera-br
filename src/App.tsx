@@ -936,11 +936,35 @@ export default function App() {
   const handleOpenAddFeeSchedule = () => {
     setEditingFs(null);
     setFsCptCode("");
-    setFsYear(2026);
+    setFsYear(new Date().getFullYear());
     setFsSemester1Rate(0);
     setFsSemester2Rate(0);
     setFsMaxPerDos(1);
     setFsDescription("");
+    setIsFsModalOpen(true);
+  };
+
+  const nextAvailableFeeScheduleYear = (cptCode: string, startYear?: number) => {
+    const usedYears = new Set(
+      feeSchedules
+        .filter(item => String(item.cpt_code ?? "").trim() === cptCode)
+        .map(item => Number(item.year))
+        .filter(year => Number.isFinite(year))
+    );
+    let year = startYear || new Date().getFullYear();
+    while (usedYears.has(year)) year += 1;
+    return year;
+  };
+
+  const handleOpenAddFeeScheduleYear = (fs: FeeSchedule) => {
+    const cptCode = String(fs.cpt_code ?? "").trim();
+    setEditingFs(null);
+    setFsCptCode(cptCode);
+    setFsYear(nextAvailableFeeScheduleYear(cptCode, Number(fs.year) + 1));
+    setFsSemester1Rate(Number(fs.semester1_rate) || 0);
+    setFsSemester2Rate(Number(fs.semester2_rate) || 0);
+    setFsMaxPerDos(Math.max(1, Math.floor(Number(fs.max_per_dos) || 1)));
+    setFsDescription(String(fs.description ?? ""));
     setIsFsModalOpen(true);
   };
 
@@ -960,9 +984,25 @@ export default function App() {
       notify(isEnglish ? "Please enter a CPT code." : "Por favor ingresa un código CPT.", "warning");
       return;
     }
+    const normalizedCptCode = fsCptCode.trim();
+    const normalizedYear = Number(fsYear);
+    const duplicate = feeSchedules.find(item =>
+      String(item.cpt_code ?? "").trim() === normalizedCptCode &&
+      Number(item.year) === normalizedYear &&
+      (!editingFs || item.id !== editingFs.id)
+    );
+    if (duplicate) {
+      notify(
+        isEnglish
+          ? `CPT ${normalizedCptCode} already has a fee schedule for ${normalizedYear}. Edit that year instead.`
+          : `El CPT ${normalizedCptCode} ya tiene una tarifa para ${normalizedYear}. Edita ese año existente.`,
+        "warning"
+      );
+      return;
+    }
     const payload = {
-      cpt_code: fsCptCode,
-      year: Number(fsYear),
+      cpt_code: normalizedCptCode,
+      year: normalizedYear,
       semester1_rate: Number(fsSemester1Rate),
       semester2_rate: Number(fsSemester2Rate),
       max_per_dos: Math.max(1, Math.floor(Number(fsMaxPerDos) || 1)),
@@ -1524,7 +1564,8 @@ export default function App() {
       !feeScheduleSearch ||
       fs.cptCode.toLowerCase().includes(feeScheduleSearch) ||
       fs.description.toLowerCase().includes(feeScheduleSearch)
-    );
+    )
+    .sort((a, b) => a.cptCode.localeCompare(b.cptCode) || b.year - a.year);
 
   return (
     <div className="h-screen w-screen flex bg-[#e8f1f2] overflow-hidden font-sans text-slate-800">
@@ -2891,7 +2932,9 @@ export default function App() {
                       <div>
                         <h4 className="font-bold text-slate-900 text-sm">FCSO-style CPT Fee Schedules Configuration Manager</h4>
                         <p className="text-[10px] text-slate-500 mt-0.5">
-                          {isEnglish ? "Define official semester rates to automate billed charge calculation." : "Define los honorarios oficiales por cada semestre para automatizar el cálculo de cargos facturados (Billed Charge)."}
+                          {isEnglish
+                            ? "Define one rate set per CPT/year, including historical semesters for 2025, 2026 and future years."
+                            : "Define una tarifa por CPT/año, incluyendo semestres históricos de 2025, 2026 y años futuros."}
                         </p>
                       </div>
                     </div>
@@ -2941,6 +2984,13 @@ export default function App() {
                               <td className="p-3 text-slate-500 max-w-xs truncate" title={fs.description}>{fs.description || "-"}</td>
                               <td className="p-3 text-right">
                                 <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleOpenAddFeeScheduleYear(fs.source)}
+                                    className="p-1 hover:bg-blue-50 text-slate-500 hover:text-primary-blue rounded transition-colors"
+                                    title={isEnglish ? "Add another year for this CPT" : "Añadir otro año para este CPT"}
+                                  >
+                                    <Plus className="w-3.5 h-3.5" />
+                                  </button>
                                   <button
                                     onClick={() => handleOpenEditFeeSchedule(fs.source)}
                                     className="p-1 hover:bg-slate-100 text-slate-500 hover:text-slate-900 rounded transition-colors"

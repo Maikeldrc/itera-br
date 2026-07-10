@@ -957,7 +957,7 @@ async function startServer() {
       const created = await sheetsService.createFeeSchedule(req.body);
       res.status(201).json(created);
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to create fee schedule" });
+      res.status(400).json({ error: err.message || "Failed to create fee schedule" });
     }
   });
 
@@ -967,7 +967,7 @@ async function startServer() {
       const updated = await sheetsService.updateFeeSchedule(req.params.id, req.body);
       res.json(updated);
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to update fee schedule" });
+      res.status(400).json({ error: err.message || "Failed to update fee schedule" });
     }
   });
 

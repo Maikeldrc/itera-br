@@ -761,8 +761,19 @@ export class GoogleSheetsService {
   }
 
   public async createFeeSchedule(fs: FeeSchedule): Promise<FeeSchedule> {
+    const cptCode = String(fs.cpt_code ?? "").trim();
+    const year = Number(fs.year);
+    const duplicate = this.feeSchedules.find(item =>
+      String(item.cpt_code ?? "").trim() === cptCode &&
+      Number(item.year) === year
+    );
+    if (duplicate) {
+      throw new Error(`Fee schedule already exists for CPT ${cptCode} year ${year}.`);
+    }
     const fsToAdd = {
       ...fs,
+      cpt_code: cptCode,
+      year,
       id: fs.id || `FSCH-${Date.now()}`,
       max_per_dos: Math.max(1, Math.floor(Number(fs.max_per_dos) || 1))
     };
@@ -779,8 +790,20 @@ export class GoogleSheetsService {
     if (index === -1) {
       throw new Error(`Fee schedule with ID ${id} not found.`);
     }
+    const cptCode = String(updated.cpt_code ?? "").trim();
+    const year = Number(updated.year);
+    const duplicate = this.feeSchedules.find(item =>
+      item.id !== id &&
+      String(item.cpt_code ?? "").trim() === cptCode &&
+      Number(item.year) === year
+    );
+    if (duplicate) {
+      throw new Error(`Fee schedule already exists for CPT ${cptCode} year ${year}.`);
+    }
     this.feeSchedules[index] = {
       ...updated,
+      cpt_code: cptCode,
+      year,
       id,
       max_per_dos: Math.max(1, Math.floor(Number(updated.max_per_dos) || 1))
     };
