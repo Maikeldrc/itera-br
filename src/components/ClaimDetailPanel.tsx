@@ -40,16 +40,16 @@ import { validateServiceLineDetails } from "../serviceLineValidation";
 import { validateCptRepeatLimitsByLine } from "../cptRepeatLimits";
 
 const COMMON_CPT_DESCRIPTIONS: Record<string, string> = {
-  "99453": "RPM - Preparación inicial de dispositivo, educación y entrenamiento del paciente.",
-  "99454": "RPM - Suministro de dispositivo con transmisión programada diaria y grabaciones cada 30 días.",
-  "99457": "RPM - Monitoreo fisiológico remoto por personal de salud, primeros 20 minutos de revisión mensual.",
-  "99458": "RPM - Monitoreo fisiológico remoto, por cada periodo adicional de 20 minutos mensuales.",
-  "99490": "CCM - Gestión de cuidado crónico, mínimo 20 minutos de personal clínico al mes bajo dirección médica.",
-  "99439": "CCM - Gestión de cuidado crónico, periodo adicional de 20 minutos mensuales.",
-  "99491": "CCM - Gestión de cuidado crónico por médico o profesional calificado, primeros 30 minutos.",
-  "99484": "BHI - Servicios de integración de salud conductual general, 20 minutos mensuales.",
-  "99495": "TCM - Gestión de transición de cuidado médico, complejidad moderada (comunicación en 2 días, visita en 14 días).",
-  "99496": "TCM - Gestión de transición de cuidado médico, alta complejidad (comunicación en 2 días, visita en 7 días)."
+  "99453": "RPM - Initial device setup, patient education, and training.",
+  "99454": "RPM - Device supply with scheduled daily transmission and 30-day recordings.",
+  "99457": "RPM - Remote physiologic monitoring by clinical staff, first 20 minutes per month.",
+  "99458": "RPM - Remote physiologic monitoring, each additional 20-minute monthly period.",
+  "99490": "CCM - Chronic care management, at least 20 minutes of clinical staff time per month under physician direction.",
+  "99439": "CCM - Chronic care management, each additional 20-minute monthly period.",
+  "99491": "CCM - Chronic care management by physician or qualified professional, first 30 minutes.",
+  "99484": "BHI - General behavioral health integration services, 20 minutes per month.",
+  "99495": "TCM - Transitional care management, moderate complexity (communication in 2 days, visit in 14 days).",
+  "99496": "TCM - Transitional care management, high complexity (communication in 2 days, visit in 7 days)."
 };
 
 const textValue = (value: unknown) => String(value ?? "").trim();
@@ -261,13 +261,14 @@ interface EraCodePickerProps {
   compact?: boolean;
   onChange: (codes: string[]) => void;
   disabled?: boolean;
+  isEnglish?: boolean;
 }
 
 function normalizeEraCode(value: string) {
   return value.trim().toUpperCase().replace(/\s+/g, "");
 }
 
-function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = false }: EraCodePickerProps) {
+function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = false, isEnglish = true }: EraCodePickerProps) {
   const [draft, setDraft] = useState("");
   const [isExpanded, setIsExpanded] = useState(!compact);
   const normalizedCodes = codes.map(normalizeEraCode).filter(Boolean);
@@ -303,7 +304,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
       <div className="relative flex max-w-[220px] items-center gap-1">
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto whitespace-nowrap">
           {normalizedCodes.length === 0 && (
-            <span className="text-[9px] italic text-slate-400">Sin códigos</span>
+            <span className="text-[9px] italic text-slate-400">{isEnglish ? "No codes" : "Sin códigos"}</span>
           )}
           {normalizedCodes.map(code => (
             <button
@@ -312,7 +313,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
               key={code}
               onClick={() => toggleCode(code)}
               className="shrink-0 rounded border border-primary-blue bg-primary-blue px-1.5 py-0.5 font-mono text-[9px] font-bold text-white hover:border-rose-600 hover:bg-rose-600 disabled:opacity-80 disabled:hover:bg-primary-blue disabled:hover:border-primary-blue"
-              title={`${CARC_CODE_DESCRIPTIONS[code] || "Código manual"}${disabled ? "" : " - click para quitar"}`}
+              title={`${CARC_CODE_DESCRIPTIONS[code] || (isEnglish ? "Manual code" : "Código manual")}${disabled ? "" : (isEnglish ? " - click to remove" : " - click para quitar")}`}
             >
               {code} {disabled ? "" : "×"}
             </button>
@@ -323,8 +324,8 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
           type="button"
           onClick={() => setIsExpanded(value => !value)}
           className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-primary-blue hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Añadir código CARC / RARC / MA"
-          aria-label="Añadir código ERA"
+          title={isEnglish ? "Add CARC / RARC / MA code" : "Añadir código CARC / RARC / MA"}
+          aria-label={isEnglish ? "Add ERA code" : "Añadir código ERA"}
         >
           {isExpanded && !disabled ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
         </button>
@@ -335,7 +336,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
               <input
                 type="text"
                 list={datalistId}
-                placeholder="Buscar código o descripción"
+                placeholder={isEnglish ? "Search code or description" : "Buscar código o descripción"}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
@@ -384,7 +385,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
       <div className="space-y-1.5">
         <div className="flex flex-wrap gap-1">
           {normalizedCodes.length === 0 ? (
-            <span className="text-[9px] text-slate-400 italic">Sin códigos</span>
+            <span className="text-[9px] text-slate-400 italic">{isEnglish ? "No codes" : "Sin códigos"}</span>
           ) : (
             normalizedCodes.map(code => (
               <button
@@ -393,7 +394,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
                 key={code}
                 onClick={() => toggleCode(code)}
                 className="shrink-0 bg-primary-blue text-white border border-primary-blue font-mono text-[9px] px-1.5 py-0.5 rounded font-bold shadow-xs hover:bg-rose-600 hover:border-rose-600 disabled:opacity-80 disabled:hover:bg-primary-blue disabled:hover:border-primary-blue"
-                title={`${CARC_CODE_DESCRIPTIONS[code] || "Código manual"}${disabled ? "" : " - click para quitar"}`}
+                title={`${CARC_CODE_DESCRIPTIONS[code] || (isEnglish ? "Manual code" : "Código manual")}${disabled ? "" : (isEnglish ? " - click to remove" : " - click para quitar")}`}
               >
                 {code} {disabled ? "" : "×"}
               </button>
@@ -410,15 +411,15 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
               e.target.value = "";
             }}
             className="min-w-0 flex-1 border border-slate-200 rounded px-1.5 py-1 text-[9px] bg-white text-slate-600 font-semibold disabled:opacity-50"
-            aria-label="Seleccionar código ERA rápido"
+            aria-label={isEnglish ? "Select quick ERA code" : "Seleccionar código ERA rápido"}
           >
-            <option value="" disabled>Código rápido</option>
-            <optgroup label="CARC / Ajustes">
+            <option value="" disabled>{isEnglish ? "Quick code" : "Código rápido"}</option>
+            <optgroup label={isEnglish ? "CARC / Adjustments" : "CARC / Ajustes"}>
               {ERA_CODE_OPTIONS.filter(item => ["CO-45", "CO-253", "CO-97", "CO-16", "CO-18", "CO-29", "CO-50", "CO-96", "CO-197", "CO-204", "OA-23"].includes(item.code)).map(item => (
                 <option key={item.code} value={item.code}>{item.code} - {item.label}</option>
               ))}
             </optgroup>
-            <optgroup label="Responsabilidad Paciente">
+            <optgroup label={isEnglish ? "Patient Responsibility" : "Responsabilidad Paciente"}>
               {ERA_CODE_OPTIONS.filter(item => ["PR-1", "PR-2", "PR-3", "PR-27", "PR-96", "PR-119", "PR-204"].includes(item.code)).map(item => (
                 <option key={item.code} value={item.code}>{item.code} - {item.label}</option>
               ))}
@@ -434,8 +435,8 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
             type="button"
             onClick={() => setIsExpanded(value => !value)}
             className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-500 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed"
-            title={isExpanded ? "Cerrar búsqueda" : "Buscar código"}
-            aria-label={isExpanded ? "Cerrar búsqueda de código" : "Buscar código ERA"}
+            title={isExpanded ? (isEnglish ? "Close search" : "Cerrar búsqueda") : (isEnglish ? "Search code" : "Buscar código")}
+            aria-label={isExpanded ? (isEnglish ? "Close code search" : "Cerrar búsqueda de código") : (isEnglish ? "Search ERA code" : "Buscar código ERA")}
           >
             {isExpanded && !disabled ? <X className="h-3 w-3" /> : <Search className="h-3 w-3" />}
           </button>
@@ -448,7 +449,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
             <input
               type="text"
               list={datalistId}
-              placeholder="Código o descripción"
+              placeholder={isEnglish ? "Code or description" : "Código o descripción"}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
@@ -489,7 +490,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
           </div>
           {!compact && (
             <p className="text-[8px] leading-snug text-slate-400">
-              Busca por código o problema. Acepta códigos manuales del ERA aunque no estén en la lista.
+              {isEnglish ? "Search by code or issue. Manual ERA codes are accepted even when they are not listed." : "Busca por código o problema. Acepta códigos manuales del ERA aunque no estén en la lista."}
             </p>
           )}
         </div>
@@ -679,7 +680,7 @@ export function ClaimDetailPanel({
 
   const handleConfirmInsuranceChange = async () => {
     if (!newPayerIdState) {
-      notify("Por favor selecciona una aseguradora válida.", "warning");
+      notify(isEnglish ? "Please select a valid insurance payer." : "Por favor selecciona una aseguradora válida.", "warning");
       return;
     }
     if (newPayerIdState === claim.payer_id) {
@@ -688,7 +689,7 @@ export function ClaimDetailPanel({
     }
     const selectedPayer = payers.find(p => p.payer_id === newPayerIdState);
     if (!selectedPayer) {
-      notify("La aseguradora seleccionada no es válida.", "warning");
+      notify(isEnglish ? "The selected insurance payer is not valid." : "La aseguradora seleccionada no es válida.", "warning");
       return;
     }
     
@@ -703,7 +704,12 @@ export function ClaimDetailPanel({
       setIsChangingInsurance(false);
       setInsuranceChangeReason("");
       setNewMemberId("");
-      notify(`Seguro actualizado a ${selectedPayer.payer_name}. El cambio quedó registrado en el historial del claim.`, "success");
+    notify(
+      isEnglish
+        ? `Insurance updated to ${selectedPayer.payer_name}. The change was recorded in the claim history.`
+        : `Seguro actualizado a ${selectedPayer.payer_name}. El cambio quedó registrado en el historial del claim.`,
+      "success"
+    );
     } catch (err: any) {
       notify(`Error al registrar cambio de seguro: ${err.message}`, "error");
     }
@@ -971,9 +977,9 @@ export function ClaimDetailPanel({
   const deleteServiceLineNote = async (noteId: string) => {
     if (noteEditorIndex === null || isSavingServiceLineNote) return;
     const confirmed = await confirmAction({
-      title: "Eliminar nota",
-      message: "¿Eliminar esta nota de forma permanente?",
-      confirmLabel: "Eliminar nota",
+      title: isEnglish ? "Delete note" : "Eliminar nota",
+      message: isEnglish ? "Delete this note permanently?" : "¿Eliminar esta nota de forma permanente?",
+      confirmLabel: isEnglish ? "Delete note" : "Eliminar nota",
       tone: "danger"
     });
     if (!confirmed) return;
@@ -1057,7 +1063,7 @@ export function ClaimDetailPanel({
 
   const handleLogPayment = async () => {
     if (!logPaymentAmount || Number(logPaymentAmount) <= 0) {
-      notify("Registra un valor numérico positivo de cobro.", "warning");
+      notify(isEnglish ? "Enter a positive numeric payment amount." : "Registra un valor numérico positivo de cobro.", "warning");
       return;
     }
     try {
@@ -1069,7 +1075,7 @@ export function ClaimDetailPanel({
         payment_received_by: receiver,
         payment_source: logPaymentSource,
         payment_date: new Date().toISOString().split("T")[0],
-        notes: `Registrado manualmente desde el portal de conciliación.`
+        notes: isEnglish ? "Manually logged from the reconciliation portal." : "Registrado manualmente desde el portal de conciliación."
       });
       setLogPaymentAmount("");
       setLogPaymentCheck("");
@@ -1137,29 +1143,29 @@ export function ClaimDetailPanel({
   };
 
   const FIELD_LABELS: Record<string, string> = {
-    claim_status: "Estado del Claim",
-    claim_classification: "Clasificación",
-    billed_by: "Facturado por",
-    payment_received_by: "Pago recibido por",
-    billed_charge: "Charge Facturado",
-    allowed_amount: "Importe Permitido",
-    paid_amount: "Importe Pagado",
-    insurance_adjustment: "Ajuste Seguro",
-    denied_amount: "Importe Denegado",
+    claim_status: isEnglish ? "Claim Status" : "Estado del Claim",
+    claim_classification: isEnglish ? "Classification" : "Clasificación",
+    billed_by: isEnglish ? "Billed by" : "Facturado por",
+    payment_received_by: isEnglish ? "Payment received by" : "Pago recibido por",
+    billed_charge: isEnglish ? "Billed Charge" : "Charge Facturado",
+    allowed_amount: isEnglish ? "Allowed Amount" : "Importe Permitido",
+    paid_amount: isEnglish ? "Paid Amount" : "Importe Pagado",
+    insurance_adjustment: isEnglish ? "Insurance Adjustment" : "Ajuste Seguro",
+    denied_amount: isEnglish ? "Denied Amount" : "Importe Denegado",
     write_off_amount: "Write-off",
-    uncollectible_amount: "Incobrable",
-    itera_direct_collection: "Colección ITERA",
-    provider_direct_collection: "Colección Provider",
-    payment_to_physician: "Pago Médico",
-    locked: "Bloqueo Administrativo",
-    lock_reason: "Motivo de Bloqueo",
-    error_flag: "Bandera de Error",
-    error_category: "Categoría de Error",
-    correction_status: "Fase de Corrección",
-    resubmission_date: "Fecha de Re-envío",
-    corrected_claim_reference: "Referencia Claim Corregido",
-    service_lines_json: "Notas CPT / Líneas de Servicio",
-    payer_id: "🔄 Cambio de Seguro",
+    uncollectible_amount: isEnglish ? "Uncollectible" : "Incobrable",
+    itera_direct_collection: isEnglish ? "ITERA Collection" : "Colección ITERA",
+    provider_direct_collection: isEnglish ? "Provider Collection" : "Colección Provider",
+    payment_to_physician: isEnglish ? "Provider Payment" : "Pago Médico",
+    locked: isEnglish ? "Administrative Lock" : "Bloqueo Administrativo",
+    lock_reason: isEnglish ? "Lock Reason" : "Motivo de Bloqueo",
+    error_flag: isEnglish ? "Error Flag" : "Bandera de Error",
+    error_category: isEnglish ? "Error Category" : "Categoría de Error",
+    correction_status: isEnglish ? "Correction Phase" : "Fase de Corrección",
+    resubmission_date: isEnglish ? "Resubmission Date" : "Fecha de Re-envío",
+    corrected_claim_reference: isEnglish ? "Corrected Claim Reference" : "Referencia Claim Corregido",
+    service_lines_json: isEnglish ? "CPT Notes / Service Lines" : "Notas CPT / Líneas de Servicio",
+    payer_id: isEnglish ? "Insurance Change" : "🔄 Cambio de Seguro",
   };
 
   const renderClaimTimeline = (className = "") => {
@@ -1439,7 +1445,7 @@ export function ClaimDetailPanel({
             <div className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
               <span className="itera-label block">{isEnglish ? "Visit" : "Visita"}</span>
               <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-800">DOS: {claim.date_of_service_from}</span>
-              <span className="block truncate font-mono text-[9px] text-slate-400">Tipo: {claim.service_type || "N/A"}</span>
+              <span className="block truncate font-mono text-[9px] text-slate-400">{isEnglish ? "Type" : "Tipo"}: {claim.service_type || "N/A"}</span>
             </div>
           </div>
         </div>
@@ -1485,8 +1491,8 @@ export function ClaimDetailPanel({
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-4 flex gap-3 text-red-800 text-xs">
                 <Lock className="w-4 h-4 text-red-600 shrink-0 mt-0.5 animate-pulse" />
                 <div>
-                  <h5 className="font-bold uppercase tracking-wider text-rose-800">Claim Bloqueado (Locked)</h5>
-                  <p className="mt-1 font-semibold text-slate-700">{lockReason || "Este claim está bloqueado debido a errores financieros o administrativos."}</p>
+                  <h5 className="font-bold uppercase tracking-wider text-rose-800">{isEnglish ? "Claim Locked" : "Claim Bloqueado (Locked)"}</h5>
+                  <p className="mt-1 font-semibold text-slate-700">{lockReason || (isEnglish ? "This claim is locked due to financial or administrative errors." : "Este claim está bloqueado debido a errores financieros o administrativos.")}</p>
                 </div>
               </div>
             )}
@@ -1495,8 +1501,12 @@ export function ClaimDetailPanel({
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-4 flex gap-3 text-amber-800 text-xs">
                 <AlertOctagon className="w-4 h-4 text-accent-orange shrink-0 mt-0.5 animate-bounce-subtle" />
                 <div>
-                  <h5 className="font-bold uppercase tracking-wider text-amber-800">Error en Claim Detectado</h5>
-                  <p className="mt-1 font-semibold text-slate-700">Categoría: {errorCategory || "No especificado"}. Requiere corregir antes de re-facturar.</p>
+                  <h5 className="font-bold uppercase tracking-wider text-amber-800">{isEnglish ? "Claim Error Detected" : "Error en Claim Detectado"}</h5>
+                  <p className="mt-1 font-semibold text-slate-700">
+                    {isEnglish
+                      ? `Category: ${errorCategory || "Not specified"}. Requires correction before rebilling.`
+                      : `Categoría: ${errorCategory || "No especificado"}. Requiere corregir antes de re-facturar.`}
+                  </p>
                 </div>
               </div>
             )}
@@ -1516,12 +1526,14 @@ export function ClaimDetailPanel({
                 <div className="flex items-center gap-1.5">
                   <Zap className="w-4.5 h-4.5 text-amber-500 animate-pulse" />
                   <div>
-                    <h4 className="font-bold text-slate-800 text-xs">Captura de Líneas del ERA (Service Lines)</h4>
-                    <p className="text-[10px] text-slate-400">Concilia pagos primarios y secundarios de manera independiente por cada CPT.</p>
+                    <h4 className="font-bold text-slate-800 text-xs">{isEnglish ? "ERA Service Line Capture" : "Captura de Líneas del ERA (Service Lines)"}</h4>
+                    <p className="text-[10px] text-slate-400">
+                      {isEnglish ? "Reconcile primary and secondary payments independently for each CPT." : "Concilia pagos primarios y secundarios de manera independiente por cada CPT."}
+                    </p>
                   </div>
                 </div>
                 <span className="rounded-lg border border-blue-100 bg-blue-50 px-2.5 py-1 text-[9px] font-semibold text-dark-blue">
-                  Charged proviene de Billing y es solo lectura
+                  {isEnglish ? "Charged comes from Billing and is read-only" : "Charged proviene de Billing y es solo lectura"}
                 </span>
               </div>
 
@@ -1538,7 +1550,7 @@ export function ClaimDetailPanel({
                       <th className="px-3 py-3 w-52 text-right">Paid (P + S + Total)</th>
                       <th className="px-3 py-3 w-20 text-right">Balance</th>
                       <th className="px-3 py-3 w-36">EFT / Cheque #</th>
-                      <th className="px-3 py-3 w-32">Fecha Pago</th>
+                      <th className="px-3 py-3 w-32">{isEnglish ? "Payment Date" : "Fecha Pago"}</th>
                       <th className="px-3 py-3 min-w-[240px]">CARC / RARC / MA</th>
                       <th className="px-3 py-3 min-w-[170px]">Next action</th>
                       <th className="px-3 py-3 w-20 text-center">Notes</th>
@@ -1634,14 +1646,14 @@ export function ClaimDetailPanel({
                                       ? "border-blue-300 bg-blue-50 text-primary-blue"
                                       : "border-slate-200 bg-white text-slate-400 hover:border-blue-300 hover:text-primary-blue"
                                   } disabled:cursor-not-allowed disabled:opacity-50`}
-                                  title={line.hasSecondaryPayment ? "Editar payer secundario" : "Agregar pago secundario"}
-                                  aria-label={`Configurar pago secundario CPT ${line.cpt}`}
+                                  title={line.hasSecondaryPayment ? (isEnglish ? "Edit secondary payer" : "Editar payer secundario") : (isEnglish ? "Add secondary payment" : "Agregar pago secundario")}
+                                  aria-label={`${isEnglish ? "Configure secondary payment for CPT" : "Configurar pago secundario CPT"} ${line.cpt}`}
                                 >
                                   <Plus className="h-3.5 w-3.5" />
                                 </button>
                                 <span
                                   className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-1 font-mono text-[8px] font-bold text-slate-700"
-                                  title={`Primario ${formatUSD(Number(line.paid))} + secundario ${formatUSD(Number(line.secondaryPaid))}`}
+                                  title={`${isEnglish ? "Primary" : "Primario"} ${formatUSD(Number(line.paid))} + ${isEnglish ? "secondary" : "secundario"} ${formatUSD(Number(line.secondaryPaid))}`}
                                 >
                                   T {formatUSD(Number(line.paid) + Number(line.secondaryPaid))}
                                 </span>
@@ -1659,7 +1671,7 @@ export function ClaimDetailPanel({
                                 onChange={(e) => handleUpdateServiceLine(idx, "eftNumber", e.target.value)}
                                 className="w-full text-left border border-slate-200 rounded-lg py-1.5 px-2 font-mono text-[10px] font-bold bg-white focus:border-primary-blue focus:bg-blue-50/30 disabled:opacity-50 placeholder-slate-300"
                                 aria-label={`EFT CPT ${line.cpt}`}
-                                title="Número de EFT o cheque para este CPT"
+                                title={isEnglish ? "EFT or check number for this CPT" : "Número de EFT o cheque para este CPT"}
                               />
                             </td>
                             <td className="px-3 py-2.5">
@@ -1669,7 +1681,7 @@ export function ClaimDetailPanel({
                                 value={line.paymentDate || ""}
                                 onChange={(e) => handleUpdateServiceLine(idx, "paymentDate", e.target.value)}
                                 className="w-full border border-slate-200 rounded-lg py-1.5 px-2 font-mono text-[10px] bg-white focus:border-primary-blue disabled:opacity-50"
-                                aria-label={`Fecha pago CPT ${line.cpt}`}
+                                aria-label={`${isEnglish ? "Payment date CPT" : "Fecha pago CPT"} ${line.cpt}`}
                               />
                             </td>
                             <td className="px-3 py-2">
@@ -1679,6 +1691,7 @@ export function ClaimDetailPanel({
                                 compact
                                 onChange={(nextCodes) => handleUpdateServiceLine(idx, "codes", nextCodes)}
                                 disabled={isReadOnly}
+                                isEnglish={isEnglish}
                               />
                             </td>
                             <td className="px-3 py-2.5">
@@ -1699,8 +1712,8 @@ export function ClaimDetailPanel({
                                   setServiceLineNoteDraft("");
                                 }}
                                 className="relative inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:border-blue-300 hover:bg-blue-50 hover:text-primary-blue"
-                                aria-label={`Notas CPT ${line.cpt}`}
-                                title="Ver o añadir notas"
+                                aria-label={`${isEnglish ? "CPT notes" : "Notas CPT"} ${line.cpt}`}
+                                title={isEnglish ? "View or add notes" : "Ver o añadir notas"}
                               >
                                 <MessageSquareText className="h-4 w-4" />
                                 {line.notes.length > 0 && (
@@ -1742,11 +1755,11 @@ export function ClaimDetailPanel({
                 <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
                     <Sliders className="w-4 h-4 text-primary-blue" />
-                    <h5 className="font-bold text-slate-800 text-xs">Workflow & Estado</h5>
+                    <h5 className="font-bold text-slate-800 text-xs">{isEnglish ? "Workflow & Status" : "Workflow & Estado"}</h5>
                   </div>
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Estado agregado del Claim</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{isEnglish ? "Aggregated Claim Status" : "Estado agregado del Claim"}</label>
                       <select
                         value={status}
                         onChange={(e) => setStatus(e.target.value as ClaimStatus)}
@@ -1759,7 +1772,7 @@ export function ClaimDetailPanel({
                       </select>
                       <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-blue-50/70 px-2 py-1.5">
                         <span className="text-[9px] font-semibold text-slate-600">
-                          Sugerido por CPT: <strong className="text-dark-blue">{suggestedClaimStatus}</strong>
+                          {isEnglish ? "Suggested by CPT" : "Sugerido por CPT"}: <strong className="text-dark-blue">{suggestedClaimStatus}</strong>
                         </span>
                         {!statusMatchesSuggestion && !isReadOnly && (
                           <button
@@ -1767,7 +1780,7 @@ export function ClaimDetailPanel({
                             onClick={() => setStatus(suggestedClaimStatus)}
                             className="rounded-md border border-blue-200 bg-white px-2 py-0.5 text-[8px] font-bold uppercase tracking-wider text-primary-blue hover:bg-blue-100"
                           >
-                            Aplicar
+                            {isEnglish ? "Apply" : "Aplicar"}
                           </button>
                         )}
                       </div>
@@ -1775,7 +1788,7 @@ export function ClaimDetailPanel({
                         <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] font-semibold text-amber-800">
                           <div className="mb-1 flex items-center gap-1.5 font-bold">
                             <AlertOctagon className="h-3.5 w-3.5 text-amber-600" />
-                            Validación del claim
+                            {isEnglish ? "Claim validation" : "Validación del claim"}
                           </div>
                           <div className="space-y-1">
                             {claimValidationErrors.map(error => (
@@ -1787,7 +1800,7 @@ export function ClaimDetailPanel({
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Clasificación</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{isEnglish ? "Classification" : "Clasificación"}</label>
                       <select
                         value={classification}
                         onChange={(e) => setClassification(e.target.value as any)}
@@ -1808,13 +1821,13 @@ export function ClaimDetailPanel({
                 <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
                     <Shield className="w-4 h-4 text-emerald-600" />
-                    <h5 className="font-bold text-slate-800 text-xs">Aseguradora Registrada</h5>
+                    <h5 className="font-bold text-slate-800 text-xs">{isEnglish ? "Registered Insurance" : "Aseguradora Registrada"}</h5>
                   </div>
 
                   {!isChangingInsurance ? (
                     <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                       <div className="min-w-0">
-                        <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">Seguro actual</span>
+                        <span className="block text-[9px] font-bold uppercase tracking-wider text-slate-400">{isEnglish ? "Current insurance" : "Seguro actual"}</span>
                         <span className="block truncate text-[11px] font-bold text-slate-700">{claim.payer_name}</span>
                       </div>
                       <button
@@ -1825,15 +1838,15 @@ export function ClaimDetailPanel({
                         }}
                         className="shrink-0 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100"
                       >
-                        Cambiar
+                        {isEnglish ? "Change" : "Cambiar"}
                       </button>
                     </div>
                   ) : (
                     <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-2 text-xs">
                       <div className="font-bold text-slate-700 text-[11px] flex items-center justify-between">
-                        <span>Reportar Cambio de Seguro</span>
+                        <span>{isEnglish ? "Report Insurance Change" : "Reportar Cambio de Seguro"}</span>
                         <button type="button" onClick={() => setIsChangingInsurance(false)} className="text-slate-400 hover:text-slate-600 font-bold">
-                          Cancelar
+                          {isEnglish ? "Cancel" : "Cancelar"}
                         </button>
                       </div>
                       <select
@@ -1841,11 +1854,11 @@ export function ClaimDetailPanel({
                         onChange={(e) => setNewPayerIdState(e.target.value)}
                         className="w-full p-1.5 border border-slate-200 bg-white rounded font-medium text-slate-700 text-xs cursor-pointer"
                       >
-                        <option value="">-- Seleccionar Nuevo --</option>
+                        <option value="">{isEnglish ? "-- Select New --" : "-- Seleccionar Nuevo --"}</option>
                         {payers.map(p => <option key={p.payer_id} value={p.payer_id}>{p.payer_name}</option>)}
                       </select>
                       <textarea
-                        placeholder="Motivo del cambio de cobertura..."
+                        placeholder={isEnglish ? "Coverage change reason..." : "Motivo del cambio de cobertura..."}
                         value={insuranceChangeReason}
                         onChange={(e) => setInsuranceChangeReason(e.target.value)}
                         className="w-full p-1.5 border border-slate-200 bg-white rounded text-xs h-10 resize-none"
@@ -1855,7 +1868,7 @@ export function ClaimDetailPanel({
                         onClick={handleConfirmInsuranceChange}
                         className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-1.5 rounded-lg text-center shadow-xs transition-colors cursor-pointer text-xs"
                       >
-                        Aplicar Cambio y Dejar Traza
+                        {isEnglish ? "Apply Change and Leave Audit Trail" : "Aplicar Cambio y Dejar Traza"}
                       </button>
                     </div>
                   )}
@@ -1868,12 +1881,12 @@ export function ClaimDetailPanel({
                 <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3 flex-1 min-h-[258px]">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
                     <Calendar className="w-4 h-4 text-primary-blue" />
-                    <h5 className="font-bold text-slate-800 text-xs">Pago y Depósito ERA</h5>
+                    <h5 className="font-bold text-slate-800 text-xs">{isEnglish ? "ERA Payment and Deposit" : "Pago y Depósito ERA"}</h5>
                   </div>
                   
                   <div className="space-y-3 text-xs">
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase">¿Recibió ERA / EOB?</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase">{isEnglish ? "ERA / EOB Received?" : "¿Recibió ERA / EOB?"}</label>
                       <div className="flex gap-2 mt-1">
                         <button
                           type="button"
@@ -1884,7 +1897,7 @@ export function ClaimDetailPanel({
                               : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
                           }`}
                         >
-                          Sí, ERA
+                          {isEnglish ? "Yes, ERA" : "Sí, ERA"}
                         </button>
                         <button
                           type="button"
@@ -1902,7 +1915,7 @@ export function ClaimDetailPanel({
 
                     <div className="grid grid-cols-2 gap-2">
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Cheque / EFT #</label>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{isEnglish ? "Check / EFT #" : "Cheque / EFT #"}</label>
                         <input
                           type="text"
                           placeholder="EFT-483829"
@@ -1912,7 +1925,7 @@ export function ClaimDetailPanel({
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Fecha de Pago</label>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{isEnglish ? "Payment Date" : "Fecha de Pago"}</label>
                         <input
                           type="date"
                           value={paymentDate}
@@ -1923,16 +1936,16 @@ export function ClaimDetailPanel({
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Receptor de Cobro</label>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">{isEnglish ? "Payment Receiver" : "Receptor de Cobro"}</label>
                       <select
                         value={paymentReceivedBy}
                         onChange={(e) => setPaymentReceivedBy(e.target.value as any)}
                         className="w-full p-1.5 border border-slate-200 rounded font-semibold text-slate-700 bg-slate-50 text-xs cursor-pointer"
                       >
-                        <option value="ITERA">ITERA (Banco de ITERA)</option>
-                        <option value="Provider">Provider (Directo en Clínica)</option>
-                        <option value="Split">Split (Monto dividido)</option>
-                        <option value="Unknown">Unknown (Sin clasificar)</option>
+                        <option value="ITERA">{isEnglish ? "ITERA (ITERA Bank)" : "ITERA (Banco de ITERA)"}</option>
+                        <option value="Provider">{isEnglish ? "Provider (Direct to Clinic)" : "Provider (Directo en Clínica)"}</option>
+                        <option value="Split">{isEnglish ? "Split (Divided Amount)" : "Split (Monto dividido)"}</option>
+                        <option value="Unknown">{isEnglish ? "Unknown (Unclassified)" : "Unknown (Sin clasificar)"}</option>
                       </select>
                     </div>
                   </div>
@@ -1945,12 +1958,12 @@ export function ClaimDetailPanel({
                 <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3 flex flex-col h-full">
                   <div className="flex items-center gap-1.5 border-b border-slate-100 pb-2">
                     <FileText className="w-4 h-4 text-primary-blue" />
-                    <h5 className="font-bold text-slate-800 text-xs">Notas de Seguimiento</h5>
+                    <h5 className="font-bold text-slate-800 text-xs">{isEnglish ? "Follow-up Notes" : "Notas de Seguimiento"}</h5>
                   </div>
 
                   <div className="space-y-2 text-xs">
                     <textarea
-                      placeholder="Escribe una observación del ERA..."
+                      placeholder={isEnglish ? "Write an ERA observation..." : "Escribe una observación del ERA..."}
                       value={newNoteText}
                       onChange={(e) => setNewNoteText(e.target.value)}
                       className="w-full p-2 border border-slate-200 rounded text-xs h-16 resize-none focus:ring-1 focus:ring-primary-blue bg-slate-50/50"
@@ -1962,14 +1975,14 @@ export function ClaimDetailPanel({
                         disabled={!newNoteText.trim()}
                         className="bg-primary-blue hover:bg-secondary-blue disabled:opacity-50 text-white font-bold px-3 py-1 rounded-lg text-[11px] transition-all cursor-pointer"
                       >
-                        Anotar
+                        {isEnglish ? "Add note" : "Anotar"}
                       </button>
                     </div>
                   </div>
 
                   <div className="flex-1 overflow-y-auto space-y-2 pt-2 border-t border-slate-100 mt-2 max-h-[160px] min-h-[110px]">
                     {filteredNotes.length === 0 ? (
-                      <p className="text-[10px] italic text-slate-400 text-center py-4">Sin anotaciones de seguimiento en este claim.</p>
+                      <p className="text-[10px] italic text-slate-400 text-center py-4">{isEnglish ? "No follow-up notes for this claim." : "Sin anotaciones de seguimiento en este claim."}</p>
                     ) : (
                       filteredNotes.map((n) => (
                         <div key={n.note_id} className="bg-slate-50 p-2 rounded border border-slate-200 text-[10px] leading-relaxed">
@@ -2008,8 +2021,8 @@ export function ClaimDetailPanel({
               <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex gap-3 text-red-800 text-xs">
                 <Lock className="w-4 h-4 text-red-600 shrink-0 mt-0.5 animate-pulse" />
                 <div>
-                  <h5 className="font-bold uppercase tracking-wider text-rose-800">Claim Bloqueado (Locked)</h5>
-                  <p className="mt-1 font-semibold text-slate-700">{lockReason || "Este claim está bloqueado debido a errores financieros o administrativos."}</p>
+                  <h5 className="font-bold uppercase tracking-wider text-rose-800">{isEnglish ? "Claim Locked" : "Claim Bloqueado (Locked)"}</h5>
+                  <p className="mt-1 font-semibold text-slate-700">{lockReason || (isEnglish ? "This claim is locked due to financial or administrative errors." : "Este claim está bloqueado debido a errores financieros o administrativos.")}</p>
                 </div>
               </div>
             )}
@@ -2018,8 +2031,12 @@ export function ClaimDetailPanel({
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex gap-3 text-amber-800 text-xs">
                 <AlertOctagon className="w-4 h-4 text-accent-orange shrink-0 mt-0.5 animate-bounce-subtle" />
                 <div>
-                  <h5 className="font-bold uppercase tracking-wider text-amber-800">Error en Claim Detectado</h5>
-                  <p className="mt-1 font-semibold text-slate-700">Categoría: {errorCategory || "No especificado"}. Requiere corregir antes de re-facturar.</p>
+                  <h5 className="font-bold uppercase tracking-wider text-amber-800">{isEnglish ? "Claim Error Detected" : "Error en Claim Detectado"}</h5>
+                  <p className="mt-1 font-semibold text-slate-700">
+                    {isEnglish
+                      ? `Category: ${errorCategory || "Not specified"}. Requires correction before rebilling.`
+                      : `Categoría: ${errorCategory || "No especificado"}. Requiere corregir antes de re-facturar.`}
+                  </p>
                 </div>
               </div>
             )}
@@ -2044,7 +2061,7 @@ export function ClaimDetailPanel({
                   <span className="font-bold text-slate-700 font-mono">{claim.provider_npi}</span>
                 </div>
                 <div>
-                  <span className="block text-slate-400 font-mono">Aseguradora (Payer)</span>
+                  <span className="block text-slate-400 font-mono">{isEnglish ? "Insurance (Payer)" : "Aseguradora (Payer)"}</span>
                   <span className="font-bold text-slate-700">{claim.payer_name}</span>
                 </div>
                 <div>
@@ -2060,7 +2077,7 @@ export function ClaimDetailPanel({
               {/* Owner assignment inputs */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-100">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 mb-1">Facturado por (Billed Owner)</label>
+                  <label className="block text-xs font-semibold text-slate-500 mb-1">{isEnglish ? "Billed by (Owner)" : "Facturado por (Billed Owner)"}</label>
                   <select
                     disabled={isReadOnly}
                     value={billedBy}
@@ -2094,12 +2111,12 @@ export function ClaimDetailPanel({
                 <div className="flex items-center gap-2">
                   <Coins className="w-4.5 h-4.5 text-primary-blue" />
                   <div>
-                    <h4 className="font-bold text-slate-800 text-sm">Líneas de Servicio a nivel de Código CPT</h4>
-                    <p className="text-[10px] text-slate-400">Edición en lote y desglose por código para la conciliación rápida del claim.</p>
+                    <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "CPT-Level Service Lines" : "Líneas de Servicio a nivel de Código CPT"}</h4>
+                    <p className="text-[10px] text-slate-400">{isEnglish ? "Bulk editing and code-level detail for quick claim reconciliation." : "Edición en lote y desglose por código para la conciliación rápida del claim."}</p>
                   </div>
                 </div>
                 <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-mono font-bold">
-                  {serviceLines.length} {serviceLines.length === 1 ? "Línea" : "Líneas"}
+                  {serviceLines.length} {isEnglish ? (serviceLines.length === 1 ? "Line" : "Lines") : (serviceLines.length === 1 ? "Línea" : "Líneas")}
                 </span>
               </div>
 
@@ -2109,15 +2126,15 @@ export function ClaimDetailPanel({
                     <tr className="border-b border-slate-200 text-slate-400 font-bold uppercase tracking-wider bg-slate-50 text-[9px]">
                       <th className="p-2">CPT Code</th>
                       <th className="p-2 w-28">Status</th>
-                      <th className="p-2 text-right w-24">Facturado (Billed)</th>
+                      <th className="p-2 text-right w-24">{isEnglish ? "Billed" : "Facturado (Billed)"}</th>
                       <th className="p-2 text-right w-24">Permitido (Allowed)</th>
-                      <th className="p-2 text-right w-20">Ajuste (Adj)</th>
+                      <th className="p-2 text-right w-20">{isEnglish ? "Adjustment" : "Ajuste (Adj)"}</th>
                       <th className="p-2 text-right w-20">Resp. Pat.</th>
-                      <th className="p-2 text-right w-48">Pagado (P + S + Total)</th>
+                      <th className="p-2 text-right w-48">{isEnglish ? "Paid (P + S + Total)" : "Pagado (P + S + Total)"}</th>
                       <th className="p-2 text-right w-20">Balance</th>
                       <th className="p-2 w-36">EFT / Cheque #</th>
-                      <th className="p-2 w-28">Fecha Pago</th>
-                      <th className="p-2 w-48">Códigos ERA / CARC</th>
+                      <th className="p-2 w-28">{isEnglish ? "Payment Date" : "Fecha Pago"}</th>
+                      <th className="p-2 w-48">{isEnglish ? "ERA / CARC Codes" : "Códigos ERA / CARC"}</th>
                       <th className="p-2 w-40">Next Action</th>
                       <th className="p-2 w-16 text-center">Notes</th>
                     </tr>
@@ -2125,7 +2142,7 @@ export function ClaimDetailPanel({
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {serviceLines.map((line, idx) => {
                       const fsEntry = feeSchedules?.find(fs => fs.cpt_code === line.cpt);
-                      const desc = fsEntry?.description || COMMON_CPT_DESCRIPTIONS[line.cpt] || "Servicio médico asociado.";
+                      const desc = fsEntry?.description || COMMON_CPT_DESCRIPTIONS[line.cpt] || (isEnglish ? "Associated medical service." : "Servicio médico asociado.");
                       const lineValidationErrors = showValidationErrors ? serviceLineErrors[idx] || [] : [];
                       
                       return (
@@ -2202,7 +2219,7 @@ export function ClaimDetailPanel({
                                     value={line.paid}
                                     onChange={(e) => handleUpdateServiceLine(idx, "paid", e.target.value)}
                                     className="w-[4.5rem] rounded border border-emerald-200 bg-emerald-50/40 py-1 pl-5 pr-1.5 text-right font-mono text-xs font-bold text-emerald-700 focus:bg-white"
-                                    title="Pago del payer primario"
+                                    title={isEnglish ? "Primary payer payment" : "Pago del payer primario"}
                                   />
                                 </div>
                                 {line.hasSecondaryPayment && (
@@ -2214,7 +2231,7 @@ export function ClaimDetailPanel({
                                       value={line.secondaryPaid}
                                       onChange={(e) => handleUpdateServiceLine(idx, "secondaryPaid", e.target.value)}
                                       className="w-[4.5rem] rounded border border-blue-200 bg-blue-50/50 py-1 pl-5 pr-1.5 text-right font-mono text-xs font-bold text-primary-blue focus:bg-white"
-                                      title="Pago del payer secundario"
+                                      title={isEnglish ? "Secondary payer payment" : "Pago del payer secundario"}
                                     />
                                   </div>
                                 )}
@@ -2226,14 +2243,14 @@ export function ClaimDetailPanel({
                                       ? "border-blue-300 bg-blue-50 text-primary-blue"
                                       : "border-slate-200 bg-white text-slate-400 hover:border-blue-300 hover:text-primary-blue"
                                   }`}
-                                  title={line.hasSecondaryPayment ? "Editar payer secundario" : "Agregar pago secundario"}
-                                  aria-label={`Configurar pago secundario CPT ${line.cpt}`}
+                                  title={line.hasSecondaryPayment ? (isEnglish ? "Edit secondary payer" : "Editar payer secundario") : (isEnglish ? "Add secondary payment" : "Agregar pago secundario")}
+                                  aria-label={`${isEnglish ? "Configure secondary payment for CPT" : "Configurar pago secundario CPT"} ${line.cpt}`}
                                 >
                                   <Plus className="h-3.5 w-3.5" />
                                 </button>
                                 <span
                                   className="rounded border border-slate-200 bg-slate-50 px-1.5 py-1 font-mono text-[9px] font-bold text-slate-700"
-                                  title={`Primario ${formatUSD(Number(line.paid))} + secundario ${formatUSD(Number(line.secondaryPaid))}`}
+                                  title={`${isEnglish ? "Primary" : "Primario"} ${formatUSD(Number(line.paid))} + ${isEnglish ? "secondary" : "secundario"} ${formatUSD(Number(line.secondaryPaid))}`}
                                 >
                                   T {formatUSD(Number(line.paid) + Number(line.secondaryPaid))}
                                 </span>
@@ -2255,7 +2272,7 @@ export function ClaimDetailPanel({
                                 value={line.eftNumber || ""}
                                 onChange={(e) => handleUpdateServiceLine(idx, "eftNumber", e.target.value)}
                                 className="w-full text-left border border-slate-200 rounded p-1 font-mono text-[10px] font-bold bg-white focus:border-primary-blue"
-                                title="Número de EFT o cheque para este CPT"
+                                title={isEnglish ? "EFT or check number for this CPT" : "Número de EFT o cheque para este CPT"}
                               />
                             )}
                           </td>
@@ -2294,6 +2311,7 @@ export function ClaimDetailPanel({
                                 lineKey={`detail-${idx}`}
                                 compact
                                 onChange={(nextCodes) => handleUpdateServiceLine(idx, "codes", nextCodes)}
+                                isEnglish={isEnglish}
                               />
                             )}
                           </td>
@@ -2315,7 +2333,7 @@ export function ClaimDetailPanel({
                                 setServiceLineNoteDraft("");
                               }}
                               className="relative inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-blue-50 hover:text-primary-blue"
-                              aria-label={`Notas CPT ${line.cpt}`}
+                              aria-label={`${isEnglish ? "CPT notes" : "Notas CPT"} ${line.cpt}`}
                             >
                               <MessageSquareText className="h-4 w-4" />
                               {line.notes.length > 0 && (
@@ -2351,13 +2369,13 @@ export function ClaimDetailPanel({
               <div className="bg-blue-50/40 p-3 rounded-lg border border-blue-100/30 flex gap-2.5 text-[10px] text-slate-600">
                 <Info className="w-4 h-4 text-primary-blue shrink-0 mt-0.5" />
                 <div>
-                  <span className="font-bold text-slate-800">Cálculo de Honorarios Oficiales FCSO:</span> Este claim fue prestado en el mes <span className="font-mono font-bold">{claim.month_of_service}</span> (Semestre {claim.date_of_service_from ? (parseInt(claim.date_of_service_from.split("-")[1], 10) <= 6 ? "1" : "2") : "1"}).
+                  <span className="font-bold text-slate-800">{isEnglish ? "Official FCSO Fee Calculation:" : "Cálculo de Honorarios Oficiales FCSO:"}</span> {isEnglish ? "This claim was rendered in month" : "Este claim fue prestado en el mes"} <span className="font-mono font-bold">{claim.month_of_service}</span> ({isEnglish ? "Semester" : "Semestre"} {claim.date_of_service_from ? (parseInt(claim.date_of_service_from.split("-")[1], 10) <= 6 ? "1" : "2") : "1"}).
                   {serviceLines.map((line) => {
                     const fsEntry = feeSchedules?.find(fs => fs.cpt_code === line.cpt);
                     if (fsEntry) {
                       return (
                         <div key={line.cpt} className="mt-1 font-semibold text-slate-700">
-                          • Tarifa CPT {line.cpt}: Semestre 1 (${fsEntry.semester1_rate.toFixed(2)}) / Semestre 2 (${fsEntry.semester2_rate.toFixed(2)}). Cargo Facturado Esperado: ${(claim.date_of_service_from && parseInt(claim.date_of_service_from.split("-")[1], 10) <= 6 ? fsEntry.semester1_rate : fsEntry.semester2_rate).toFixed(2)}.
+                          • {isEnglish ? "CPT Fee" : "Tarifa CPT"} {line.cpt}: {isEnglish ? "Semester" : "Semestre"} 1 (${fsEntry.semester1_rate.toFixed(2)}) / {isEnglish ? "Semester" : "Semestre"} 2 (${fsEntry.semester2_rate.toFixed(2)}). {isEnglish ? "Expected Billed Charge" : "Cargo Facturado Esperado"}: ${(claim.date_of_service_from && parseInt(claim.date_of_service_from.split("-")[1], 10) <= 6 ? fsEntry.semester1_rate : fsEntry.semester2_rate).toFixed(2)}.
                         </div>
                       );
                     }
@@ -2372,15 +2390,15 @@ export function ClaimDetailPanel({
               <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5 mb-4">
                 <Coins className="w-4.5 h-4.5 text-primary-blue" />
                 <div>
-                  <h4 className="font-bold text-slate-800 text-sm">Valores de Conciliación</h4>
-                  <p className="text-[10px] text-slate-400">Edita solo los valores que requieran override manual.</p>
+                  <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Reconciliation Values" : "Valores de Conciliación"}</h4>
+                  <p className="text-[10px] text-slate-400">{isEnglish ? "Edit only values that require a manual override." : "Edita solo los valores que requieran override manual."}</p>
                 </div>
               </div>
 
               {/* Editable values for Billing / Reconciliation Staff */}
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 text-xs">
                 <div>
-                  <label className="block text-slate-500 font-mono mb-1">Cargo Facturado ($)</label>
+                  <label className="block text-slate-500 font-mono mb-1">{isEnglish ? "Billed Charge ($)" : "Cargo Facturado ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2390,7 +2408,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-mono mb-1">Permitido Aseguradora ($)</label>
+                  <label className="block text-slate-500 font-mono mb-1">{isEnglish ? "Insurance Allowed ($)" : "Permitido Aseguradora ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2400,7 +2418,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-mono mb-1">Pagado ($)</label>
+                  <label className="block text-slate-500 font-mono mb-1">{isEnglish ? "Paid ($)" : "Pagado ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2410,7 +2428,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-mono mb-1">Ajuste Contractual ($)</label>
+                  <label className="block text-slate-400 font-mono mb-1">{isEnglish ? "Contractual Adjustment ($)" : "Ajuste Contractual ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2420,7 +2438,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-rose-500/80 font-mono mb-1">Denegado (Denial) ($)</label>
+                  <label className="block text-rose-500/80 font-mono mb-1">{isEnglish ? "Denied ($)" : "Denegado (Denial) ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2430,7 +2448,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-mono mb-1">Castigo (Write-off) ($)</label>
+                  <label className="block text-slate-400 font-mono mb-1">{isEnglish ? "Write-off ($)" : "Castigo (Write-off) ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2440,7 +2458,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-mono mb-1">Incobrable (Uncollectible) ($)</label>
+                  <label className="block text-slate-400 font-mono mb-1">{isEnglish ? "Uncollectible ($)" : "Incobrable (Uncollectible) ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2450,7 +2468,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-blue-600 font-mono mb-1">Cobro Directo ITERA ($)</label>
+                  <label className="block text-blue-600 font-mono mb-1">{isEnglish ? "ITERA Direct Collection ($)" : "Cobro Directo ITERA ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2460,7 +2478,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-sky-600 font-mono mb-1">Cobro Directo Médico ($)</label>
+                  <label className="block text-sky-600 font-mono mb-1">{isEnglish ? "Provider Direct Collection ($)" : "Cobro Directo Médico ($)"}</label>
                   <input
                     type="number"
                     disabled={isReadOnly}
@@ -2473,7 +2491,7 @@ export function ClaimDetailPanel({
 
               {/* Physician Payout override field */}
               <div className="pt-4 border-t border-slate-100 mt-4">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">PAGO DIRECTO EFECTUADO AL MÉDICO (Payment to Physician) ($)</label>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">{isEnglish ? "DIRECT PAYMENT MADE TO PROVIDER ($)" : "PAGO DIRECTO EFECTUADO AL MÉDICO (Payment to Physician) ($)"}</label>
                 <div className="flex gap-3">
                   <input
                     type="number"
@@ -2483,7 +2501,7 @@ export function ClaimDetailPanel({
                     className="p-1.5 border border-slate-200 rounded bg-slate-50 font-mono text-xs w-48 font-semibold text-dark-blue"
                   />
                   <div className="text-[10px] text-slate-500 self-center">
-                    Ajuste manual de distribución de ingresos. El saldo final (Ending A/P) recalculará automáticamente restando este pago.
+                    {isEnglish ? "Manual revenue distribution adjustment. The ending A/P balance recalculates automatically after subtracting this payment." : "Ajuste manual de distribución de ingresos. El saldo final (Ending A/P) recalculará automáticamente restando este pago."}
                   </div>
                 </div>
               </div>
@@ -2493,36 +2511,36 @@ export function ClaimDetailPanel({
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
                 <FileCheck className="w-4.5 h-4.5 text-primary-blue" />
-                <h4 className="font-bold text-slate-800 text-sm">Información de Pago / ERA / EOB</h4>
+                <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Payment / ERA / EOB Information" : "Información de Pago / ERA / EOB"}</h4>
               </div>
               
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div>
-                  <label className="block text-slate-500 mb-1">ERA Recibido</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "ERA Received" : "ERA Recibido"}</label>
                   <select
                     disabled={isReadOnly}
                     value={eraReceived}
                     onChange={(e) => setEraReceived(e.target.value as any)}
                     className="w-full p-1.5 border border-slate-200 rounded bg-slate-50"
                   >
-                    <option value="Yes">Sí (Yes)</option>
+                    <option value="Yes">{isEnglish ? "Yes" : "Sí (Yes)"}</option>
                     <option value="No">No (No)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1">EOB Recibido</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "EOB Received" : "EOB Recibido"}</label>
                   <select
                     disabled={isReadOnly}
                     value={eobReceived}
                     onChange={(e) => setEobReceived(e.target.value as any)}
                     className="w-full p-1.5 border border-slate-200 rounded bg-slate-50"
                   >
-                    <option value="Yes">Sí (Yes)</option>
+                    <option value="Yes">{isEnglish ? "Yes" : "Sí (Yes)"}</option>
                     <option value="No">No (No)</option>
                   </select>
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1">Fecha de Pago</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Payment Date" : "Fecha de Pago"}</label>
                   <input
                     type="date"
                     disabled={isReadOnly}
@@ -2532,7 +2550,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 mb-1">Cheque / EFT #</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Check / EFT #" : "Cheque / EFT #"}</label>
                   <input
                     type="text"
                     disabled={isReadOnly}
@@ -2568,7 +2586,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div className="col-span-1 sm:col-span-3">
-                  <label className="block text-slate-500 mb-1">Detalle / Motivo de Denegación (Payer Notes)</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Denial Detail / Reason (Payer Notes)" : "Detalle / Motivo de Denegación (Payer Notes)"}</label>
                   <input
                     type="text"
                     disabled={isReadOnly}
@@ -2585,7 +2603,7 @@ export function ClaimDetailPanel({
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
                 <Wrench className="w-4.5 h-4.5 text-primary-blue" />
-                <h4 className="font-bold text-slate-800 text-sm">Flujo de Corrección y Resubmissions</h4>
+                <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Correction and Resubmission Workflow" : "Flujo de Corrección y Resubmissions"}</h4>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
@@ -2598,7 +2616,7 @@ export function ClaimDetailPanel({
                     id="chk-error-flag"
                     className="rounded border-slate-300 text-primary-blue h-4 w-4"
                   />
-                  <label htmlFor="chk-error-flag" className="font-semibold text-slate-700 cursor-pointer">Marcar con Error</label>
+                  <label htmlFor="chk-error-flag" className="font-semibold text-slate-700 cursor-pointer">{isEnglish ? "Mark as Error" : "Marcar con Error"}</label>
                 </div>
 
                 <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
@@ -2610,11 +2628,11 @@ export function ClaimDetailPanel({
                     id="chk-lock-flag"
                     className="rounded border-slate-300 text-primary-blue h-4 w-4"
                   />
-                  <label htmlFor="chk-lock-flag" className="font-semibold text-slate-700 cursor-pointer">Bloquear Claim (Locked)</label>
+                  <label htmlFor="chk-lock-flag" className="font-semibold text-slate-700 cursor-pointer">{isEnglish ? "Lock Claim" : "Bloquear Claim (Locked)"}</label>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">Categoría del Error</label>
+                  <label className="block text-[11px] font-semibold text-slate-500 mb-1">{isEnglish ? "Error Category" : "Categoría del Error"}</label>
                   <select
                     disabled={isReadOnly}
                     value={errorCategory}
@@ -2631,11 +2649,11 @@ export function ClaimDetailPanel({
 
               {locked && (
                 <div>
-                  <label className="block text-xs font-semibold text-rose-600 mb-1">Motivo de Bloqueo Administrativo</label>
+                  <label className="block text-xs font-semibold text-rose-600 mb-1">{isEnglish ? "Administrative Lock Reason" : "Motivo de Bloqueo Administrativo"}</label>
                   <input
                     type="text"
                     disabled={isReadOnly}
-                    placeholder="Especifica por qué queda congelada la conciliación..."
+                    placeholder={isEnglish ? "Specify why reconciliation is locked..." : "Especifica por qué queda congelada la conciliación..."}
                     value={lockReason}
                     onChange={(e) => setLockReason(e.target.value)}
                     className="w-full p-2 border border-red-200 bg-rose-50/10 text-xs rounded-lg font-semibold text-slate-800"
@@ -2645,7 +2663,7 @@ export function ClaimDetailPanel({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs pt-3 border-t border-slate-100">
                 <div>
-                  <label className="block text-slate-500 mb-1">Fase de Corrección</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Correction Phase" : "Fase de Corrección"}</label>
                   <select
                     disabled={isReadOnly}
                     value={correctionStatus}
@@ -2653,7 +2671,7 @@ export function ClaimDetailPanel({
                     className="w-full p-2 border border-slate-200 rounded-lg bg-slate-50 text-slate-700"
                   >
                     <option value="">Sin Cambios</option>
-                    <option value="Pending">Pendiente de Revisión</option>
+                    <option value="Pending">{isEnglish ? "Pending Review" : "Pendiente de Revisión"}</option>
                     <option value="Corrected">Corregido</option>
                     <option value="Ready to Rebill">Listo para Re-facturar</option>
                     <option value="Resubmitted">Re-presentado a Payer (Resubmitted)</option>
@@ -2661,7 +2679,7 @@ export function ClaimDetailPanel({
                 </div>
 
                 <div>
-                  <label className="block text-slate-500 mb-1">Fecha de Re-envío</label>
+                  <label className="block text-slate-500 mb-1">{isEnglish ? "Resubmission Date" : "Fecha de Re-envío"}</label>
                   <input
                     type="date"
                     disabled={isReadOnly}
@@ -2693,15 +2711,15 @@ export function ClaimDetailPanel({
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                 <Coins className="w-4.5 h-4.5 text-primary-blue" />
-                <h4 className="font-bold text-slate-800 text-xs">Registrar Cobro Real (Payment Recieved)</h4>
+                <h4 className="font-bold text-slate-800 text-xs">{isEnglish ? "Log Actual Payment Received" : "Registrar Cobro Real (Payment Recieved)"}</h4>
               </div>
               <p className="text-[10px] text-slate-500 leading-relaxed">
-                Agrega cobros recibidos de aseguradoras o copagos de forma directa a la cuenta de conciliación de este claim.
+                {isEnglish ? "Add insurer payments or patient copays directly to this claim reconciliation account." : "Agrega cobros recibidos de aseguradoras o copagos de forma directa a la cuenta de conciliación de este claim."}
               </p>
               
               <div className="space-y-2.5 text-xs">
                 <div>
-                  <label className="block text-slate-500 font-mono text-[10px] mb-0.5">Monto del Depósito ($)</label>
+                  <label className="block text-slate-500 font-mono text-[10px] mb-0.5">{isEnglish ? "Deposit Amount ($)" : "Monto del Depósito ($)"}</label>
                   <input
                     disabled={isReadOnly}
                     type="number"
@@ -2712,7 +2730,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 font-mono text-[10px] mb-0.5">EFT / Cheque Código de Referencia</label>
+                  <label className="block text-slate-500 font-mono text-[10px] mb-0.5">{isEnglish ? "EFT / Check Reference Code" : "EFT / Cheque Código de Referencia"}</label>
                   <input
                     disabled={isReadOnly}
                     type="text"
@@ -2723,7 +2741,7 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-500 text-[10px] mb-0.5">Canal de Cobro</label>
+                  <label className="block text-slate-500 text-[10px] mb-0.5">{isEnglish ? "Payment Channel" : "Canal de Cobro"}</label>
                   <select
                     disabled={isReadOnly}
                     value={logPaymentSource}
@@ -2731,8 +2749,8 @@ export function ClaimDetailPanel({
                     className="w-full p-1.5 border border-slate-200 rounded bg-slate-50 text-slate-700 disabled:opacity-50"
                   >
                     <option value="ERA">ERA (Electronic Remittance)</option>
-                    <option value="Manual">Confirmación Manual Banco</option>
-                    <option value="Patient Check">Copago Paciente / Cheque</option>
+                    <option value="Manual">{isEnglish ? "Manual Bank Confirmation" : "Confirmación Manual Banco"}</option>
+                    <option value="Patient Check">{isEnglish ? "Patient Copay / Check" : "Copago Paciente / Cheque"}</option>
                   </select>
                 </div>
                 <button
@@ -2741,7 +2759,7 @@ export function ClaimDetailPanel({
                   className="w-full mt-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs p-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors shadow-xs disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  Aplicar Cobro Recibido
+                  {isEnglish ? "Apply Received Payment" : "Aplicar Cobro Recibido"}
                 </button>
               </div>
             </div>
@@ -2750,7 +2768,7 @@ export function ClaimDetailPanel({
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                 <FileText className="w-4.5 h-4.5 text-primary-blue" />
-                <h4 className="font-bold text-slate-800 text-xs">Notas de Auditoría Administrativa</h4>
+                <h4 className="font-bold text-slate-800 text-xs">{isEnglish ? "Administrative Audit Notes" : "Notas de Auditoría Administrativa"}</h4>
               </div>
 
               <div className="space-y-2 text-xs">
@@ -2758,7 +2776,7 @@ export function ClaimDetailPanel({
                 <div>
                   <textarea
                     rows={3}
-                    placeholder="Ingresa los comentarios de auditoría..."
+                    placeholder={isEnglish ? "Enter audit comments..." : "Ingresa los comentarios de auditoría..."}
                     value={newNoteText}
                     onChange={(e) => setNewNoteText(e.target.value)}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-primary-blue text-xs text-slate-800"
@@ -2769,18 +2787,18 @@ export function ClaimDetailPanel({
                   className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  Agregar Nota al Historial
+                  {isEnglish ? "Add Note to History" : "Agregar Nota al Historial"}
                 </button>
               </div>
 
               {/* Feed of Notes */}
               <div className="space-y-3 pt-3 border-t border-slate-100 max-h-64 overflow-y-auto">
                 {filteredNotes.length === 0 ? (
-                  <p className="text-[10px] text-slate-400 italic text-center py-4">No hay comentarios registrados para este claim.</p>
+                  <p className="text-[10px] text-slate-400 italic text-center py-4">{isEnglish ? "No comments are registered for this claim." : "No hay comentarios registrados para este claim."}</p>
                 ) : (
                   filteredNotes.map((n) => {
                     const noteDate = new Date(n.created_at);
-                    const formattedDateTime = `${noteDate.toLocaleDateString()} a las ${noteDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+                    const formattedDateTime = `${noteDate.toLocaleDateString()} ${isEnglish ? "at" : "a las"} ${noteDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
                     return (
                       <div key={n.note_id} className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs leading-relaxed transition-all hover:border-slate-300">
                         <div className="flex items-center justify-between text-[10px] text-slate-500 mb-1.5 border-b border-slate-100 pb-1">
@@ -2792,7 +2810,7 @@ export function ClaimDetailPanel({
                         <p className="text-slate-700 font-medium whitespace-pre-wrap">{n.note_text}</p>
                         <div className="text-[9px] font-mono text-slate-400 mt-2 flex items-center justify-end gap-1 select-none">
                           <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                          <span>Registrado por:</span> <span className="font-bold text-slate-600">{n.created_by}</span>
+                          <span>{isEnglish ? "Logged by:" : "Registrado por:"}</span> <span className="font-bold text-slate-600">{n.created_by}</span>
                         </div>
                       </div>
                     );
@@ -2805,15 +2823,15 @@ export function ClaimDetailPanel({
             <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
               <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                 <History className="w-4.5 h-4.5 text-primary-blue" />
-                <h4 className="font-bold text-slate-800 text-xs">Log de Auditoría HIPAA</h4>
+                <h4 className="font-bold text-slate-800 text-xs">{isEnglish ? "HIPAA Audit Log" : "Log de Auditoría HIPAA"}</h4>
               </div>
               <p className="text-[9px] text-slate-400 leading-normal">
-                Control de cambios inalterable exigido por normativas de seguridad de salud para vigilar PHI.
+                {isEnglish ? "Immutable change tracking required by health security rules to monitor PHI." : "Control de cambios inalterable exigido por normativas de seguridad de salud para vigilar PHI."}
               </p>
 
               <div className="space-y-2.5 max-h-52 overflow-y-auto pt-1 text-[10px] font-mono text-slate-600">
                 {filteredAudits.length === 0 ? (
-                  <p className="italic text-center text-slate-400 py-4 font-sans text-xs">Ningún cambio registrado en el historial.</p>
+                  <p className="italic text-center text-slate-400 py-4 font-sans text-xs">{isEnglish ? "No history changes recorded." : "Ningún cambio registrado en el historial."}</p>
                 ) : (
                   filteredAudits.map((a) => (
                     <div key={a.audit_id} className="p-2 border-l-2 border-primary-blue bg-slate-50 rounded-r-lg">
@@ -2822,18 +2840,18 @@ export function ClaimDetailPanel({
                         <span>{new Date(a.changed_at).toLocaleTimeString()}</span>
                       </div>
                       <div className="mt-1">
-                        <span className="text-slate-400">Campo:</span> <span className="font-bold text-slate-700">{a.field_name}</span>
+                        <span className="text-slate-400">{isEnglish ? "Field:" : "Campo:"}</span> <span className="font-bold text-slate-700">{a.field_name}</span>
                       </div>
                       {a.previous_value && (
                         <div className="text-slate-400 text-[9px] truncate">
-                          Previo: <span className="line-through">{a.previous_value}</span>
+                          {isEnglish ? "Previous" : "Previo"}: <span className="line-through">{a.previous_value}</span>
                         </div>
                       )}
                       <div className="text-slate-800 font-semibold truncate">
-                        Nuevo: {a.new_value}
+                        {isEnglish ? "New" : "Nuevo"}: {a.new_value}
                       </div>
                       <div className="text-[9px] text-slate-500 italic mt-0.5">
-                        Motivo: {a.reason}
+                        {isEnglish ? "Reason" : "Motivo"}: {a.reason}
                       </div>
                       <div className="text-[8px] text-right text-slate-400 mt-1">— {a.changed_by}</div>
                     </div>
@@ -2853,14 +2871,14 @@ export function ClaimDetailPanel({
             <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-200 bg-blue-50 px-4 py-3">
                 <div>
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-primary-blue">Pago secundario</p>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-primary-blue">{isEnglish ? "Secondary payment" : "Pago secundario"}</p>
                   <h4 className="text-sm font-bold text-dark-blue">CPT {serviceLines[secondaryEditorIndex].cpt}</h4>
                 </div>
                 <button
                   type="button"
                   onClick={() => setSecondaryEditorIndex(null)}
                   className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-400 hover:text-slate-700"
-                  aria-label="Cerrar pago secundario"
+                  aria-label={isEnglish ? "Close secondary payment" : "Cerrar pago secundario"}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -2869,13 +2887,13 @@ export function ClaimDetailPanel({
               <div className="space-y-4 p-4">
                 <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
                   <div>
-                    <span className="itera-label block">Pago primario</span>
+                    <span className="itera-label block">{isEnglish ? "Primary payment" : "Pago primario"}</span>
                     <span className="mt-1 block font-mono font-bold text-slate-700">
                       {formatUSD(Number(serviceLines[secondaryEditorIndex].paid))}
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="itera-label block">Total combinado</span>
+                    <span className="itera-label block">{isEnglish ? "Combined total" : "Total combinado"}</span>
                     <span className="mt-1 block font-mono font-bold text-emerald-700">
                       {formatUSD(Number(serviceLines[secondaryEditorIndex].paid) + Number(serviceLines[secondaryEditorIndex].secondaryPaid))}
                     </span>
@@ -2884,13 +2902,13 @@ export function ClaimDetailPanel({
 
                 <div className="grid gap-3 sm:grid-cols-[1fr_5.5rem]">
                   <div>
-                    <label className="itera-label mb-1 block">Payer secundario</label>
+                    <label className="itera-label mb-1 block">{isEnglish ? "Secondary payer" : "Payer secundario"}</label>
                     <select
                       value={serviceLines[secondaryEditorIndex].secondaryPayerId}
                       onChange={(e) => handleUpdateServiceLine(secondaryEditorIndex, "secondaryPayerId", e.target.value)}
                       className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
                     >
-                      <option value="">Seleccionar payer...</option>
+                      <option value="">{isEnglish ? "Select payer..." : "Seleccionar payer..."}</option>
                       {payers.filter(payer => payer.payer_id !== claim.payer_id).map(payer => (
                         <option key={payer.payer_id} value={payer.payer_id}>{payer.payer_name}</option>
                       ))}
@@ -2898,7 +2916,7 @@ export function ClaimDetailPanel({
                   </div>
 
                   <div>
-                    <label className="itera-label mb-1 block">Importe</label>
+                    <label className="itera-label mb-1 block">{isEnglish ? "Amount" : "Importe"}</label>
                     <input
                       type="number"
                       step="0.01"
@@ -2921,7 +2939,7 @@ export function ClaimDetailPanel({
                     }}
                     className="text-[10px] font-bold text-rose-600 hover:text-rose-700"
                   >
-                    Retirar secundario
+                    {isEnglish ? "Remove secondary" : "Retirar secundario"}
                   </button>
                 ) : <span />}
                 <div className="flex gap-2">
@@ -2930,7 +2948,7 @@ export function ClaimDetailPanel({
                     onClick={() => setSecondaryEditorIndex(null)}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-600"
                   >
-                    Cancelar
+                    {isEnglish ? "Cancel" : "Cancelar"}
                   </button>
                   <button
                     type="button"
@@ -2941,7 +2959,7 @@ export function ClaimDetailPanel({
                     disabled={!serviceLines[secondaryEditorIndex].secondaryPayerId || Number(serviceLines[secondaryEditorIndex].secondaryPaid) <= 0}
                     className="rounded-lg bg-primary-blue px-3 py-1.5 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Aplicar pago
+                    {isEnglish ? "Apply payment" : "Aplicar pago"}
                   </button>
                 </div>
               </div>
@@ -2954,7 +2972,7 @@ export function ClaimDetailPanel({
             <div className="flex max-h-[80vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               <div className="flex items-center justify-between border-b border-slate-200 bg-blue-50 px-4 py-3">
                 <div>
-                  <p className="text-[9px] font-bold uppercase tracking-wider text-primary-blue">Notas de Service Line</p>
+                  <p className="text-[9px] font-bold uppercase tracking-wider text-primary-blue">{isEnglish ? "Service Line Notes" : "Notas de Service Line"}</p>
                   <h4 className="text-sm font-bold text-dark-blue">
                     CPT {serviceLines[noteEditorIndex].cpt}
                     <span className="ml-2 rounded-full bg-primary-blue px-2 py-0.5 text-[9px] text-white">
@@ -2966,7 +2984,7 @@ export function ClaimDetailPanel({
                   type="button"
                   onClick={() => setNoteEditorIndex(null)}
                   className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-400 hover:text-slate-700"
-                  aria-label="Cerrar notas CPT"
+                  aria-label={isEnglish ? "Close CPT notes" : "Cerrar notas CPT"}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -2975,7 +2993,7 @@ export function ClaimDetailPanel({
               <div className="flex-1 space-y-2 overflow-y-auto p-4">
                 {serviceLines[noteEditorIndex].notes.length === 0 ? (
                   <p className="rounded-lg border border-dashed border-slate-200 py-6 text-center text-[10px] italic text-slate-400">
-                    No hay notas registradas para este CPT.
+                    {isEnglish ? "No notes are registered for this CPT." : "No hay notas registradas para este CPT."}
                   </p>
                 ) : (
                   serviceLines[noteEditorIndex].notes.map(note => (
@@ -2999,7 +3017,7 @@ export function ClaimDetailPanel({
                               disabled={isSavingServiceLineNote}
                               className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[9px] font-bold text-slate-500"
                             >
-                              Cancelar
+                              {isEnglish ? "Cancel" : "Cancelar"}
                             </button>
                             <button
                               type="button"
@@ -3008,7 +3026,7 @@ export function ClaimDetailPanel({
                               className="flex items-center gap-1 rounded-md bg-primary-blue px-2 py-1 text-[9px] font-bold text-white disabled:opacity-40"
                             >
                               <Check className="h-3 w-3" />
-                              Guardar
+                              {isEnglish ? "Save" : "Guardar"}
                             </button>
                           </div>
                         </div>
@@ -3022,8 +3040,8 @@ export function ClaimDetailPanel({
                                 onClick={() => startEditingServiceLineNote(note)}
                                 disabled={isSavingServiceLineNote}
                                 className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-400 hover:border-blue-200 hover:text-primary-blue disabled:opacity-40"
-                                aria-label="Editar nota"
-                                title="Editar nota"
+                                aria-label={isEnglish ? "Edit note" : "Editar nota"}
+                                title={isEnglish ? "Edit note" : "Editar nota"}
                               >
                                 <Pencil className="h-3 w-3" />
                               </button>
@@ -3032,8 +3050,8 @@ export function ClaimDetailPanel({
                                 onClick={() => deleteServiceLineNote(note.id)}
                                 disabled={isSavingServiceLineNote}
                                 className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-400 hover:border-rose-200 hover:text-rose-600 disabled:opacity-40"
-                                aria-label="Eliminar nota"
-                                title="Eliminar nota"
+                                aria-label={isEnglish ? "Delete note" : "Eliminar nota"}
+                                title={isEnglish ? "Delete note" : "Eliminar nota"}
                               >
                                 <Trash2 className="h-3 w-3" />
                               </button>
@@ -3046,7 +3064,7 @@ export function ClaimDetailPanel({
                             </span>
                             <span className="font-mono">
                               {new Date(note.createdAt).toLocaleString()}
-                              {note.updatedAt && ` · Editada ${new Date(note.updatedAt).toLocaleString()} por ${note.updatedBy}`}
+                              {note.updatedAt && (isEnglish ? ` · Edited ${new Date(note.updatedAt).toLocaleString()} by ${note.updatedBy}` : ` · Editada ${new Date(note.updatedAt).toLocaleString()} por ${note.updatedBy}`)}
                             </span>
                           </div>
                         </>
@@ -3060,7 +3078,7 @@ export function ClaimDetailPanel({
                 <textarea
                   value={serviceLineNoteDraft}
                   onChange={(e) => setServiceLineNoteDraft(e.target.value)}
-                  placeholder="Añadir una nota para este CPT..."
+                  placeholder={isEnglish ? "Add a note for this CPT..." : "Añadir una nota para este CPT..."}
                   rows={3}
                   className="w-full resize-none rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs focus:bg-white"
                 />
@@ -3070,7 +3088,7 @@ export function ClaimDetailPanel({
                     onClick={() => setNoteEditorIndex(null)}
                     className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-bold text-slate-600"
                   >
-                    Cerrar
+                    {isEnglish ? "Close" : "Cerrar"}
                   </button>
                   <button
                     type="button"
@@ -3078,7 +3096,7 @@ export function ClaimDetailPanel({
                     disabled={!serviceLineNoteDraft.trim() || isSavingServiceLineNote}
                     className="rounded-lg bg-primary-blue px-3 py-1.5 text-[10px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {isSavingServiceLineNote ? "Guardando..." : "Añadir nota"}
+                    {isSavingServiceLineNote ? (isEnglish ? "Saving..." : "Guardando...") : (isEnglish ? "Add note" : "Añadir nota")}
                   </button>
                 </div>
               </div>
