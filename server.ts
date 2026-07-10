@@ -43,6 +43,30 @@ function textValue(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function importField(row: Record<string, unknown>, names: string[]) {
+  const normalized = new Map(
+    Object.entries(row).map(([key, value]) => [key.trim().toLowerCase(), value])
+  );
+  for (const name of names) {
+    const value = normalized.get(name.trim().toLowerCase());
+    if (value !== undefined && value !== null && String(value).trim() !== "") {
+      return String(value).trim();
+    }
+  }
+  return "";
+}
+
+function equivalentExternalCode(left: unknown, right: unknown) {
+  const normalize = (value: unknown) => {
+    const raw = textValue(value).toLowerCase();
+    const withoutLeadingZeros = raw.replace(/^0+(?=\d)/, "");
+    return new Set([raw, withoutLeadingZeros]);
+  };
+  const leftValues = normalize(left);
+  const rightValues = normalize(right);
+  return Array.from(leftValues).some(value => rightValues.has(value));
+}
+
 function readZipEntries(buffer: Buffer): Record<string, Buffer> {
   const entries: Record<string, Buffer> = {};
   const eocdSig = 0x06054b50;
@@ -982,30 +1006,34 @@ async function startServer() {
       for (let i = 0; i < importRows.length; i++) {
         const row = importRows[i];
         const rowErrors: string[] = [];
-        const isBillingWorklist = !!(row.MRN || row["Provider NPI"] || row.Code1 || row["Month Of"]);
+        const isBillingWorklist = !!(
+          importField(row, ["MRN"]) ||
+          importField(row, ["Provider NPI"]) ||
+          importField(row, ["Code1"]) ||
+          importField(row, ["Month Of"])
+        );
 
         if (isBillingWorklist) {
-          const mrn = String(row.MRN || "").trim();
-          const providerNpi = String(row["Provider NPI"] || "").trim();
-          const payerCode = String(row["Primary Insurance Code"] || row["Payer ID"] || "").trim();
-          const monthDate = excelSerialToIsoDate(String(row["Month Of"] || ""));
+          const mrn = importField(row, ["MRN"]);
+          const providerNpi = importField(row, ["Provider NPI"]);
+          const payerCode = importField(row, ["Primary Insurance Code", "Primary Insurance", "Insurance Code", "Payer ID"]);
+          const monthDate = excelSerialToIsoDate(importField(row, ["Month Of"]));
           const serviceFrom = firstDayOfMonth(monthDate);
           const serviceTo = monthDate || serviceFrom;
           const year = Number((serviceTo || serviceFrom).slice(0, 4));
           const month = Number((serviceTo || serviceFrom).slice(5, 7));
           const isSemester2 = month >= 7;
           const provider = providers.find(item => item.npi === providerNpi && item.active !== false);
-          const normalizedPayerCode = payerCode.toLowerCase();
           const payer = payers.find(item =>
             item.active !== false &&
             (
-              item.payer_id.toLowerCase() === normalizedPayerCode ||
-              String(item.pverify_payer_code || "").trim().toLowerCase() === normalizedPayerCode ||
-              item.payer_name.toLowerCase() === normalizedPayerCode
+              equivalentExternalCode(item.payer_id, payerCode) ||
+              equivalentExternalCode(item.pverify_payer_code, payerCode) ||
+              equivalentExternalCode(item.payer_name, payerCode)
             )
           );
           const codes = ["Code1", "Code2", "Code3", "Code4", "Code5", "Code6"]
-            .map(key => String(row[key] || "").trim())
+            .map(key => importField(row, [key]))
             .filter(Boolean);
 
           if (!mrn) rowErrors.push("MRN is required.");
@@ -1019,16 +1047,24 @@ async function startServer() {
           if (!serviceTo) rowErrors.push("Month Of is required.");
           if (codes.length === 0) rowErrors.push("At least one CPT code is required.");
 
+          const feeFallbackNotes: string[] = [];
           const unitsByCode = codes.reduce<Record<string, number>>((acc, code) => {
             acc[code] = (acc[code] || 0) + 1;
             return acc;
           }, {});
           const uniqueCodes = Object.keys(unitsByCode);
           const serviceLines = uniqueCodes.map(code => {
-            const fee = feeSchedules.find(item => textValue(item.cpt_code) === code && Number(item.year) === year);
+            const feeCandidates = feeSchedules
+              .filter(item => textValue(item.cpt_code) === code)
+              .sort((a, b) => Math.abs(Number(a.year) - year) - Math.abs(Number(b.year) - year));
+            const exactFee = feeCandidates.find(item => Number(item.year) === year);
+            const fee = exactFee || feeCandidates[0];
             if (!fee) {
-              rowErrors.push(`Fee Schedule missing for CPT ${code} year ${year}.`);
+              rowErrors.push(`Fee Schedule missing for CPT ${code}.`);
               return null;
+            }
+            if (!exactFee) {
+              feeFallbackNotes.push(`CPT ${code} used ${fee.year} fee because ${year} fee was not found`);
             }
             const rate = Number(isSemester2 ? fee.semester2_rate : fee.semester1_rate);
             const units = unitsByCode[code];
@@ -1068,7 +1104,7 @@ async function startServer() {
           const claimObj: Partial<Claim> = {
             claim_id: claimId,
             patient_id: mrn,
-            patient_display_name_masked: String(row.Patient || `${row["First Name"] || ""} ${row["Last Name"] || ""}`).trim() || `MRN ${mrn}`,
+            patient_display_name_masked: importField(row, ["Patient"]) || `${importField(row, ["First Name"])} ${importField(row, ["Last Name"])}`.trim() || `MRN ${mrn}`,
             practice_id: provider!.practice_id,
             practice_name: provider!.practice_name,
             provider_id: provider!.provider_id,
@@ -1076,7 +1112,7 @@ async function startServer() {
             provider_npi: provider!.npi,
             payer_id: payer!.payer_id,
             payer_name: String(row["Primary Insurance Name"] || payer!.payer_name).trim() || payer!.payer_name,
-            service_type: String(row.Service || "").trim() || "CCM",
+            service_type: importField(row, ["Service"]) || "CCM",
             cpt_hcpcs: uniqueCodes.join(", "),
             modifiers: "",
             units: serviceLines.reduce((sum, line) => sum + Number(line.units || 1), 0),
@@ -1111,7 +1147,7 @@ async function startServer() {
             correction_status: "",
             resubmission_date: "",
             corrected_claim_reference: "",
-            last_note: `Imported as Draft from billing worklist. Primary Insurance Code: ${payerCode || "N/A"}. Care Manager: ${row["Care Manager"] || "N/A"}. Sex: ${row.Sex || "N/A"}. DOB: ${row["Date of Birth"] || "N/A"}.`,
+            last_note: `Imported as Draft from billing worklist. Primary Insurance Code: ${payerCode || "N/A"}. Care Manager: ${importField(row, ["Care Manager"]) || "N/A"}. Sex: ${importField(row, ["Sex"]) || "N/A"}. DOB: ${excelSerialToIsoDate(importField(row, ["Date of Birth"])) || importField(row, ["Date of Birth"]) || "N/A"}.${feeFallbackNotes.length > 0 ? ` Fee fallback: ${feeFallbackNotes.join("; ")}.` : ""}`,
             service_lines_json: JSON.stringify(serviceLines)
           };
 
