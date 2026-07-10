@@ -4,6 +4,7 @@
  */
 
 import { google } from "googleapis";
+import { Readable } from "stream";
 import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule } from "./types";
 import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS, SEED_PAYERS, SEED_USERS, SEED_SETTINGS, SEED_FEE_SCHEDULES, SEED_ELIGIBILITY_COVERAGE, SEED_REPORT_FEE_SCHEDULES } from "./seedData";
 import { normalizeUserAccess } from "./accessControl";
@@ -21,6 +22,7 @@ export class GoogleSheetsService {
   private sheetId?: string;
   private authClient: any = null;
   private sheets: any = null;
+  private drive: any = null;
 
   // In-memory data store for fallback/caching
   public claims: Claim[] = [];
@@ -51,9 +53,10 @@ export class GoogleSheetsService {
         this.authClient = new google.auth.JWT({
           email: this.clientEmail,
           key: formattedKey,
-          scopes: ["https://www.googleapis.com/auth/spreadsheets"]
+          scopes: ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         });
         this.sheets = google.sheets({ version: "v4", auth: this.authClient });
+        this.drive = google.drive({ version: "v3", auth: this.authClient });
         this.isConfigured = true;
         console.log("Google Sheets service initialized successfully with credentials.");
       } catch (err) {
@@ -66,6 +69,7 @@ export class GoogleSheetsService {
           scopes: ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         });
         this.sheets = google.sheets({ version: "v4", auth: this.authClient });
+        this.drive = google.drive({ version: "v3", auth: this.authClient });
         this.isConfigured = true;
         console.log("Google Sheets service initialized successfully with Application Default Credentials.");
       } catch (err) {
@@ -86,7 +90,8 @@ export class GoogleSheetsService {
       hasSheetId: !!this.sheetId,
       usingAdc: process.env.GOOGLE_USE_ADC === "true",
       usingFallback: !this.isConfigured,
-      usingSeedData: this.useSeedData
+      usingSeedData: this.useSeedData,
+      supportingDocumentsFolderConfigured: !!process.env.SUPPORTING_DOCUMENTS_FOLDER_ID
     };
   }
 
@@ -817,6 +822,53 @@ export class GoogleSheetsService {
     if (this.isConfigured) {
       await this.appendRow("Audit_Log", mapObjectToRow("Audit_Log", auditRecord));
     }
+  }
+
+  public async uploadSupportingDocument({
+    claimId,
+    fileName,
+    mimeType,
+    buffer,
+    uploadedBy
+  }: {
+    claimId: string;
+    fileName: string;
+    mimeType: string;
+    buffer: Buffer;
+    uploadedBy: string;
+  }): Promise<{ fileId: string; name: string; mimeType: string; size: number; webViewLink: string; webContentLink: string }> {
+    const folderId = process.env.SUPPORTING_DOCUMENTS_FOLDER_ID;
+    if (!folderId) {
+      throw new Error("SUPPORTING_DOCUMENTS_FOLDER_ID is not configured.");
+    }
+    if (!this.isConfigured || !this.drive) {
+      throw new Error("Google Drive is not configured.");
+    }
+
+    const safeName = fileName.replace(/[<>:"/\\|?*\x00-\x1F]/g, "_").slice(0, 140) || "supporting-document";
+    const driveFileName = `${claimId}_${new Date().toISOString().replace(/[:.]/g, "-")}_${safeName}`;
+    const response = await this.drive.files.create({
+      requestBody: {
+        name: driveFileName,
+        parents: [folderId],
+        description: `Supporting document for claim ${claimId}. Uploaded by ${uploadedBy}.`
+      },
+      media: {
+        mimeType,
+        body: Readable.from(buffer)
+      },
+      fields: "id,name,mimeType,size,webViewLink,webContentLink",
+      supportsAllDrives: true
+    });
+
+    return {
+      fileId: response.data.id || "",
+      name: response.data.name || driveFileName,
+      mimeType: response.data.mimeType || mimeType,
+      size: Number(response.data.size || buffer.length),
+      webViewLink: response.data.webViewLink || "",
+      webContentLink: response.data.webContentLink || ""
+    };
   }
 
   public async clearOperationalData(): Promise<{ clearedSheets: string[]; counts: Record<string, number> }> {

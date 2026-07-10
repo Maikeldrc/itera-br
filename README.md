@@ -58,7 +58,11 @@ Variables:
 GOOGLE_CLIENT_EMAIL="service-account@project.iam.gserviceaccount.com"
 GOOGLE_PRIVATE_KEY="ONLY_IF_NOT_USING_ADC_STORE_IN_SECRET_MANAGER"
 GOOGLE_SHEET_ID="spreadsheet-id"
+SUPPORTING_DOCUMENTS_FOLDER_ID="google-drive-folder-id"
 ```
+
+`SUPPORTING_DOCUMENTS_FOLDER_ID` debe apuntar al folder de Google Drive `Supporting Documents`.
+Comparte ese folder con el service account que ejecuta Cloud Run para permitir la carga de adjuntos.
 
 ### Claims
 

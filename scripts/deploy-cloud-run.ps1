@@ -6,7 +6,8 @@ param(
   [string] $Region = "us-central1",
   [string] $ServiceName = "itera-claim-reconciliation-api",
   [string] $ServiceAccount = "itera-backend-svc@itera-tools.iam.gserviceaccount.com",
-  [string] $AllowedOrigin = "https://itera-br.vercel.app"
+  [string] $AllowedOrigin = "https://itera-br.vercel.app",
+  [string] $SupportingDocumentsFolderId = $env:SUPPORTING_DOCUMENTS_FOLDER_ID
 )
 
 $ErrorActionPreference = "Stop"
@@ -26,7 +27,13 @@ $envVars = @(
   "GOOGLE_USE_ADC=true",
   "GOOGLE_SHEET_ID=$GoogleSheetId",
   "ALLOWED_ORIGIN=$AllowedOrigin"
-) -join ","
+)
+
+if ($SupportingDocumentsFolderId) {
+  $envVars += "SUPPORTING_DOCUMENTS_FOLDER_ID=$SupportingDocumentsFolderId"
+}
+
+$envVars = $envVars -join ","
 
 Write-Host "Deploying Cloud Run service: $ServiceName"
 gcloud run deploy $ServiceName `

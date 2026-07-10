@@ -30,6 +30,7 @@ import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
+import { apiFetch } from "../apiClient";
 import { PENDING_ERA_ACTION } from "../serviceLineValidation";
 import {
   CARC_CATALOG,
@@ -354,7 +355,16 @@ export function ClaimsTable({
     taskStatus: "Open"
   });
   const [internalCategory, setInternalCategory] = useState<string>("Eligibility / Coverage");
-  const [attachments, setAttachments] = useState<Array<{ name: string; size: string; type: string }>>([]);
+  const [attachments, setAttachments] = useState<Array<{
+    id: string;
+    name: string;
+    size: string;
+    type: string;
+    status: "uploading" | "uploaded" | "error";
+    fileId?: string;
+    webViewLink?: string;
+    error?: string;
+  }>>([]);
   const [issueNote, setIssueNote] = useState<string>("");
   const [issueSubmitMode, setIssueSubmitMode] = useState<"draft" | "apply" | null>(null);
   const [isSavingPayment, setIsSavingPayment] = useState(false);
@@ -392,6 +402,10 @@ export function ClaimsTable({
       const actualStatus = statusOverride || issueStatus;
 
       // Smart Validation
+      if (attachments.some(att => att.status === "uploading")) {
+        notify(localIsEnglish ? "Wait until supporting documents finish uploading before applying the issue." : "Espera a que terminen de subir los documentos antes de aplicar la incidencia.", "warning");
+        return;
+      }
       if (selectedLines.length === 0 && actualStatus !== "Pending") {
         notify(localIsEnglish ? "Select at least one affected CPT line before applying the issue." : "Seleccione al menos una línea CPT afectada antes de aplicar la incidencia.", "warning");
         return;
@@ -598,7 +612,11 @@ export function ClaimsTable({
         ? `${assignedUser.name} <${assignedUser.email}> (${assignedUser.role})`
         : "Unassigned";
 
-      const noteContent = `[Issue: ${actualStatus}] Source: ${issueSource} | Cat: ${internalCategory} | Codes: ${codesSummary} | Action: ${nextActionData.nextAction} | Assigned: ${assignedSummary}. ${issueNote ? `Note: ${issueNote}` : ""}`;
+      const documentSummary = attachments
+        .filter(att => att.status === "uploaded" && att.webViewLink)
+        .map(att => `${att.name}: ${att.webViewLink}`)
+        .join("; ");
+      const noteContent = `[Issue: ${actualStatus}] Source: ${issueSource} | Cat: ${internalCategory} | Codes: ${codesSummary} | Action: ${nextActionData.nextAction} | Assigned: ${assignedSummary}${documentSummary ? ` | Docs: ${documentSummary}` : ""}. ${issueNote ? `Note: ${issueNote}` : ""}`;
 
       if (onUpdateClaim) {
         await onUpdateClaim({
@@ -614,6 +632,7 @@ export function ClaimsTable({
 
       notify(localIsEnglish ? "Claim Issue registered successfully!" : "¡Incidencia de Reclamación registrada con éxito!", "success");
       setActiveIssueClaim(null);
+      setAttachments([]);
     } catch (err: any) {
       notify(err.message || "Error", "error");
     } finally {
@@ -1154,6 +1173,7 @@ export function ClaimsTable({
                                   setIssueSource("ERA / 835");
                                   setCodingMode("quick");
                                   setDenialCombinations([]);
+                                  setAttachments([]);
                                   setInternalCategory("Eligibility / Coverage");
                                   setNextActionData({
                                     nextAction: "Correct and Resubmit",
@@ -1399,6 +1419,7 @@ export function ClaimsTable({
                                   setIssueSource("ERA / 835");
                                   setCodingMode("quick");
                                   setDenialCombinations([]);
+                                  setAttachments([]);
                                   setInternalCategory("Eligibility / Coverage");
                                   setNextActionData({
                                     nextAction: "Correct and Resubmit",
@@ -1822,6 +1843,7 @@ export function ClaimsTable({
         const handleCancelIssue = () => {
           setActiveIssueClaim(null);
           setIssueNote("");
+          setAttachments([]);
         };
 
         const handleAddCombination = () => {
@@ -1906,20 +1928,63 @@ export function ClaimsTable({
           notify(isEnglish ? `Quick preset applied: ${preset.carc}` : `Ajuste rápido aplicado: ${preset.carc}`, "info");
         };
 
-        const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const fileToDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result || ""));
+          reader.onerror = () => reject(new Error("Unable to read the selected file."));
+          reader.readAsDataURL(file);
+        });
+
+        const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
           const filesList = e.target.files;
           if (filesList && filesList.length > 0) {
             const file = filesList[0];
+            const localId = `${file.name}-${file.size}-${Date.now()}`;
             setAttachments(prev => [
               ...prev,
-              { name: file.name, size: `${(file.size / 1024).toFixed(1)} KB`, type: file.type }
+              { id: localId, name: file.name, size: `${(file.size / 1024).toFixed(1)} KB`, type: file.type, status: "uploading" }
             ]);
-            notify(isEnglish ? "Document attached successfully!" : "¡Documento adjuntado correctamente!", "success");
+            e.target.value = "";
+
+            try {
+              const fileBase64 = await fileToDataUrl(file);
+              const response = await apiFetch("/api/supporting-documents", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  claimId: activeIssueClaim.claim_id,
+                  fileName: file.name,
+                  mimeType: file.type || "application/octet-stream",
+                  fileBase64
+                })
+              });
+              const data = await response.json().catch(() => ({}));
+              if (!response.ok || !data.document) {
+                throw new Error(data.error || "Failed to upload supporting document.");
+              }
+              setAttachments(prev => prev.map(att => att.id === localId
+                ? {
+                    id: localId,
+                    name: file.name,
+                    size: `${((Number(data.document.size) || file.size) / 1024).toFixed(1)} KB`,
+                    type: data.document.mimeType || file.type,
+                    status: "uploaded",
+                    fileId: data.document.fileId,
+                    webViewLink: data.document.webViewLink
+                  }
+                : att));
+              notify(isEnglish ? "Document uploaded to Google Drive." : "Documento subido a Google Drive.", "success");
+            } catch (err: any) {
+              setAttachments(prev => prev.map(att => att.id === localId
+                ? { ...att, status: "error", error: err.message || "Upload failed" }
+                : att));
+              notify(`${isEnglish ? "Document upload failed" : "Error al subir documento"}: ${err.message}`, "error");
+            }
           }
         };
 
-        const handleRemoveAttachment = (name: string) => {
-          setAttachments(prev => prev.filter(a => a.name !== name));
+        const handleRemoveAttachment = (id: string) => {
+          setAttachments(prev => prev.filter(a => a.id !== id));
         };
 
         // Smart warnings computation
@@ -2574,15 +2639,28 @@ export function ClaimsTable({
                     {attachments.length > 0 && (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
                         {attachments.map(att => (
-                          <div key={att.name} className="flex items-center justify-between p-2 rounded-lg border border-slate-200 bg-white text-[10px]">
+                          <div key={att.id} className="flex items-center justify-between gap-2 p-2 rounded-lg border border-slate-200 bg-white text-[10px]">
                             <div className="flex items-center gap-1.5 min-w-0">
                               <FileText className="h-3.5 w-3.5 text-blue-500 shrink-0" />
-                              <span className="truncate font-semibold text-slate-700" title={att.name}>{att.name}</span>
+                              {att.webViewLink ? (
+                                <a href={att.webViewLink} target="_blank" rel="noreferrer" className="truncate font-semibold text-primary-blue hover:underline" title={att.name}>
+                                  {att.name}
+                                </a>
+                              ) : (
+                                <span className="truncate font-semibold text-slate-700" title={att.name}>{att.name}</span>
+                              )}
                               <span className="text-slate-400 shrink-0 font-mono">({att.size})</span>
                             </div>
+                            <span className={`shrink-0 rounded px-1.5 py-0.5 font-bold uppercase ${
+                              att.status === "uploaded" ? "bg-emerald-50 text-emerald-700" :
+                              att.status === "error" ? "bg-rose-50 text-rose-700" :
+                              "bg-blue-50 text-blue-700"
+                            }`} title={att.error || undefined}>
+                              {att.status === "uploaded" ? "Drive" : att.status === "error" ? "Error" : "Uploading"}
+                            </span>
                             <button
                               type="button"
-                              onClick={() => handleRemoveAttachment(att.name)}
+                              onClick={() => handleRemoveAttachment(att.id)}
                               className="text-slate-400 hover:text-rose-600 px-1 font-bold text-xs"
                             >
                               &times;

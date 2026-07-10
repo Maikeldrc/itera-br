@@ -274,6 +274,31 @@ async function startServer() {
   const canAccessClaim = (req: AppRequest, claim: Claim) =>
     !!req.appUser && canUserAccessProvider(req.appUser, claim.provider_id, claim.provider_npi);
 
+  const allowedSupportingDocumentTypes = new Set([
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "text/plain",
+    "application/xml",
+    "text/xml"
+  ]);
+  const maxSupportingDocumentBytes = Number(process.env.SUPPORTING_DOCUMENT_MAX_BYTES || 15 * 1024 * 1024);
+  const decodeUploadBase64 = (value: unknown) => {
+    const raw = textValue(value);
+    const base64 = raw.includes(",") ? raw.split(",").pop() || "" : raw;
+    return Buffer.from(base64, "base64");
+  };
+  const inferSupportingDocumentMimeType = (fileName: string, mimeType: string) => {
+    if (mimeType && mimeType !== "application/octet-stream") return mimeType;
+    const extension = path.extname(fileName).toLowerCase();
+    if (extension === ".pdf") return "application/pdf";
+    if (extension === ".png") return "image/png";
+    if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+    if (extension === ".txt") return "text/plain";
+    if (extension === ".xml") return "application/xml";
+    return mimeType || "application/octet-stream";
+  };
+
   // --- API Routes ---
 
   // Connection and Diagnostic Status
@@ -315,6 +340,62 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to clear operational data." });
+    }
+  });
+
+  app.post("/api/supporting-documents", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
+    try {
+      const claimId = textValue(req.body.claimId);
+      const fileName = textValue(req.body.fileName);
+      const mimeType = inferSupportingDocumentMimeType(fileName, textValue(req.body.mimeType) || "application/octet-stream");
+      const fileBase64 = req.body.fileBase64;
+
+      if (!claimId || !fileName || !fileBase64) {
+        return res.status(400).json({ error: "claimId, fileName and fileBase64 are required." });
+      }
+      if (!allowedSupportingDocumentTypes.has(mimeType)) {
+        return res.status(400).json({ error: "Unsupported file type. Allowed: PDF, PNG, JPG, JPEG, TXT, XML." });
+      }
+
+      const claims = await sheetsService.getClaims(true);
+      const claim = claims.find(c => c.claim_id === claimId && !c.deleted_flag);
+      if (!claim) return res.status(404).json({ error: "Claim not found." });
+      if (!canAccessClaim(req, claim)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+
+      const buffer = decodeUploadBase64(fileBase64);
+      if (buffer.length === 0) {
+        return res.status(400).json({ error: "The uploaded file is empty." });
+      }
+      if (buffer.length > maxSupportingDocumentBytes) {
+        return res.status(413).json({ error: `File exceeds the ${Math.round(maxSupportingDocumentBytes / 1024 / 1024)} MB upload limit.` });
+      }
+
+      const operatorEmail = getOperatorEmail(req);
+      const uploaded = await sheetsService.uploadSupportingDocument({
+        claimId,
+        fileName,
+        mimeType,
+        buffer,
+        uploadedBy: operatorEmail
+      });
+
+      await sheetsService.addAuditLog({
+        audit_id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        claim_id: claimId,
+        action_type: "Update",
+        field_name: "supporting_documents",
+        previous_value: "",
+        new_value: uploaded.webViewLink || uploaded.fileId,
+        reason: `Supporting document uploaded: ${uploaded.name}`,
+        changed_by: operatorEmail,
+        changed_at: new Date().toISOString()
+      });
+
+      res.status(201).json({ success: true, document: uploaded });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to upload supporting document." });
     }
   });
 
