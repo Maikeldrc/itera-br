@@ -1595,6 +1595,7 @@ export default function App() {
                 }}
                 onDeleteClaim={handleSoftDeleteClaim}
                 userRole={currentUser.role}
+                allUsers={users}
               />
 
               {/* Bulk action toolbar */}

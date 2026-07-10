@@ -24,7 +24,7 @@ import {
   FileText,
   Check
 } from "lucide-react";
-import { Claim, ClaimStatus, ClaimClassification, UserRole } from "../types";
+import { Claim, ClaimStatus, ClaimClassification, User, UserRole } from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
@@ -40,6 +40,7 @@ interface ClaimsTableProps {
   onSaveServiceLineNotes?: (serviceLinesJson: string, targetClaimId?: string) => Promise<void>;
   onDeleteClaim?: (claim: Claim, reason: string) => Promise<void>;
   userRole?: UserRole | string;
+  allUsers?: User[];
 }
 
 interface ServiceLineRow {
@@ -286,13 +287,19 @@ export function ClaimsTable({
   onUpdateClaim,
   onSaveServiceLineNotes,
   onDeleteClaim,
-  userRole
+  userRole,
+  allUsers = []
 }: ClaimsTableProps) {
   const [viewMode, setViewMode] = useState<"patient" | "cpt">("patient");
   const [sortField, setSortField] = useState<SortField>("updated_at");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const activeAssignableUsers = allUsers
+    .filter(user => user.active)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const defaultAssignedUserId = activeAssignableUsers[0]?.user_id || "unassigned";
+  const getAssignedUser = (userId: string) => activeAssignableUsers.find(user => user.user_id === userId);
 
   // State to track which row has its actions menu open
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
@@ -346,7 +353,7 @@ export function ClaimsTable({
   });
   const [nextActionData, setNextActionData] = useState({
     nextAction: "Correct and Resubmit",
-    assignedTo: "billing_specialist_1",
+    assignedTo: "unassigned",
     dueDate: "",
     priority: "Medium",
     followUpDate: "",
@@ -528,8 +535,12 @@ export function ClaimsTable({
       const codesSummary = codingMode === "advanced" 
         ? denialCombinations.map(c => `${c.groupCode}-${c.carc} (${c.rarcs.join(",")})`).join("; ")
         : (actualStatus === "Rejected" ? `Rejection: ${rejectionData.statusCode || "Custom"}` : "Quick Issue");
+      const assignedUser = getAssignedUser(nextActionData.assignedTo);
+      const assignedSummary = assignedUser
+        ? `${assignedUser.name} <${assignedUser.email}> (${assignedUser.role})`
+        : "Unassigned";
 
-      const noteContent = `[Issue: ${actualStatus}] Source: ${issueSource} | Cat: ${internalCategory} | Codes: ${codesSummary} | Action: ${nextActionData.nextAction}. ${issueNote ? `Note: ${issueNote}` : ""}`;
+      const noteContent = `[Issue: ${actualStatus}] Source: ${issueSource} | Cat: ${internalCategory} | Codes: ${codesSummary} | Action: ${nextActionData.nextAction} | Assigned: ${assignedSummary}. ${issueNote ? `Note: ${issueNote}` : ""}`;
 
       if (onUpdateClaim) {
         await onUpdateClaim({
@@ -1071,6 +1082,14 @@ export function ClaimsTable({
                                   setCodingMode("quick");
                                   setDenialCombinations([]);
                                   setInternalCategory("Eligibility / Coverage");
+                                  setNextActionData({
+                                    nextAction: "Correct and Resubmit",
+                                    assignedTo: defaultAssignedUserId,
+                                    dueDate: "",
+                                    priority: "Medium",
+                                    followUpDate: "",
+                                    taskStatus: "Open"
+                                  });
                                   setIssueNote("");
                                   let initialLines: string[] = [];
                                   if (claim.service_lines_json) {
@@ -1302,6 +1321,14 @@ export function ClaimsTable({
                                   setCodingMode("quick");
                                   setDenialCombinations([]);
                                   setInternalCategory("Eligibility / Coverage");
+                                  setNextActionData({
+                                    nextAction: "Correct and Resubmit",
+                                    assignedTo: defaultAssignedUserId,
+                                    dueDate: "",
+                                    priority: "Medium",
+                                    followUpDate: "",
+                                    taskStatus: "Open"
+                                  });
                                   setIssueNote("");
                                   setSelectedLines([slRow.cpt]);
                                 }}
@@ -1998,11 +2025,18 @@ export function ClaimsTable({
                           onChange={(e) => setNextActionData(prev => ({ ...prev, assignedTo: e.target.value }))}
                           className="w-full py-1.5 px-2 bg-white border border-slate-200 rounded-lg text-slate-600"
                         >
-                          <option value="billing_specialist_1">Billing Spec. 1</option>
-                          <option value="billing_manager">Billing Manager</option>
-                          <option value="reconciliation_agent">Recon Agent</option>
+                          {activeAssignableUsers.map(user => (
+                            <option key={user.user_id} value={user.user_id}>
+                              {user.name} - {user.role}
+                            </option>
+                          ))}
                           <option value="unassigned">Unassigned</option>
                         </select>
+                        {activeAssignableUsers.length === 0 && (
+                          <p className="mt-1 text-[9px] font-semibold text-amber-600">
+                            {isEnglish ? "No active registered users are available." : "No hay usuarios activos registrados disponibles."}
+                          </p>
+                        )}
                       </div>
 
                       <div>
