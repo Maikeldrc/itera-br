@@ -1814,7 +1814,7 @@ export function ClaimsTable({
             <div className="w-full max-w-[82rem] max-h-[92vh] flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               
               {/* Header */}
-              <div className="flex items-start justify-between border-b border-slate-100 bg-slate-50 px-6 py-4.5">
+              <div className="flex items-start justify-between border-b border-slate-100 bg-slate-50 px-6 py-5">
                 <div className="flex items-center gap-3">
                   <div className="rounded-xl p-2 bg-rose-50 text-rose-600 shadow-xs">
                     <ShieldAlert className="h-5.5 w-5.5 animate-pulse" />
@@ -1851,11 +1851,11 @@ export function ClaimsTable({
               <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
                 
                 {/* LEFT COLUMN: Outcome, Source, Line Selection, Next Action */}
-                <div className="lg:col-span-5 space-y-5.5">
+                <div className="lg:col-span-5 space-y-6">
                   
                   {/* Section A: Outcome & Source */}
-                  <div className="bg-slate-50/50 p-4.5 rounded-xl border border-slate-200/80 space-y-4">
-                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5">
+                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200/80 space-y-4">
+                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-2 mb-1">
                       {isEnglish ? "1. Outcome & Source" : "1. Resultado y Origen"}
                     </h4>
                     
@@ -1899,8 +1899,8 @@ export function ClaimsTable({
                   </div>
 
                   {/* Section B: Affected Service Lines */}
-                  <div className="bg-slate-50/50 p-4.5 rounded-xl border border-slate-200/80 space-y-3">
-                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5">
+                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200/80 space-y-4">
+                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-2 mb-1">
                       {isEnglish ? "2. Affected CPT Lines" : "2. Líneas CPT Afectadas"}
                     </h4>
                     
@@ -1961,8 +1961,8 @@ export function ClaimsTable({
                   </div>
 
                   {/* Section C: Operational Actions & Task */}
-                  <div className="bg-slate-50/50 p-4.5 rounded-xl border border-slate-200/80 space-y-4">
-                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5">
+                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200/80 space-y-4">
+                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-2 mb-1">
                       {isEnglish ? "3. RCM Next Action & Task" : "3. Próxima Acción RCM y Tarea"}
                     </h4>
                     
@@ -2044,10 +2044,10 @@ export function ClaimsTable({
                 </div>
 
                 {/* RIGHT COLUMN: Coding Modes, rejection codes, internal categories, attachments */}
-                <div className="lg:col-span-7 space-y-5.5">
+                <div className="lg:col-span-7 space-y-6">
                   
                   {/* Category & Internal Analysis */}
-                  <div className="bg-slate-50/50 p-4.5 rounded-xl border border-slate-200/80">
+                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200/80">
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">
                       Internal Denial/Issue Category (for KPI & Reporting)
                     </label>
@@ -2090,14 +2090,14 @@ export function ClaimsTable({
                           <button
                             type="button"
                             onClick={() => setCodingMode("quick")}
-                            className={`px-2 py-1 rounded text-[10.px] font-bold transition-all ${codingMode === "quick" ? "bg-white text-slate-800 shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                            className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${codingMode === "quick" ? "bg-white text-slate-800 shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
                           >
                             Quick Chips
                           </button>
                           <button
                             type="button"
                             onClick={() => setCodingMode("advanced")}
-                            className={`px-2 py-1 rounded text-[10.px] font-bold transition-all ${codingMode === "advanced" ? "bg-white text-slate-800 shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                            className={`px-2 py-1 rounded text-[10px] font-bold transition-all ${codingMode === "advanced" ? "bg-white text-slate-800 shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
                           >
                             Advanced Code Combinations
                           </button>
@@ -2105,7 +2105,7 @@ export function ClaimsTable({
                       )}
                     </div>
 
-                    <div className="p-4.5 space-y-4">
+                    <div className="p-5 space-y-4">
                       {issueStatus === "Rejected" ? (
                         /* REJECTION CODES PANEL */
                         <div className="space-y-3.5 text-xs">
@@ -2414,8 +2414,8 @@ export function ClaimsTable({
                   </div>
 
                   {/* Supporting Documents & Attachments */}
-                  <div className="bg-slate-50/50 p-4.5 rounded-xl border border-slate-200/80 space-y-3">
-                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-1.5">
+                  <div className="bg-slate-50/50 p-5 rounded-xl border border-slate-200/80 space-y-4">
+                    <h4 className="text-[11px] font-bold text-slate-700 uppercase tracking-wider border-b border-slate-200 pb-2 mb-1">
                       Supporting Documents
                     </h4>
                     
@@ -2456,7 +2456,7 @@ export function ClaimsTable({
                   </div>
 
                   {/* General issue notes */}
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">General Issue Note / Adjudication Message</label>
                     <textarea
                       rows={2.5}
