@@ -514,12 +514,15 @@ export function ClaimsTable({
       // Determine claim status
       const allRejected = updatedLines.every(line => line.status === "Rejected");
       const allDenied = updatedLines.every(line => line.status === "Denied");
+      const allPaid = updatedLines.every(line => line.status === "Paid");
       const anyPaid = updatedLines.some(line => line.status === "Paid" || line.status === "Partially Paid");
 
       let targetClaimStatus = ClaimStatus.Pending;
       if (allRejected) targetClaimStatus = ClaimStatus.Rejected;
       else if (allDenied) targetClaimStatus = ClaimStatus.Denied;
+      else if (allPaid) targetClaimStatus = ClaimStatus.Paid;
       else if (anyPaid) targetClaimStatus = ClaimStatus.PartiallyPaid;
+      else if (actualStatus === "Recoupment / Takeback") targetClaimStatus = ClaimStatus.WrittenOff;
       else if (actualStatus === "Pending / Additional Information Needed") targetClaimStatus = ClaimStatus.Pending;
 
       const codesSummary = codingMode === "advanced" 
