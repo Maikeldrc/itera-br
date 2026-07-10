@@ -470,7 +470,7 @@ async function startServer() {
       // Explicit insurance change audit log — bypass diff mechanism for reliability
       if (prevPayerId !== updated.payer_id) {
         console.log("[DEBUG Payer Change] Payer change detected! Creating audit log...");
-        const changeReason = (rawClaimUpdates.insurance_change_reason as string) || "Cambio reportado al procesar ERA";
+        const changeReason = (rawClaimUpdates.insurance_change_reason as string) || "Change reported while processing ERA";
         const memberId     = (rawClaimUpdates.insurance_change_member_id as string) || "";
         const reason = `Insurance changed from "${prevPayerName || prevPayerId}" to "${updated.payer_name || updated.payer_id}"` +
           (changeReason ? ` — Reason: ${changeReason}` : "") +

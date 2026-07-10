@@ -36,6 +36,7 @@ import { Claim, ClaimStatus, ClaimClassification, ErrorCategory, Payment, Note, 
 import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
+import { useLanguage } from "./LanguageProvider";
 import { validateServiceLineDetails } from "../serviceLineValidation";
 import { validateCptRepeatLimitsByLine } from "../cptRepeatLimits";
 
@@ -620,7 +621,8 @@ export function ClaimDetailPanel({
   onSaveServiceLineNotes
 }: ClaimDetailPanelProps) {
   const { notify, confirmAction } = useFeedback();
-  const isEnglish = localStorage.getItem("itera-language") !== "es";
+  const { language } = useLanguage();
+  const isEnglish = language !== "es";
   // Local form states
   const [status, setStatus] = useState<ClaimStatus>(claim.claim_status);
   const [classification, setClassification] = useState<ClaimClassification>(claim.claim_classification);
@@ -689,7 +691,12 @@ export function ClaimDetailPanel({
       return;
     }
     if (newPayerIdState === claim.payer_id) {
-      notify("La aseguradora seleccionada es la misma que la actual. Selecciona una diferente para registrar el cambio.", "warning");
+      notify(
+        isEnglish
+          ? "The selected insurance payer is the same as the current one. Select a different payer to record the change."
+          : "La aseguradora seleccionada es la misma que la actual. Selecciona una diferente para registrar el cambio.",
+        "warning"
+      );
       return;
     }
     const selectedPayer = payers.find(p => p.payer_id === newPayerIdState);
@@ -702,7 +709,7 @@ export function ClaimDetailPanel({
       await onUpdate({
         payer_id: selectedPayer.payer_id,
         payer_name: selectedPayer.payer_name,
-        insurance_change_reason: insuranceChangeReason || "Cambio reportado al procesar ERA",
+        insurance_change_reason: insuranceChangeReason || (isEnglish ? "Change reported while processing ERA" : "Cambio reportado al procesar ERA"),
         insurance_change_member_id: newMemberId || undefined,
       });
       
@@ -716,7 +723,7 @@ export function ClaimDetailPanel({
       "success"
     );
     } catch (err: any) {
-      notify(`Error al registrar cambio de seguro: ${err.message}`, "error");
+      notify(`${isEnglish ? "Insurance change error" : "Error al registrar cambio de seguro"}: ${err.message}`, "error");
     }
   };
 
@@ -761,7 +768,7 @@ export function ClaimDetailPanel({
                 id: note.id || `legacy-${cptCode}-${index}`,
                 text: note.text || "",
                 createdAt: note.createdAt || c.updated_at || new Date().toISOString(),
-                createdBy: note.createdBy || note.updatedBy || "Usuario no registrado",
+                createdBy: note.createdBy || note.updatedBy || (isEnglish ? "Unregistered user" : "Usuario no registrado"),
                 createdByEmail: note.createdByEmail || "",
                 updatedAt: note.updatedAt,
                 updatedBy: note.updatedBy
@@ -771,7 +778,7 @@ export function ClaimDetailPanel({
                   id: `legacy-${cptCode}`,
                   text: existing.note,
                   createdAt: c.updated_at || new Date().toISOString(),
-                  createdBy: c.updated_by || "Usuario no registrado",
+                  createdBy: c.updated_by || (isEnglish ? "Unregistered user" : "Usuario no registrado"),
                   createdByEmail: c.updated_by || ""
                 }]
               : [],
@@ -925,7 +932,7 @@ export function ClaimDetailPanel({
       await onSaveServiceLineNotes(JSON.stringify(nextServiceLines));
     } catch (error) {
       setServiceLines(serviceLines);
-      notify(error instanceof Error ? error.message : "No se pudieron guardar las notas del CPT.", "error");
+      notify(error instanceof Error ? error.message : (isEnglish ? "Unable to save CPT notes." : "No se pudieron guardar las notas del CPT."), "error");
       throw error;
     } finally {
       setIsSavingServiceLineNote(false);
@@ -1010,7 +1017,12 @@ export function ClaimDetailPanel({
 
       if (validationErrors.length > 0) {
         setShowValidationErrors(true);
-        notify("Corrige los errores marcados debajo de cada service line antes de guardar.", "warning");
+        notify(
+          isEnglish
+            ? "Fix the errors marked under each service line before saving."
+            : "Corrige los errores marcados debajo de cada service line antes de guardar.",
+          "warning"
+        );
         return;
       }
 
@@ -1048,9 +1060,9 @@ export function ClaimDetailPanel({
 
       await onUpdate(updates);
       setShowValidationErrors(false);
-      notify("Claim guardado y conciliado correctamente.", "success");
+      notify(isEnglish ? "Claim saved and reconciled successfully." : "Claim guardado y conciliado correctamente.", "success");
     } catch (err: any) {
-      notify(`Error al guardar claim: ${err.message}`, "error");
+      notify(`${isEnglish ? "Claim save error" : "Error al guardar claim"}: ${err.message}`, "error");
     }
   };
 
@@ -1059,9 +1071,9 @@ export function ClaimDetailPanel({
     try {
       await onAddNote(newNoteType, newNoteText);
       setNewNoteText("");
-      notify("Nota registrada.", "success");
+      notify(isEnglish ? "Note added." : "Nota registrada.", "success");
     } catch (err: any) {
-      notify(`Error al guardar nota: ${err.message}`, "error");
+      notify(`${isEnglish ? "Note save error" : "Error al guardar nota"}: ${err.message}`, "error");
     }
   };
 
@@ -1083,9 +1095,9 @@ export function ClaimDetailPanel({
       });
       setLogPaymentAmount("");
       setLogPaymentCheck("");
-      notify("Cobro aplicado correctamente.", "success");
+      notify(isEnglish ? "Payment applied successfully." : "Cobro aplicado correctamente.", "success");
     } catch (err: any) {
-      notify(`Error al registrar cobro: ${err.message}`, "error");
+      notify(`${isEnglish ? "Payment entry error" : "Error al registrar cobro"}: ${err.message}`, "error");
     }
   };
 
@@ -1174,7 +1186,6 @@ export function ClaimDetailPanel({
 
   const renderClaimTimeline = (className = "") => {
     const sortedAudits = [...filteredAudits].sort((a, b) => b.changed_at.localeCompare(a.changed_at));
-    const isEnglish = localStorage.getItem("itera-language") !== "es";
     const parseAuditServiceLines = (value: string | null) => {
       if (!value) return [];
       try {

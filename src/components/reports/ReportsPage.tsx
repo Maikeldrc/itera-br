@@ -18,6 +18,7 @@ import {
 } from "./ReportComponents";
 import { ReportsTable } from "./ReportsTable";
 import { useFeedback } from "../FeedbackProvider";
+import { useLanguage } from "../LanguageProvider";
 
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 const percentage = (value: number | null) => value === null ? "N/A" : `${value.toFixed(1)}%`;
@@ -125,6 +126,8 @@ export function ReportsPage({
   reportFeeSchedules: ReportFeeSchedule[];
 }) {
   const { notify } = useFeedback();
+  const { language } = useLanguage();
+  const isEnglish = language !== "es";
   const [view, setView] = useState<ReportView>(() => {
     const path = window.location.pathname.split("/").filter(Boolean)[1];
     return (["billing-summary", "provider-vs-itera", "collections", "denials", "pending", "coverage"].includes(path) ? path : "billing-summary") as ReportView;
@@ -156,7 +159,7 @@ export function ReportsPage({
   const saveView = () => {
     const { search, ...safeFilters } = filters;
     localStorage.setItem("itera-report-view", JSON.stringify(safeFilters));
-    notify("Vista de reporte guardada localmente.", "success");
+    notify(isEnglish ? "Report view saved locally." : "Vista de reporte guardada localmente.", "success");
   };
 
   return (

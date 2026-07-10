@@ -365,7 +365,7 @@ export default function App() {
       ]);
 
       if (!claimsRes.ok || !paymentsRes.ok || !notesRes.ok) {
-        throw new Error("No se pudo conectar con el servidor Express.");
+        throw new Error(isEnglish ? "Unable to connect to the Express server." : "No se pudo conectar con el servidor Express.");
       }
 
       const claimsData = await claimsRes.json();
@@ -1471,7 +1471,9 @@ export default function App() {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 font-sans gap-3">
         <RefreshCw className="w-8 h-8 text-primary-blue animate-spin" />
-        <h4 className="font-semibold text-slate-800">Cargando Portal de Conciliación de ITERA HEALTH...</h4>
+        <h4 className="font-semibold text-slate-800">
+          {isEnglish ? "Loading ITERA HEALTH Reconciliation Portal..." : "Cargando Portal de Conciliación de ITERA HEALTH..."}
+        </h4>
         <p className="text-xs text-slate-500 font-mono">Connecting secure data service</p>
       </div>
     );
@@ -1482,13 +1484,15 @@ export default function App() {
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-slate-50 font-sans p-6">
         <div className="bg-white border border-red-200 p-8 rounded-2xl max-w-md w-full shadow-2xl text-center space-y-4">
           <AlertTriangle className="w-12 h-12 text-rose-600 mx-auto animate-bounce" />
-          <h3 className="font-bold text-slate-800 text-lg">Error de Inicialización Full-Stack</h3>
+          <h3 className="font-bold text-slate-800 text-lg">
+            {isEnglish ? "Full-Stack Initialization Error" : "Error de Inicialización Full-Stack"}
+          </h3>
           <p className="text-sm text-slate-600 leading-relaxed">{errorState}</p>
           <button
             onClick={fetchAllData}
             className="w-full bg-dark-blue text-white p-2.5 rounded-xl font-bold hover:bg-primary-blue transition-colors text-xs uppercase"
           >
-            Reintentar Conexión
+            {isEnglish ? "Retry Connection" : "Reintentar Conexión"}
           </button>
         </div>
       </div>
