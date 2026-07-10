@@ -1,82 +1,117 @@
 import {
+  CARC_CATALOG,
   ISSUE_GROUP_CODES,
+  QUICK_ISSUE_PRESETS,
   RARC_CATALOG,
   buildIssueCodes,
+  enumerateIssueCombinationTestCases,
   enumerateRarcSubsets,
+  getCarcGroup,
   getCarcOptionsForGroup,
-  normalizeIssueCombination
+  normalizeIssueCombination,
+  quickCodesForCategory,
+  validateIssueCombination
 } from "./registerIssueCoding";
 
 export function runRegisterIssueCodingTests() {
-  const results: { name: string; success: boolean; error?: string }[] = [];
+  const failures: string[] = [];
+  const rarcSubsets = enumerateRarcSubsets();
+  const testCases = enumerateIssueCombinationTestCases();
 
-  function test(name: string, fn: () => void) {
-    try {
-      fn();
-      results.push({ name, success: true });
-    } catch (error: any) {
-      results.push({ name, success: false, error: error.message || String(error) });
-    }
+  const expectedCaseCount = CARC_CATALOG.length * (2 ** RARC_CATALOG.length);
+  if (testCases.length !== expectedCaseCount) {
+    failures.push(`Expected ${expectedCaseCount} advanced combinations, got ${testCases.length}.`);
   }
 
-  test("Every group has at least one CARC option", () => {
-    for (const groupCode of ISSUE_GROUP_CODES) {
-      const options = getCarcOptionsForGroup(groupCode);
-      if (options.length === 0) throw new Error(`${groupCode} has no CARC options.`);
-      for (const option of options) {
-        if (!option.code.startsWith(`${groupCode}-`)) {
-          throw new Error(`${option.code} is not valid for ${groupCode}.`);
-        }
+  ISSUE_GROUP_CODES.forEach(groupCode => {
+    const groupCarcs = getCarcOptionsForGroup(groupCode);
+    if (groupCarcs.length === 0) {
+      failures.push(`Group ${groupCode} has no selectable CARC codes.`);
+    }
+    groupCarcs.forEach(carc => {
+      if (getCarcGroup(carc.code) !== groupCode) {
+        failures.push(`CARC ${carc.code} is exposed under the wrong group ${groupCode}.`);
       }
-    }
+    });
   });
 
-  test("All valid Group/CARC/RARC subset combinations build expected codes", () => {
-    const rarcSubsets = enumerateRarcSubsets();
-    let tested = 0;
+  testCases.forEach(combination => {
+    const errors = validateIssueCombination(combination);
+    if (errors.length > 0) {
+      failures.push(`Valid combination failed: ${combination.groupCode}/${combination.carc}/${combination.rarcs.join("+") || "none"} -> ${errors.join("; ")}`);
+      return;
+    }
 
-    for (const groupCode of ISSUE_GROUP_CODES) {
-      for (const carc of getCarcOptionsForGroup(groupCode)) {
-        for (const rarcs of rarcSubsets) {
-          const codes = buildIssueCodes([{ groupCode, carc: carc.code, rarcs }]);
-          const expected = [carc.code, ...rarcs];
-
-          if (codes.length !== expected.length) {
-            throw new Error(`${groupCode}/${carc.code}/${rarcs.join(",")} returned ${codes.join(",")}.`);
-          }
-          for (const code of expected) {
-            if (!codes.includes(code)) {
-              throw new Error(`${groupCode}/${carc.code}/${rarcs.join(",")} is missing ${code}.`);
-            }
-          }
-          tested += 1;
-        }
+    const codes = buildIssueCodes([combination]);
+    if (!codes.includes(combination.carc)) {
+      failures.push(`Built codes missed CARC ${combination.carc}.`);
+    }
+    combination.rarcs.forEach(rarc => {
+      if (!codes.includes(rarc)) {
+        failures.push(`Built codes missed RARC ${rarc} for ${combination.carc}.`);
       }
-    }
-
-    const expectedTotal = ISSUE_GROUP_CODES
-      .reduce((sum, groupCode) => sum + getCarcOptionsForGroup(groupCode).length, 0) * (2 ** RARC_CATALOG.length);
-    if (tested !== expectedTotal) throw new Error(`Expected ${expectedTotal} combinations, tested ${tested}.`);
-  });
-
-  test("Mismatched Group/CARC combinations normalize to the selected group", () => {
-    const normalized = normalizeIssueCombination({ groupCode: "PR", carc: "CO-16", rarcs: [] });
-    if (normalized.carc !== "PR-1") {
-      throw new Error(`Expected PR-1, got ${normalized.carc}.`);
+    });
+    if (new Set(codes).size !== codes.length) {
+      failures.push(`Built codes include duplicates for ${combination.carc}/${combination.rarcs.join("+")}.`);
     }
   });
 
-  test("Invalid or duplicate RARC codes are removed", () => {
-    const codes = buildIssueCodes([{ groupCode: "CO", carc: "CO-16", rarcs: ["N105", "N105", "BAD"] }]);
-    if (codes.join("|") !== "CO-16|N105") {
-      throw new Error(`Expected CO-16|N105, got ${codes.join("|")}.`);
+  QUICK_ISSUE_PRESETS.forEach(preset => {
+    const groupCode = getCarcGroup(preset.carc);
+    const combination = { groupCode, carc: preset.carc, rarcs: preset.rarcs };
+    const errors = validateIssueCombination(combination);
+    if (errors.length > 0) {
+      failures.push(`Quick preset "${preset.label}" is invalid: ${errors.join("; ")}`);
     }
+
+    const categoryCodes = quickCodesForCategory(preset.category);
+    const expectedCodes = [preset.carc, ...preset.rarcs];
+    expectedCodes.forEach(code => {
+      if (!categoryCodes.includes(code)) {
+        failures.push(`Quick category ${preset.category} missed code ${code}.`);
+      }
+    });
   });
 
-  return results;
+  const invalidCarc = normalizeIssueCombination({ groupCode: "PR", carc: "CO-16", rarcs: ["N105", "BAD-RARC", "N105"] });
+  if (invalidCarc.carc !== "PR-1") {
+    failures.push(`Invalid PR/CO mismatch did not normalize to PR-1. Got ${invalidCarc.carc}.`);
+  }
+  if (invalidCarc.rarcs.join(",") !== "N105") {
+    failures.push(`Invalid or duplicate RARCs were not normalized. Got ${invalidCarc.rarcs.join(",")}.`);
+  }
+
+  const duplicateCodes = buildIssueCodes([
+    { groupCode: "CO", carc: "CO-16", rarcs: ["N105"] },
+    { groupCode: "CO", carc: "CO-16", rarcs: ["N105", "N781"] }
+  ]);
+  if (duplicateCodes.join(",") !== "CO-16,N105,N781") {
+    failures.push(`Duplicate code collapse failed. Got ${duplicateCodes.join(",")}.`);
+  }
+
+  return {
+    failures,
+    coverage: {
+      groupCodes: ISSUE_GROUP_CODES.length,
+      carcCodes: CARC_CATALOG.length,
+      rarcCodes: RARC_CATALOG.length,
+      rarcSubsets: rarcSubsets.length,
+      advancedCombinations: testCases.length,
+      quickPresets: QUICK_ISSUE_PRESETS.length
+    }
+  };
 }
 
-const results = runRegisterIssueCodingTests();
-const failed = results.filter(result => !result.success);
-console.log(JSON.stringify({ total: results.length, failed: failed.length, results }, null, 2));
-if (failed.length > 0) process.exit(1);
+const result = runRegisterIssueCodingTests();
+if (result.failures.length > 0) {
+  console.error("Register Claim Issue coding certification failed:");
+  result.failures.forEach(failure => console.error(`- ${failure}`));
+  process.exit(1);
+}
+
+console.log(
+  `Register Claim Issue coding certification passed: ${result.coverage.groupCodes} groups, ` +
+  `${result.coverage.carcCodes} CARCs, ${result.coverage.rarcCodes} RARCs, ` +
+  `${result.coverage.rarcSubsets} RARC subsets, ${result.coverage.advancedCombinations} advanced combinations, ` +
+  `${result.coverage.quickPresets} quick presets.`
+);

@@ -36,7 +36,10 @@ import {
   buildIssueCodes,
   getCarcOptionsForGroup,
   getDefaultCarcForGroup,
+  getQuickIssuePreset,
+  getQuickIssuePresetLabels,
   normalizeIssueCombination,
+  quickCodesForCategory,
   type IssueGroupCode
 } from "../registerIssueCoding";
 
@@ -492,14 +495,7 @@ export function ClaimsTable({
                   .map(comb => ({ groupCode: comb.groupCode, carc: comb.carc, rarcs: comb.rarcs }))
               ));
             } else {
-              // Quick Mode defaults based on internal category
-              if (internalCategory === "Eligibility / Coverage") nextCodes.push("CO-16", "PR-204");
-              else if (internalCategory === "Incorrect Payer") nextCodes.push("CO-109");
-              else if (internalCategory === "Coordination of Benefits") nextCodes.push("CO-22");
-              else if (internalCategory === "Authorization / Referral") nextCodes.push("CO-197");
-              else if (internalCategory === "Timely Filing") nextCodes.push("CO-29");
-              else if (internalCategory === "Medical Necessity") nextCodes.push("CO-50");
-              else if (internalCategory === "Duplicate Claim") nextCodes.push("CO-18");
+              nextCodes.push(...quickCodesForCategory(internalCategory));
             }
           } else if (actualStatus === "Rejected") {
             if (rejectionData.statusCode) {
@@ -1853,61 +1849,25 @@ export function ClaimsTable({
         };
 
         const handleQuickChipSelect = (chip: string) => {
-          let suggestedCarc = "CO-16";
-          let suggestedRarcs: string[] = [];
-          
-          if (chip === "Eligibility / Coverage Issue") {
-            setInternalCategory("Eligibility / Coverage");
-            suggestedCarc = "PR-204";
-          } else if (chip === "Incorrect Payer / Contractor") {
-            setInternalCategory("Incorrect Payer");
-            suggestedCarc = "CO-109";
-          } else if (chip === "Railroad Medicare") {
-            setInternalCategory("Railroad Medicare");
-            suggestedCarc = "CO-109";
-            suggestedRarcs = ["N105"];
-          } else if (chip === "COB Issue") {
-            setInternalCategory("Coordination of Benefits");
-            suggestedCarc = "CO-22";
-          } else if (chip === "Authorization Missing") {
-            setInternalCategory("Authorization / Referral");
-            suggestedCarc = "CO-197";
-          } else if (chip === "Duplicate Claim") {
-            setInternalCategory("Duplicate Claim");
-            suggestedCarc = "CO-18";
-          } else if (chip === "Bundled / Inclusive") {
-            setInternalCategory("Bundling");
-            suggestedCarc = "CO-97";
-          } else if (chip === "Timely Filing") {
-            setInternalCategory("Timely Filing");
-            suggestedCarc = "CO-29";
-          } else if (chip === "Medical Necessity") {
-            setInternalCategory("Medical Necessity");
-            suggestedCarc = "CO-50";
-          } else if (chip === "Benefit Maximum Reached") {
-            setInternalCategory("Benefit Limitation");
-            suggestedCarc = "CO-119";
-          } else if (chip === "QMB / Medicaid Cost-Sharing") {
-            setInternalCategory("QMB / Medicaid");
-            suggestedCarc = "PR-1";
-            suggestedRarcs = ["N781"];
-          }
+          const preset = getQuickIssuePreset(chip);
+          if (!preset) return;
+          setInternalCategory(preset.category);
 
           // Auto inject code combination
           setDenialCombinations([
             {
               id: `comb-quick-${Date.now()}`,
               level: activeIssueCpt ? "Service Line" : "Claim",
-              groupCode: suggestedCarc.startsWith("PR") ? "PR" : "CO",
-              carc: suggestedCarc,
-              rarcs: suggestedRarcs,
+              groupCode: preset.carc.split("-")[0] as IssueGroupCode,
+              carc: preset.carc,
+              rarcs: preset.rarcs,
               amount: activeIssueClaim.billed_charge,
-              patientResponsibility: suggestedCarc.startsWith("PR") ? activeIssueClaim.billed_charge : 0,
+              patientResponsibility: preset.carc.startsWith("PR") ? activeIssueClaim.billed_charge : 0,
               cpt: activeIssueCpt || (claimServiceLines[0]?.cpt || "")
             }
           ]);
           setCodingMode("advanced");
-          notify(isEnglish ? `Quick preset applied: ${suggestedCarc}` : `Ajuste rápido aplicado: ${suggestedCarc}`, "info");
+          notify(isEnglish ? `Quick preset applied: ${preset.carc}` : `Ajuste rápido aplicado: ${preset.carc}`, "info");
         };
 
         const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2383,23 +2343,7 @@ export function ClaimsTable({
                             Select a frequent denial reason to auto-configure standard X12 CARC/RARC codes:
                           </p>
                           <div className="flex flex-wrap gap-2">
-                            {[
-                              "Incorrect Payer / Contractor",
-                              "Eligibility / Coverage Issue",
-                              "Railroad Medicare",
-                              "COB Issue",
-                              "Missing Information",
-                              "Authorization Missing",
-                              "Duplicate Claim",
-                              "Bundled / Inclusive",
-                              "Timely Filing",
-                              "Medical Necessity",
-                              "Benefit Maximum Reached",
-                              "Non-Covered Service",
-                              "Provider Enrollment / NPI Issue",
-                              "Patient Responsibility",
-                              "QMB / Medicaid Cost-Sharing"
-                            ].map(preset => (
+                            {getQuickIssuePresetLabels().map(preset => (
                               <button
                                 key={preset}
                                 type="button"
