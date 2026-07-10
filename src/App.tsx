@@ -1739,7 +1739,7 @@ export default function App() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">ID Claim</th>
+                        <th className="p-3.5">{isEnglish ? "Patient" : "Paciente"}</th>
                         <th className="p-3.5">{isEnglish ? "Provider" : "Médico"}</th>
                         <th className="p-3.5">{isEnglish ? "Insurance" : "Aseguradora"}</th>
                         <th className="p-3.5">CPT</th>
@@ -1754,7 +1754,7 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
                       {visibleClaims.filter(c => c.claim_status === ClaimStatus.Denied || c.claim_status === ClaimStatus.Rejected).map((c) => (
                         <tr key={c.claim_id} className="hover:bg-slate-50">
-                          <td className="p-3.5 font-bold text-rose-700 font-mono">{c.claim_id}</td>
+                          <td className="p-3.5 font-bold text-slate-800">{c.patient_display_name_masked || (isEnglish ? "Unknown patient" : "Paciente desconocido")}</td>
                           <td className="p-3.5 font-semibold">{c.provider_name}</td>
                           <td className="p-3.5 text-slate-600">{c.payer_name}</td>
                           <td className="p-3.5 font-mono">{c.cpt_hcpcs}</td>

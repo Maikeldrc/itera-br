@@ -175,17 +175,17 @@ function applyPrimaryPaymentToServiceLine(line: any, inputAmount: number) {
   const secondaryPaid = normalized.secondaryPaid;
   const primaryPaid = Number(Math.max(0, inputAmount).toFixed(2));
   const allowed = Number(Math.max(existingAllowed, charged, primaryPaid + secondaryPaid + patResp).toFixed(2));
-  const balance = Number((allowed - primaryPaid - secondaryPaid - patResp).toFixed(2));
+  const adj = roundMoney(Math.max(0, charged - allowed));
 
   return {
     ...normalized,
     charged,
     allowed,
-    adj: Number((charged - allowed).toFixed(2)),
+    adj,
     paid: primaryPaid,
     secondaryPaid,
     patResp,
-    balance: Math.max(0, balance),
+    balance: calculateCasBalance(charged, primaryPaid, secondaryPaid, adj),
     status: primaryPaid > 0
       ? "Paid"
       : (line.status === "Paid" || line.status === "Partially Paid" ? "Pending" : line.status || "Pending"),
@@ -200,6 +200,14 @@ function numberOrZero(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function roundMoney(value: number) {
+  return Number(value.toFixed(2));
+}
+
+function calculateCasBalance(charged: number, paid: number, secondaryPaid: number, adjustment: number) {
+  return roundMoney(Math.max(0, charged - paid - secondaryPaid - adjustment));
+}
+
 function normalizePaymentServiceLine(line: any) {
   const charged = Number(numberOrZero(line.charged).toFixed(2));
   const allowedSource = line.allowed === undefined || line.allowed === null || line.allowed === ""
@@ -209,17 +217,17 @@ function normalizePaymentServiceLine(line: any) {
   const paid = Number(numberOrZero(line.paid).toFixed(2));
   const secondaryPaid = Number(numberOrZero(line.secondaryPaid).toFixed(2));
   const patResp = Number(numberOrZero(line.patResp).toFixed(2));
-  const balance = Number((allowed - paid - secondaryPaid - patResp).toFixed(2));
+  const adj = roundMoney(Math.max(0, charged - allowed));
 
   return {
     ...line,
     charged,
     allowed,
-    adj: Number((charged - allowed).toFixed(2)),
+    adj,
     paid,
     secondaryPaid,
     patResp,
-    balance: Math.max(0, balance),
+    balance: calculateCasBalance(charged, paid, secondaryPaid, adj),
     status: line.status || "Pending",
     nextAction: line.nextAction || "No action",
     notes: Array.isArray(line.notes) ? line.notes : [],
@@ -436,6 +444,35 @@ export function ClaimsTable({
       else if (actualStatus === "Pending / Additional Information Needed") targetLineStatus = "Pending";
       else if (actualStatus === "Recoupment / Takeback") targetLineStatus = "Written Off";
 
+      const balanceValidationErrors: string[] = [];
+      const affectedLinesForAllocation = updatedLines.filter((line: any) => selectedLines.includes(line.cpt));
+      const affectedChargeTotal = affectedLinesForAllocation.reduce((sum: number, line: any) => sum + (Number(line.charged) || 0), 0);
+      const claimLevelAllocations = new Map<string, Map<string, number>>();
+      denialCombinations
+        .filter(comb => comb.level === "Claim")
+        .forEach(comb => {
+          const amount = roundMoney(Number(comb.amount) || 0);
+          const lineAllocations = new Map<string, number>();
+          let allocated = 0;
+          affectedLinesForAllocation.forEach((line: any, index: number) => {
+            const isLast = index === affectedLinesForAllocation.length - 1;
+            const weight = affectedChargeTotal > 0
+              ? (Number(line.charged) || 0) / affectedChargeTotal
+              : 1 / Math.max(affectedLinesForAllocation.length, 1);
+            const lineAmount = isLast ? roundMoney(amount - allocated) : roundMoney(amount * weight);
+            allocated = roundMoney(allocated + lineAmount);
+            lineAllocations.set(line.cpt, lineAmount);
+          });
+          claimLevelAllocations.set(comb.id, lineAllocations);
+        });
+
+      const getCombinationAmountForLine = (comb: typeof denialCombinations[number], line: any) => {
+        if (comb.level === "Claim") {
+          return claimLevelAllocations.get(comb.id)?.get(line.cpt) || 0;
+        }
+        return comb.cpt === line.cpt ? Number(comb.amount) || 0 : 0;
+      };
+
       updatedLines = updatedLines.map((line: any) => {
         if (selectedLines.includes(line.cpt)) {
           // Add notes
@@ -477,8 +514,11 @@ export function ClaimsTable({
           if (actualStatus === "Denied" || actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment") {
             if (codingMode === "advanced") {
               const activeCombs = denialCombinations.filter(c => c.level === "Claim" || c.cpt === line.cpt);
-              lineAdj = activeCombs.reduce((sum, c) => sum + (c.amount || 0), 0);
-              linePatResp = activeCombs.reduce((sum, c) => sum + (c.patientResponsibility || 0), 0);
+              lineAdj = roundMoney(activeCombs.reduce((sum, c) => sum + getCombinationAmountForLine(c, line), 0));
+              linePatResp = roundMoney(activeCombs.reduce((sum, c) => {
+                if (c.groupCode === "PR") return sum + getCombinationAmountForLine(c, line);
+                return sum + (Number(c.patientResponsibility) || 0);
+              }, 0));
             } else {
               if (actualStatus === "Denied") {
                 lineAdj = line.charged;
@@ -496,16 +536,20 @@ export function ClaimsTable({
 
           const finalAllowed = Math.max(0, line.charged - lineAdj);
           const finalPaid = actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment"
-            ? Math.min(Math.max(0, linePaid || finalAllowed - linePatResp), finalAllowed)
+            ? Math.min(Math.max(0, linePaid || finalAllowed), finalAllowed)
             : 0;
+          const rawBalance = roundMoney(line.charged - finalPaid - lineAdj);
+          if (rawBalance < -0.01) {
+            balanceValidationErrors.push(`CPT ${line.cpt}: CAS adjustments exceed the remaining charge by $${Math.abs(rawBalance).toFixed(2)}.`);
+          }
 
           return {
             ...line,
-            allowed: Number(finalAllowed.toFixed(2)),
-            adj: Number(lineAdj.toFixed(2)),
-            patResp: Number(linePatResp.toFixed(2)),
-            paid: Number(finalPaid.toFixed(2)),
-            balance: Number((finalAllowed - finalPaid - linePatResp).toFixed(2)),
+            allowed: roundMoney(finalAllowed),
+            adj: roundMoney(lineAdj),
+            patResp: roundMoney(linePatResp),
+            paid: roundMoney(finalPaid),
+            balance: roundMoney(Math.max(0, rawBalance)),
             status: targetLineStatus,
             codes: Array.from(new Set(nextCodes)).filter(Boolean),
             notes: nextNotes,
@@ -514,6 +558,14 @@ export function ClaimsTable({
         }
         return line;
       });
+
+      if (balanceValidationErrors.length > 0) {
+        notify(
+          `${localIsEnglish ? "Review adjudication amounts before applying:" : "Revise los montos de adjudicación antes de aplicar:"} ${balanceValidationErrors.join(" ")}`,
+          "warning"
+        );
+        return;
+      }
 
       // Recalculate totals
       const totalLinePaid = updatedLines.reduce((sum, line) => sum + (Number(line.paid) || 0) + (Number(line.secondaryPaid) || 0), 0);
@@ -1772,9 +1824,19 @@ export function ClaimsTable({
               if (field === "groupCode") {
                 updated.groupCode = value as IssueGroupCode;
                 updated.carc = getDefaultCarcForGroup(updated.groupCode);
+                updated.patientResponsibility = updated.groupCode === "PR" ? Number(updated.amount) || 0 : 0;
               }
               if (field === "carc") {
                 updated.carc = value;
+              }
+              if (field === "amount") {
+                updated.amount = Number(value) || 0;
+                if (updated.groupCode === "PR") {
+                  updated.patientResponsibility = updated.amount;
+                }
+              }
+              if (field === "patientResponsibility") {
+                updated.patientResponsibility = updated.groupCode === "PR" ? Number(updated.amount) || 0 : Number(value) || 0;
               }
               // Smart suggestions based on RARC/CARC
               if (updated.carc === "CO-109") {
@@ -1873,8 +1935,8 @@ export function ClaimsTable({
           if (c.groupCode === "CO" && c.patientResponsibility > 0) {
             warnings.push(`Combination ${c.carc}: Contractual Obligations (CO) should not be billed to the patient. Normally transferred to write-off.`);
           }
-          if (c.groupCode === "PR" && c.patientResponsibility === 0) {
-            warnings.push(`Combination ${c.carc}: Patient Responsibility (PR) code added but Patient Responsibility amount is $0.00.`);
+          if (c.groupCode === "PR" && (Number(c.amount) || 0) === 0) {
+            warnings.push(`Combination ${c.carc}: Patient Responsibility (PR) code added but CAS Adjustment Amount is $0.00.`);
           }
           if (c.carc === "CO-109" && internalCategory !== "Incorrect Payer" && internalCategory !== "Railroad Medicare") {
             warnings.push("CARC CO-109 (Claim not covered by payer) detected. Consider setting Category to Incorrect Payer.");
@@ -2470,15 +2532,24 @@ export function ClaimsTable({
                                     </div>
 
                                     <div className="col-span-3">
-                                      <label className="block text-[8px] font-bold text-slate-400 uppercase">Patient Resp ($)</label>
+                                      <label className="block text-[8px] font-bold text-slate-400 uppercase">
+                                        {comb.groupCode === "PR" ? "Patient Resp (Derived)" : "Patient Resp ($)"}
+                                      </label>
                                       <input
                                         type="number"
                                         step="0.01"
                                         placeholder="0.00"
                                         value={comb.patientResponsibility || ""}
                                         onChange={(e) => handleUpdateCombination(comb.id, "patientResponsibility", Number(e.target.value) || 0)}
-                                        className="w-full py-1 px-1.5 border border-slate-200 rounded text-[10px] font-mono text-right"
+                                        disabled={comb.groupCode === "PR"}
+                                        title={comb.groupCode === "PR" ? "For PR codes, Patient Responsibility is derived from CAS Adjustment Amount and is not subtracted again." : undefined}
+                                        className="w-full py-1 px-1.5 border border-slate-200 rounded text-[10px] font-mono text-right disabled:bg-slate-100 disabled:text-slate-500"
                                       />
+                                      {comb.groupCode === "PR" && (
+                                        <p className="mt-1 text-[8px] leading-tight text-slate-400">
+                                          Informational only; balance uses CAS adjustment once.
+                                        </p>
+                                      )}
                                     </div>
                                   </div>
                                   

@@ -69,9 +69,8 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
     const primaryPaid = money(line.paid);
     const secondaryPaid = money(line.secondaryPaid);
     const totalPaid = primaryPaid + secondaryPaid;
-    const patResp = money(line.patResp);
     const expectedAdj = Number((charged - allowed).toFixed(2));
-    const expectedBalance = Number((allowed - totalPaid - patResp).toFixed(2));
+    const expectedBalance = Number(Math.max(0, charged - totalPaid - money(line.adj)).toFixed(2));
     const status = line.status || "Pending";
     const codes = Array.isArray(line.codes) ? line.codes.filter(Boolean) : [];
 
@@ -104,7 +103,7 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
     }
 
     if (!closeEnough(money(line.balance), expectedBalance)) {
-      addLineError(index, "balance must equal allowed minus total paid minus patient responsibility.");
+      addLineError(index, "balance must equal charged amount minus total paid minus CAS adjustments.");
     }
 
     if (line.hasSecondaryPayment || secondaryPaid > 0) {
@@ -120,7 +119,7 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
       addLineError(index, "total paid (primary + secondary) cannot exceed the charged amount.");
     }
 
-    if (expectedBalance < -MONEY_TOLERANCE) {
+    if (charged - totalPaid - money(line.adj) < -MONEY_TOLERANCE) {
       addLineError(index, "balance cannot be negative.");
     }
 

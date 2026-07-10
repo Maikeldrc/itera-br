@@ -330,6 +330,40 @@ export function runReconciliationEngineTests() {
     }
   });
 
+  test("Validation: PR CAS adjustment does not double-count patient responsibility", () => {
+    const errors = validateClaim({
+      claim_id: "CLM-TEST-PR-001",
+      billed_by: "ITERA",
+      payment_received_by: "Unknown",
+      claim_status: ClaimStatus.Denied,
+      claim_classification: ClaimClassification.DeniedNeedsReview,
+      billed_charge: 23.59,
+      allowed_amount: 0,
+      paid_amount: 0,
+      service_lines_json: JSON.stringify([{
+        cpt: "99453",
+        charged: 23.59,
+        allowed: 0,
+        adj: 23.59,
+        patResp: 23.59,
+        paid: 0,
+        secondaryPaid: 0,
+        balance: 0,
+        codes: ["PR-204"],
+        status: "Denied",
+        nextAction: "Correct and Resubmit"
+      }])
+    });
+
+    const doubleCountErrors = errors.filter(error =>
+      error.includes("balance must equal") || error.includes("balance cannot be negative")
+    );
+
+    if (doubleCountErrors.length > 0) {
+      throw new Error(`Validation double-counted PR patient responsibility: ${doubleCountErrors.join("; ")}`);
+    }
+  });
+
   test("Validation: Denied service line requires ERA code", () => {
     const errors = validateClaim({
       claim_id: "CLM-TEST-002",

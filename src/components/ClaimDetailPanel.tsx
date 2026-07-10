@@ -857,7 +857,7 @@ export function ClaimDetailPanel({
     const totalAllowed = serviceLines.reduce((acc, l) => acc + (l.allowed || 0), 0);
     const totalPaid = serviceLines.reduce((acc, l) => acc + (Number(l.paid) || 0) + (Number(l.secondaryPaid) || 0), 0);
     const totalAdj = serviceLines.reduce((acc, l) => acc + (l.adj || 0), 0);
-    const totalDenied = serviceLines.reduce((acc, l) => acc + (l.codes?.length > 0 ? (l.charged - l.paid - l.secondaryPaid - l.patResp) : 0), 0);
+    const totalDenied = serviceLines.reduce((acc, l) => acc + (l.codes?.length > 0 ? Math.max(0, l.charged - l.paid - l.secondaryPaid - l.adj) : 0), 0);
     
     setBilledCharge(Number(totalCharged.toFixed(2)));
     setAllowedAmount(Number(totalAllowed.toFixed(2)));
@@ -909,10 +909,9 @@ export function ClaimDetailPanel({
       const allowedNum = Number(line.allowed) || 0;
       const paidNum = Number(line.paid) || 0;
       const secondaryPaidNum = Number(line.secondaryPaid) || 0;
-      const patRespNum = Number(line.patResp) || 0;
 
       line.adj = Number((chargedNum - allowedNum).toFixed(2));
-      line.balance = Number((allowedNum - paidNum - secondaryPaidNum - patRespNum).toFixed(2));
+      line.balance = Number(Math.max(0, chargedNum - paidNum - secondaryPaidNum - line.adj).toFixed(2));
       
       copy[index] = line;
       return copy;

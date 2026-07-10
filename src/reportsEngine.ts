@@ -229,7 +229,7 @@ export function expandClaimsToReportLines(
         ? number(serviceLine.paid) + number(serviceLine.secondaryPaid)
         : (number(claim.total_collections) || number(claim.paid_amount)) / count;
       const denied = serviceLine?.status === "Denied"
-        ? Math.max(billed - paid - number(serviceLine.patResp), 0)
+        ? Math.max(billed - paid - number(serviceLine.adj), 0)
         : number(claim.denied_amount) / count;
       const pending = PENDING_STATUSES.has(claim.claim_status)
         ? (number(claim.ar_balance) || billed) / count
