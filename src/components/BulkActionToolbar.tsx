@@ -4,13 +4,13 @@
  */
 
 import React, { useState } from "react";
-import { Check, Clipboard, AlertTriangle, HelpCircle, FileSpreadsheet, Tag, Send } from "lucide-react";
+import { Check, Clipboard, AlertTriangle, HelpCircle, FileSpreadsheet, Tag, Send, Loader2 } from "lucide-react";
 import { ClaimStatus, ClaimClassification } from "../types";
 import { useLanguage } from "./LanguageProvider";
 
 interface BulkActionToolbarProps {
   selectedCount: number;
-  onApplyAction: (actionType: string, value: any) => void;
+  onApplyAction: (actionType: string, value: any) => void | Promise<void>;
   onExportSelected: () => void;
   onClearSelection: () => void;
 }
@@ -26,19 +26,32 @@ export function BulkActionToolbar({
   const [noteText, setNoteText] = useState("");
   const [isNoteOpen, setIsNoteOpen] = useState(false);
   const [openMenu, setOpenMenu] = useState<"status" | "classification" | "billed_by" | "payment_received_by" | null>(null);
+  const [pendingActionLabel, setPendingActionLabel] = useState<string | null>(null);
+  const isApplying = !!pendingActionLabel;
 
   if (selectedCount === 0) return null;
 
-  const handleApplyNote = () => {
-    if (!noteText.trim()) return;
-    onApplyAction("note", noteText);
-    setNoteText("");
-    setIsNoteOpen(false);
+  const handleApplyNote = async () => {
+    if (!noteText.trim() || isApplying) return;
+    setPendingActionLabel(isEnglish ? "Applying bulk note..." : "Aplicando nota masiva...");
+    try {
+      await onApplyAction("note", noteText);
+      setNoteText("");
+      setIsNoteOpen(false);
+    } finally {
+      setPendingActionLabel(null);
+    }
   };
 
-  const applyMenuAction = (actionType: string, value: any) => {
+  const applyMenuAction = async (actionType: string, value: any) => {
+    if (isApplying) return;
     setOpenMenu(null);
-    onApplyAction(actionType, value);
+    setPendingActionLabel(isEnglish ? "Applying bulk update..." : "Aplicando actualización masiva...");
+    try {
+      await onApplyAction(actionType, value);
+    } finally {
+      setPendingActionLabel(null);
+    }
   };
 
   return (
@@ -49,7 +62,10 @@ export function BulkActionToolbar({
         </span>
         <div>
           <p className="text-sm font-bold uppercase tracking-wider">{isEnglish ? "Bulk Claim Actions" : "Acciones Masivas para Claims"}</p>
-          <p className="text-[11px] text-blue-200 font-medium">{isEnglish ? "Apply changes to all selected items" : "Aplica cambios a todos los elementos seleccionados"}</p>
+          <p className="flex items-center gap-1.5 text-[11px] text-blue-200 font-medium">
+            {isApplying && <Loader2 className="h-3 w-3 animate-spin" />}
+            {pendingActionLabel || (isEnglish ? "Apply changes to all selected items" : "Aplica cambios a todos los elementos seleccionados")}
+          </p>
         </div>
       </div>
 
@@ -58,9 +74,10 @@ export function BulkActionToolbar({
         <div className="relative group">
           <button
             type="button"
+            disabled={isApplying}
             onClick={() => setOpenMenu(openMenu === "status" ? null : "status")}
             aria-expanded={openMenu === "status"}
-            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
           >
             <Check className="w-3.5 h-3.5 text-emerald-400" />
             {isEnglish ? "Change Status" : "Cambiar Estado"}
@@ -81,9 +98,10 @@ export function BulkActionToolbar({
         <div className="relative group">
           <button
             type="button"
+            disabled={isApplying}
             onClick={() => setOpenMenu(openMenu === "classification" ? null : "classification")}
             aria-expanded={openMenu === "classification"}
-            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
           >
             <Tag className="w-3.5 h-3.5 text-sky-400" />
             {isEnglish ? "Classification" : "Clasificación"}
@@ -106,9 +124,10 @@ export function BulkActionToolbar({
         <div className="relative group">
           <button
             type="button"
+            disabled={isApplying}
             onClick={() => setOpenMenu(openMenu === "billed_by" ? null : "billed_by")}
             aria-expanded={openMenu === "billed_by"}
-            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
           >
             <HelpCircle className="w-3.5 h-3.5 text-blue-400" />
             Billed By
@@ -123,9 +142,10 @@ export function BulkActionToolbar({
         <div className="relative group">
           <button
             type="button"
+            disabled={isApplying}
             onClick={() => setOpenMenu(openMenu === "payment_received_by" ? null : "payment_received_by")}
             aria-expanded={openMenu === "payment_received_by"}
-            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
           >
             <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" />
             Received By
@@ -141,8 +161,9 @@ export function BulkActionToolbar({
         {/* Add Note Button */}
         <div className="relative">
           <button
+            disabled={isApplying}
             onClick={() => setIsNoteOpen(!isNoteOpen)}
-            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
           >
             <Clipboard className="w-3.5 h-3.5 text-purple-400" />
             {isEnglish ? "Add Note" : "Añadir Nota"}
@@ -158,10 +179,10 @@ export function BulkActionToolbar({
                 className="w-full p-2 bg-slate-800 border border-slate-700 rounded text-xs focus:outline-hidden focus:ring-1 focus:ring-primary-blue text-white"
               />
               <div className="flex justify-end gap-1.5 mt-2">
-                <button onClick={() => setIsNoteOpen(false)} className="px-2 py-1 text-[10px] hover:bg-slate-800 rounded cursor-pointer">{isEnglish ? "Cancel" : "Cancelar"}</button>
-                <button onClick={handleApplyNote} className="px-2.5 py-1 bg-primary-blue hover:bg-secondary-blue rounded text-[10px] flex items-center gap-1 font-bold text-white uppercase tracking-wider cursor-pointer">
-                  <Send className="w-2.5 h-2.5" />
-                  {isEnglish ? "Apply" : "Aplicar"}
+                <button disabled={isApplying} onClick={() => setIsNoteOpen(false)} className="px-2 py-1 text-[10px] hover:bg-slate-800 rounded cursor-pointer disabled:opacity-50 disabled:cursor-wait">{isEnglish ? "Cancel" : "Cancelar"}</button>
+                <button disabled={isApplying} onClick={handleApplyNote} className="px-2.5 py-1 bg-primary-blue hover:bg-secondary-blue rounded text-[10px] flex items-center gap-1 font-bold text-white uppercase tracking-wider cursor-pointer disabled:opacity-50 disabled:cursor-wait">
+                  {isApplying ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Send className="w-2.5 h-2.5" />}
+                  {isApplying ? (isEnglish ? "Applying" : "Aplicando") : (isEnglish ? "Apply" : "Aplicar")}
                 </button>
               </div>
             </div>
@@ -170,8 +191,9 @@ export function BulkActionToolbar({
 
         {/* Export Button */}
         <button
+          disabled={isApplying}
           onClick={onExportSelected}
-          className="bg-primary-blue hover:bg-secondary-blue px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 transition-all text-white border border-transparent shadow-md cursor-pointer"
+          className="bg-primary-blue hover:bg-secondary-blue px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 transition-all text-white border border-transparent shadow-md cursor-pointer disabled:opacity-50 disabled:cursor-wait"
         >
           <FileSpreadsheet className="w-3.5 h-3.5" />
           {isEnglish ? "Export CSV" : "Exportar CSV"}
@@ -179,8 +201,9 @@ export function BulkActionToolbar({
 
         {/* Clear Selection */}
         <button
+          disabled={isApplying}
           onClick={onClearSelection}
-          className="text-slate-300 hover:text-white px-2 py-1.5 text-xs font-semibold font-mono cursor-pointer"
+          className="text-slate-300 hover:text-white px-2 py-1.5 text-xs font-semibold font-mono cursor-pointer disabled:opacity-50 disabled:cursor-wait"
         >
           {isEnglish ? "Clear" : "Limpiar"} ({selectedCount})
         </button>

@@ -22,7 +22,8 @@ import {
   Calendar,
   User,
   FileText,
-  Check
+  Check,
+  Loader2
 } from "lucide-react";
 import { Claim, ClaimStatus, ClaimClassification, UserRole, type User as AppUser } from "../types";
 import { StatusBadge } from "./StatusBadge";
@@ -342,31 +343,56 @@ export function ClaimsTable({
   const [internalCategory, setInternalCategory] = useState<string>("Eligibility / Coverage");
   const [attachments, setAttachments] = useState<Array<{ name: string; size: string; type: string }>>([]);
   const [issueNote, setIssueNote] = useState<string>("");
+  const [issueSubmitMode, setIssueSubmitMode] = useState<"draft" | "apply" | null>(null);
+  const [isSavingPayment, setIsSavingPayment] = useState(false);
+  const [pendingOperationLabel, setPendingOperationLabel] = useState<string | null>(null);
   
   const { promptAction, notify } = useFeedback();
+  const { language } = useLanguage();
+  const isEnglish = language === "en";
+
+  const runPendingOperation = async (label: string, action: () => Promise<void>) => {
+    if (pendingOperationLabel) return;
+    setPendingOperationLabel(label);
+    try {
+      await action();
+    } catch (err: any) {
+      notify(err.message || (isEnglish ? "The operation could not be completed." : "No se pudo completar la operación."), "error");
+    } finally {
+      setPendingOperationLabel(null);
+    }
+  };
 
   // Register Claim Issue function
   const handleSaveClaimIssue = async (statusOverride?: string) => {
     if (!activeIssueClaim) return;
+    if (issueSubmitMode || pendingOperationLabel) return;
+    const localIsEnglish = localStorage.getItem("itera-language") !== "es";
+    const mode = statusOverride ? "draft" : "apply";
+    setIssueSubmitMode(mode);
+    setPendingOperationLabel(
+      mode === "draft"
+        ? (localIsEnglish ? "Saving issue draft..." : "Guardando borrador de incidencia...")
+        : (localIsEnglish ? "Applying claim issue..." : "Aplicando incidencia del claim...")
+    );
     try {
-      const isEnglish = localStorage.getItem("itera-language") !== "es";
       const actualStatus = statusOverride || issueStatus;
 
       // Smart Validation
       if (selectedLines.length === 0 && actualStatus !== "Pending") {
-        notify(isEnglish ? "Select at least one affected CPT line before applying the issue." : "Seleccione al menos una línea CPT afectada antes de aplicar la incidencia.", "warning");
+        notify(localIsEnglish ? "Select at least one affected CPT line before applying the issue." : "Seleccione al menos una línea CPT afectada antes de aplicar la incidencia.", "warning");
         return;
       }
       if (actualStatus === "Denied" && codingMode === "advanced" && denialCombinations.length === 0) {
-        notify(isEnglish ? "Please add at least one CARC/RARC combination for a Denial." : "Por favor, agregue al menos una combinación de CARC/RARC para una denegación.", "warning");
+        notify(localIsEnglish ? "Please add at least one CARC/RARC combination for a Denial." : "Por favor, agregue al menos una combinación de CARC/RARC para una denegación.", "warning");
         return;
       }
       if ((actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment") && codingMode === "advanced" && denialCombinations.length === 0) {
-        notify(isEnglish ? "Please add at least one adjustment combination with the adjudicated amount." : "Agregue al menos una combinación de ajuste con el importe adjudicado.", "warning");
+        notify(localIsEnglish ? "Please add at least one adjustment combination with the adjudicated amount." : "Agregue al menos una combinación de ajuste con el importe adjudicado.", "warning");
         return;
       }
       if (actualStatus === "Rejected" && !rejectionData.message && !rejectionData.statusCode) {
-        notify(isEnglish ? "Please specify a rejection message or status code." : "Por favor, especifique un mensaje de rechazo o código de estado.", "warning");
+        notify(localIsEnglish ? "Please specify a rejection message or status code." : "Por favor, especifique un mensaje de rechazo o código de estado.", "warning");
         return;
       }
 
@@ -536,15 +562,19 @@ export function ClaimsTable({
         }, activeIssueClaim.claim_id);
       }
 
-      notify(isEnglish ? "Claim Issue registered successfully!" : "¡Incidencia de Reclamación registrada con éxito!", "success");
+      notify(localIsEnglish ? "Claim Issue registered successfully!" : "¡Incidencia de Reclamación registrada con éxito!", "success");
       setActiveIssueClaim(null);
     } catch (err: any) {
       notify(err.message || "Error", "error");
+    } finally {
+      setIssueSubmitMode(null);
+      setPendingOperationLabel(null);
     }
   };
 
   const handleQuickPayment = async (claim: Claim, cptCode?: string) => {
     const isEnglish = localStorage.getItem("itera-language") !== "es";
+    let startedPaymentSave = false;
 
     // Patient-view (no specific CPT): open the inline multi-CPT dialog
     if (!cptCode) {
@@ -607,6 +637,10 @@ export function ClaimsTable({
         notify(isEnglish ? "Please enter a valid amount." : "Por favor ingrese un monto válido.", "warning");
         return;
       }
+      if (isSavingPayment || pendingOperationLabel) return;
+      startedPaymentSave = true;
+      setIsSavingPayment(true);
+      setPendingOperationLabel(isEnglish ? "Registering quick payment..." : "Registrando pago rápido...");
 
       const updatedLines = serviceLines.map((line: any) => {
         if (line.cpt === cptCode) {
@@ -636,6 +670,11 @@ export function ClaimsTable({
       notify(isEnglish ? "Quick payment registered successfully!" : "¡Pago rápido registrado con éxito!", "success");
     } catch (err: any) {
       notify(err.message || "Error", "error");
+    } finally {
+      if (startedPaymentSave) {
+        setIsSavingPayment(false);
+        setPendingOperationLabel(null);
+      }
     }
   };
 
@@ -771,8 +810,6 @@ export function ClaimsTable({
     return `${month}-${shortYear}`;
   };
 
-  const { language } = useLanguage();
-  const isEnglish = language === "en";
   const isAdmin = userRole === UserRole.Admin;
 
   const requestSoftDeleteClaim = async (claim: Claim) => {
@@ -789,11 +826,15 @@ export function ClaimsTable({
       confirmLabel: isEnglish ? "Delete claim" : "Eliminar claim"
     });
     if (!reason || !reason.trim()) return;
+    if (pendingOperationLabel) return;
+    setPendingOperationLabel(isEnglish ? "Deleting claim..." : "Eliminando claim...");
     try {
       await onDeleteClaim(claim, reason.trim());
       notify(isEnglish ? "Claim deleted from operational views." : "Claim eliminado de las vistas operativas.", "success");
     } catch (err: any) {
       notify(err.message || (isEnglish ? "Failed to delete claim." : "No se pudo eliminar el claim."), "error");
+    } finally {
+      setPendingOperationLabel(null);
     }
   };
 
@@ -1095,12 +1136,14 @@ export function ClaimsTable({
                                   setActiveActionMenu(null);
                                   if (isLocked) {
                                     if (onUpdateClaim) {
-                                      await onUpdateClaim({
-                                        locked: false,
-                                        lock_reason: "",
-                                        claim_status: claim.claim_status === ClaimStatus.BlockedByError ? ClaimStatus.Pending : claim.claim_status
-                                      }, claim.claim_id);
-                                      notify(isEnglish ? "Claim unlocked successfully!" : "¡Reclamación desbloqueada con éxito!", "success");
+                                      await runPendingOperation(isEnglish ? "Unlocking claim..." : "Desbloqueando claim...", async () => {
+                                        await onUpdateClaim({
+                                          locked: false,
+                                          lock_reason: "",
+                                          claim_status: claim.claim_status === ClaimStatus.BlockedByError ? ClaimStatus.Pending : claim.claim_status
+                                        }, claim.claim_id);
+                                        notify(isEnglish ? "Claim unlocked successfully!" : "¡Reclamación desbloqueada con éxito!", "success");
+                                      });
                                     }
                                   } else {
                                     const reason = await promptAction({
@@ -1114,23 +1157,26 @@ export function ClaimsTable({
                                     });
                                     if (reason && reason.trim() !== "") {
                                       if (onUpdateClaim) {
-                                        await onUpdateClaim({
-                                          locked: true,
-                                          lock_reason: reason.trim(),
-                                          error_flag: true,
-                                          error_category: "Billing Error" as any,
-                                          claim_status: ClaimStatus.BlockedByError
-                                        }, claim.claim_id);
-                                        notify(isEnglish ? "Claim blocked successfully!" : "¡Reclamación bloqueada con éxito!", "success");
+                                        await runPendingOperation(isEnglish ? "Blocking claim..." : "Bloqueando claim...", async () => {
+                                          await onUpdateClaim({
+                                            locked: true,
+                                            lock_reason: reason.trim(),
+                                            error_flag: true,
+                                            error_category: "Billing Error" as any,
+                                            claim_status: ClaimStatus.BlockedByError
+                                          }, claim.claim_id);
+                                          notify(isEnglish ? "Claim blocked successfully!" : "¡Reclamación bloqueada con éxito!", "success");
+                                        });
                                       }
                                     }
                                   }
                                 }}
-                                className={`flex w-full items-center gap-2 rounded px-3 py-2 text-[11px] font-bold cursor-pointer ${
+                                disabled={!!pendingOperationLabel}
+                                className={`flex w-full items-center gap-2 rounded px-3 py-2 text-[11px] font-bold cursor-pointer disabled:opacity-40 disabled:cursor-wait ${
                                   isLocked ? "text-slate-700 hover:bg-slate-50" : "text-amber-700 hover:bg-amber-50"
                                 }`}
                               >
-                                {isLocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                                {pendingOperationLabel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (isLocked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />)}
                                 {isLocked 
                                   ? (isEnglish ? "Unlock Claim" : "Desbloquear Reclamación") 
                                   : (isEnglish ? "Block Claim" : "Bloquear Reclamación")}
@@ -1141,9 +1187,10 @@ export function ClaimsTable({
                                     setActiveActionMenu(null);
                                     await requestSoftDeleteClaim(claim);
                                   }}
-                                  className="flex w-full items-center gap-2 rounded border-t border-slate-100 px-3 py-2 text-[11px] font-bold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                                  disabled={!!pendingOperationLabel}
+                                  className="flex w-full items-center gap-2 rounded border-t border-slate-100 px-3 py-2 text-[11px] font-bold text-rose-700 hover:bg-rose-50 cursor-pointer disabled:opacity-40 disabled:cursor-wait"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {pendingOperationLabel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                                   {isEnglish ? "Delete claim" : "Eliminar claim"}
                                 </button>
                               )}
@@ -1353,12 +1400,14 @@ export function ClaimsTable({
                                       if (l.cpt === slRow.cpt) return { ...l, locked: false, lock_reason: "" };
                                       return l;
                                     });
-                                    if (onUpdateClaim) {
-                                      await onUpdateClaim({ service_lines_json: JSON.stringify(updatedLines) }, claim.claim_id);
-                                    } else if (onSaveServiceLineNotes) {
-                                      await onSaveServiceLineNotes(JSON.stringify(updatedLines), claim.claim_id);
-                                    }
-                                    notify(isEnglish ? "CPT code unlocked successfully!" : "¡Código CPT desbloqueado con éxito!", "success");
+                                    await runPendingOperation(isEnglish ? "Unlocking CPT..." : "Desbloqueando CPT...", async () => {
+                                      if (onUpdateClaim) {
+                                        await onUpdateClaim({ service_lines_json: JSON.stringify(updatedLines) }, claim.claim_id);
+                                      } else if (onSaveServiceLineNotes) {
+                                        await onSaveServiceLineNotes(JSON.stringify(updatedLines), claim.claim_id);
+                                      }
+                                      notify(isEnglish ? "CPT code unlocked successfully!" : "¡Código CPT desbloqueado con éxito!", "success");
+                                    });
                                   } else {
                                     const reason = await promptAction({
                                       title: isEnglish ? `Block CPT ${slRow.cpt}` : `Bloquear CPT ${slRow.cpt}`,
@@ -1374,20 +1423,23 @@ export function ClaimsTable({
                                         if (l.cpt === slRow.cpt) return { ...l, locked: true, lock_reason: reason.trim() };
                                         return l;
                                       });
-                                      if (onUpdateClaim) {
-                                        await onUpdateClaim({ service_lines_json: JSON.stringify(updatedLines) }, claim.claim_id);
-                                      } else if (onSaveServiceLineNotes) {
-                                        await onSaveServiceLineNotes(JSON.stringify(updatedLines), claim.claim_id);
-                                      }
-                                      notify(isEnglish ? "CPT code blocked successfully!" : "¡Código CPT bloqueado con éxito!", "success");
+                                      await runPendingOperation(isEnglish ? "Blocking CPT..." : "Bloqueando CPT...", async () => {
+                                        if (onUpdateClaim) {
+                                          await onUpdateClaim({ service_lines_json: JSON.stringify(updatedLines) }, claim.claim_id);
+                                        } else if (onSaveServiceLineNotes) {
+                                          await onSaveServiceLineNotes(JSON.stringify(updatedLines), claim.claim_id);
+                                        }
+                                        notify(isEnglish ? "CPT code blocked successfully!" : "¡Código CPT bloqueado con éxito!", "success");
+                                      });
                                     }
                                   }
                                 }}
-                                className={`flex w-full items-center gap-2 rounded px-3 py-2 text-[11px] font-bold cursor-pointer ${
+                                disabled={!!pendingOperationLabel}
+                                className={`flex w-full items-center gap-2 rounded px-3 py-2 text-[11px] font-bold cursor-pointer disabled:opacity-40 disabled:cursor-wait ${
                                   slRow.locked ? "text-slate-700 hover:bg-slate-50" : "text-amber-700 hover:bg-amber-50"
                                 }`}
                               >
-                                {slRow.locked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />}
+                                {pendingOperationLabel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : (slRow.locked ? <Unlock className="w-3.5 h-3.5" /> : <Lock className="w-3.5 h-3.5" />)}
                                 {slRow.locked
                                   ? (isEnglish ? `Unlock CPT ${slRow.cpt}` : `Desbloquear CPT ${slRow.cpt}`)
                                   : (isEnglish ? `Block CPT ${slRow.cpt}` : `Bloquear CPT ${slRow.cpt}`)}
@@ -1398,9 +1450,10 @@ export function ClaimsTable({
                                     setActiveActionMenu(null);
                                     await requestSoftDeleteClaim(claim);
                                   }}
-                                  className="flex w-full items-center gap-2 rounded border-t border-slate-100 px-3 py-2 text-[11px] font-bold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                                  disabled={!!pendingOperationLabel}
+                                  className="flex w-full items-center gap-2 rounded border-t border-slate-100 px-3 py-2 text-[11px] font-bold text-rose-700 hover:bg-rose-50 cursor-pointer disabled:opacity-40 disabled:cursor-wait"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {pendingOperationLabel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
                                   {isEnglish ? "Delete claim" : "Eliminar claim"}
                                 </button>
                               )}
@@ -1510,6 +1563,9 @@ export function ClaimsTable({
           : serviceLines;
 
         const handleSavePayments = async () => {
+          if (isSavingPayment || pendingOperationLabel) return;
+          setIsSavingPayment(true);
+          setPendingOperationLabel(isEnglish ? "Registering quick payment..." : "Registrando pago rápido...");
           try {
             let updatedLines = [];
             if (activePaymentClaim.service_lines_json) {
@@ -1582,6 +1638,9 @@ export function ClaimsTable({
             setPaymentInputs({});
           } catch (err: any) {
             notify(err.message || "Error", "error");
+          } finally {
+            setIsSavingPayment(false);
+            setPendingOperationLabel(null);
           }
         };
 
@@ -1604,7 +1663,7 @@ export function ClaimsTable({
                     </p>
                   </div>
                 </div>
-                <button type="button" onClick={() => setActivePaymentClaim(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700">
+                <button type="button" disabled={isSavingPayment} onClick={() => setActivePaymentClaim(null)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 disabled:cursor-wait">
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -1634,7 +1693,8 @@ export function ClaimsTable({
                             placeholder="0.00"
                             value={paymentInputs[line.cpt] || ""}
                             onChange={(e) => setPaymentInputs({ ...paymentInputs, [line.cpt]: e.target.value })}
-                            className="w-full pl-6 pr-2 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue focus:bg-white text-slate-800 font-mono text-right"
+                            disabled={isSavingPayment}
+                            className="w-full pl-6 pr-2 py-1.5 text-xs rounded-xl border border-slate-200 bg-slate-50 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue focus:bg-white text-slate-800 font-mono text-right disabled:opacity-60 disabled:cursor-wait"
                           />
                         </div>
                       </div>
@@ -1646,18 +1706,20 @@ export function ClaimsTable({
               <div className="flex justify-end gap-2 p-5 border-t border-slate-100 bg-slate-50">
                 <button
                   type="button"
+                  disabled={isSavingPayment}
                   onClick={() => setActivePaymentClaim(null)}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer"
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                 >
                   {isEnglish ? "Cancel" : "Cancelar"}
                 </button>
                 <button
                   type="button"
-                  disabled={targetLines.length === 0}
+                  disabled={targetLines.length === 0 || isSavingPayment}
                   onClick={handleSavePayments}
-                  className="rounded-xl bg-primary-blue hover:bg-secondary-blue px-4 py-2 text-xs font-bold text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="inline-flex items-center gap-2 rounded-xl bg-primary-blue hover:bg-secondary-blue px-4 py-2 text-xs font-bold text-white shadow-md cursor-pointer disabled:opacity-40 disabled:cursor-wait"
                 >
-                  {isEnglish ? "Register" : "Registrar"}
+                  {isSavingPayment && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  {isSavingPayment ? (isEnglish ? "Registering..." : "Registrando...") : (isEnglish ? "Register" : "Registrar")}
                 </button>
               </div>
             </div>
@@ -2503,24 +2565,29 @@ export function ClaimsTable({
                 <div className="flex gap-2.5">
                   <button
                     type="button"
+                    disabled={!!issueSubmitMode}
                     onClick={handleCancelIssue}
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer transition-all"
+                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-wait"
                   >
                     {isEnglish ? "Cancel" : "Cancelar"}
                   </button>
                   <button
                     type="button"
+                    disabled={!!issueSubmitMode}
                     onClick={() => handleSaveClaimIssue("Pending")}
-                    className="rounded-xl border border-slate-300 bg-white text-slate-700 px-4 py-2 text-xs font-bold hover:bg-slate-50 cursor-pointer transition-all"
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white text-slate-700 px-4 py-2 text-xs font-bold hover:bg-slate-50 cursor-pointer transition-all disabled:opacity-50 disabled:cursor-wait"
                   >
-                    {isEnglish ? "Save Draft" : "Guardar Borrador"}
+                    {issueSubmitMode === "draft" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {issueSubmitMode === "draft" ? (isEnglish ? "Saving..." : "Guardando...") : (isEnglish ? "Save Draft" : "Guardar Borrador")}
                   </button>
                   <button
                     type="button"
+                    disabled={!!issueSubmitMode}
                     onClick={() => handleSaveClaimIssue()}
-                    className="rounded-xl bg-rose-600 hover:bg-rose-700 px-5 py-2 text-xs font-bold text-white shadow-md hover:shadow-rose-600/20 cursor-pointer transition-all"
+                    className="inline-flex items-center gap-2 rounded-xl bg-rose-600 hover:bg-rose-700 px-5 py-2 text-xs font-bold text-white shadow-md hover:shadow-rose-600/20 cursor-pointer transition-all disabled:opacity-60 disabled:cursor-wait"
                   >
-                    {isEnglish ? "Apply Issue" : "Aplicar Incidencia"}
+                    {issueSubmitMode === "apply" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {issueSubmitMode === "apply" ? (isEnglish ? "Applying..." : "Aplicando...") : (isEnglish ? "Apply Issue" : "Aplicar Incidencia")}
                   </button>
                 </div>
               </div>
@@ -2529,6 +2596,17 @@ export function ClaimsTable({
           </div>
         );
       })()}
+
+      {pendingOperationLabel && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-5 right-5 z-[260] flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-700 shadow-2xl"
+        >
+          <Loader2 className="h-4 w-4 animate-spin text-primary-blue" />
+          <span>{pendingOperationLabel}</span>
+        </div>
+      )}
     </div>
   );
 }
