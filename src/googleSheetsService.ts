@@ -134,6 +134,18 @@ export class GoogleSheetsService {
     }
   }
 
+  private async appendRowsStrict(tabName: string, rows: any[][]) {
+    if (!this.isConfigured || rows.length === 0) return;
+    await this.sheets.spreadsheets.values.append({
+      spreadsheetId: this.sheetId,
+      range: `${tabName}!A:A`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: rows,
+      },
+    });
+  }
+
   /**
    * Helper to rewrite all data in a sheet tab
    */
@@ -381,6 +393,52 @@ export class GoogleSheetsService {
     }
 
     return claimToAdd;
+  }
+
+  public async createClaimsBulk(newClaims: Claim[], operatorEmail: string): Promise<Claim[]> {
+    if (newClaims.length === 0) return [];
+
+    const existingIds = new Set(this.claims.map(claim => claim.claim_id));
+    const batchIds = new Set<string>();
+    for (const claim of newClaims) {
+      if (existingIds.has(claim.claim_id) || batchIds.has(claim.claim_id)) {
+        throw new Error(`Claim ID "${claim.claim_id}" is already used.`);
+      }
+      batchIds.add(claim.claim_id);
+    }
+
+    const now = new Date().toISOString();
+    const claimsToAdd = newClaims.map(claim => ({
+      ...claim,
+      deleted_flag: false,
+      deleted_at: "",
+      deleted_by: "",
+      delete_reason: "",
+      created_at: now,
+      updated_at: now,
+      updated_by: operatorEmail
+    }));
+
+    const auditRecords: AuditLog[] = claimsToAdd.map((claim, index) => ({
+      audit_id: `AUD-${Date.now()}-${index}-${Math.floor(Math.random() * 1000)}`,
+      claim_id: claim.claim_id,
+      action_type: "Import",
+      field_name: "all",
+      previous_value: "",
+      new_value: "Claim Imported",
+      reason: "Claim imported from CSV/XLSX batch.",
+      changed_by: operatorEmail,
+      changed_at: now
+    }));
+
+    if (this.isConfigured) {
+      await this.appendRowsStrict("Claims", claimsToAdd.map(claim => mapObjectToRow("Claims", claim)));
+      await this.appendRowsStrict("Audit_Log", auditRecords.map(record => mapObjectToRow("Audit_Log", record)));
+    }
+
+    this.claims.unshift(...claimsToAdd);
+    this.auditLogs.unshift(...auditRecords);
+    return claimsToAdd;
   }
 
   public async softDeleteClaim(claimId: string, operatorEmail: string, reason: string): Promise<Claim> {

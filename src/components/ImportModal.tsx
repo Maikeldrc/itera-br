@@ -12,8 +12,33 @@ import { useLanguage } from "./LanguageProvider";
 interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImport: (payload: any[] | { fileName: string; fileBase64: string }) => Promise<{ success: boolean; importedCount: number; errorCount: number; errors: any[] }>;
+  onImport: (payload: any[] | { fileName: string; fileBase64: string }) => Promise<ImportResult>;
 }
+
+type ImportSummary = {
+  totalRowsRead: number;
+  importedRows: number;
+  rejectedRows: number;
+  accountedRows: number;
+  allRowsAccounted: boolean;
+  uniquePatientsInFile: number;
+  uniquePatientsImported: number;
+  uniqueProvidersImported: number;
+  uniquePayersImported: number;
+  uniqueCptCodesImported: number;
+  totalCptUnitsImported: number;
+  cptCodeCounts: Record<string, number>;
+  totalBilledChargeImported: number;
+  topRejectionReasons: { reason: string; count: number }[];
+};
+
+type ImportResult = {
+  success: boolean;
+  importedCount: number;
+  errorCount: number;
+  errors: any[];
+  summary?: ImportSummary;
+};
 
 export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const { notify } = useFeedback();
@@ -25,7 +50,7 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const [validationResults, setValidationResults] = useState<{ row: number; claim_id: string; status: "valid" | "invalid"; errors: string[] }[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
-  const [importResult, setImportResult] = useState<{ importedCount: number; errorCount: number; errors: any[] } | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const progressTimerRef = useRef<number | null>(null);
 
@@ -353,6 +378,13 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 {importResult.errorCount > 0 && (
                   <p className="mt-1 font-semibold text-rose-700">{isEnglish ? "Rejected due to errors" : "Rechazados por errores"}: {importResult.errorCount} {isEnglish ? "records" : "registros"}.</p>
                 )}
+                {importResult.summary && !importResult.summary.allRowsAccounted && (
+                  <p className="mt-1 font-semibold text-rose-700">
+                    {isEnglish
+                      ? "Warning: not all source rows were accounted for. Review the import file and retry."
+                      : "Advertencia: no todas las filas del archivo fueron contabilizadas. Revise el archivo e intente nuevamente."}
+                  </p>
+                )}
                 {importResult.errors.length > 0 && (
                   <div className="mt-2 bg-white/80 border border-rose-100 rounded-lg p-2.5 space-y-1 text-xs text-rose-700 max-h-40 overflow-y-auto font-mono">
                     {importResult.errors.map((err, i) => (
@@ -363,6 +395,74 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {importResult?.summary && (
+            <div className="rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h4 className="font-semibold text-slate-800 text-sm">
+                  {isEnglish ? "Import Summary" : "Resumen de importación"}
+                </h4>
+                <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full ${importResult.summary.allRowsAccounted ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                  {importResult.summary.allRowsAccounted ? (isEnglish ? "All rows accounted" : "Filas contabilizadas") : (isEnglish ? "Review required" : "Revisión requerida")}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                {[
+                  [isEnglish ? "Rows read" : "Filas leídas", importResult.summary.totalRowsRead],
+                  [isEnglish ? "Imported" : "Importadas", importResult.summary.importedRows],
+                  [isEnglish ? "Rejected" : "Rechazadas", importResult.summary.rejectedRows],
+                  [isEnglish ? "Unique patients" : "Pacientes únicos", importResult.summary.uniquePatientsImported],
+                  [isEnglish ? "Providers" : "Proveedores", importResult.summary.uniqueProvidersImported],
+                  [isEnglish ? "Payers" : "Payers", importResult.summary.uniquePayersImported],
+                  [isEnglish ? "CPT codes" : "Códigos CPT", importResult.summary.uniqueCptCodesImported],
+                  [isEnglish ? "CPT units" : "Unidades CPT", importResult.summary.totalCptUnitsImported]
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                    <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{label}</p>
+                    <p className="font-mono font-bold text-slate-900 mt-1">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid md:grid-cols-2 gap-3 mt-3">
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-2">
+                    {isEnglish ? "CPT imported" : "CPT importados"}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                    {Object.entries(importResult.summary.cptCodeCounts).length === 0 ? (
+                      <span className="text-xs text-slate-500">-</span>
+                    ) : (
+                      Object.entries(importResult.summary.cptCodeCounts).map(([code, count]) => (
+                        <span key={code} className="rounded-md bg-white border border-slate-200 px-2 py-1 text-[11px] font-mono text-slate-700">
+                          {code}: {count}
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-2">
+                    {isEnglish ? "Top rejection reasons" : "Principales razones de rechazo"}
+                  </p>
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
+                    {importResult.summary.topRejectionReasons.length === 0 ? (
+                      <span className="text-xs text-slate-500">-</span>
+                    ) : (
+                      importResult.summary.topRejectionReasons.map(item => (
+                        <div key={item.reason} className="flex justify-between gap-3 text-[11px] text-slate-700">
+                          <span className="truncate" title={item.reason}>{item.reason}</span>
+                          <span className="font-mono font-bold">{item.count}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-slate-500 mt-3">
+                {isEnglish ? "Total billed charge imported" : "Cargo total importado"}: <span className="font-mono font-bold">${importResult.summary.totalBilledChargeImported.toFixed(2)}</span>
+              </p>
             </div>
           )}
 

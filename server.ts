@@ -169,6 +169,80 @@ function firstDayOfMonth(dateIso: string) {
   return dateIso ? `${dateIso.slice(0, 7)}-01` : new Date().toISOString().slice(0, 10);
 }
 
+function countBy<T>(items: T[], selector: (item: T) => string) {
+  return items.reduce<Record<string, number>>((acc, item) => {
+    const key = selector(item);
+    if (!key) return acc;
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function serviceLinesFromClaim(claim: Partial<Claim>) {
+  try {
+    const parsed = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function summarizeImport(
+  importRows: Record<string, unknown>[],
+  importedClaims: Claim[],
+  errors: { row: number; claimId?: string; errors: string[] }[]
+) {
+  const inputPatients = new Set(importRows.map(row => importField(row, ["MRN", "patient_id"])).filter(Boolean));
+  const importedPatients = new Set(importedClaims.map(claim => textValue(claim.patient_id)).filter(Boolean));
+  const importedProviders = new Set(importedClaims.map(claim => textValue(claim.provider_npi || claim.provider_id)).filter(Boolean));
+  const importedPayers = new Set(importedClaims.map(claim => textValue(claim.payer_id || claim.payer_name)).filter(Boolean));
+  const cptCounts: Record<string, number> = {};
+
+  importedClaims.forEach(claim => {
+    const lines = serviceLinesFromClaim(claim);
+    if (lines.length > 0) {
+      lines.forEach(line => {
+        const cpt = textValue(line?.cpt);
+        if (!cpt) return;
+        const units = Number(line?.units);
+        cptCounts[cpt] = (cptCounts[cpt] || 0) + (Number.isFinite(units) && units > 0 ? Math.floor(units) : 1);
+      });
+      return;
+    }
+    textValue(claim.cpt_hcpcs)
+      .split(/[\s,]+/)
+      .filter(Boolean)
+      .forEach(cpt => {
+        cptCounts[cpt] = (cptCounts[cpt] || 0) + 1;
+      });
+  });
+
+  const errorReasonCounts = countBy(
+    errors.flatMap(item => item.errors),
+    reason => reason
+  );
+
+  return {
+    totalRowsRead: importRows.length,
+    importedRows: importedClaims.length,
+    rejectedRows: errors.length,
+    accountedRows: importedClaims.length + errors.length,
+    allRowsAccounted: importedClaims.length + errors.length === importRows.length,
+    uniquePatientsInFile: inputPatients.size,
+    uniquePatientsImported: importedPatients.size,
+    uniqueProvidersImported: importedProviders.size,
+    uniquePayersImported: importedPayers.size,
+    uniqueCptCodesImported: Object.keys(cptCounts).length,
+    totalCptUnitsImported: Object.values(cptCounts).reduce((sum, count) => sum + count, 0),
+    cptCodeCounts: cptCounts,
+    totalBilledChargeImported: Number(importedClaims.reduce((sum, claim) => sum + Number(claim.billed_charge || 0), 0).toFixed(2)),
+    topRejectionReasons: Object.entries(errorReasonCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([reason, count]) => ({ reason, count }))
+  };
+}
+
 function parseAllowedOrigins() {
   const configured = (process.env.ALLOWED_ORIGIN || process.env.ALLOWED_ORIGINS || "")
     .split(",")
@@ -1000,7 +1074,7 @@ async function startServer() {
       const feeSchedules = await sheetsService.getFeeSchedules();
       const existingClaims = await sheetsService.getClaims();
 
-      const importedClaims: Claim[] = [];
+      const claimsToImport: Claim[] = [];
       const errors: { row: number; claimId?: string; errors: string[] }[] = [];
 
       for (let i = 0; i < importRows.length; i++) {
@@ -1097,7 +1171,7 @@ async function startServer() {
 
           const billedCharge = Number(serviceLines.reduce((sum, line) => sum + Number(line.charged || 0), 0).toFixed(2));
           const claimId = generateClaimId(
-            [...existingClaims, ...importedClaims].map(claim => claim.claim_id),
+            [...existingClaims, ...claimsToImport].map(claim => claim.claim_id),
             mrn,
             serviceTo
           );
@@ -1156,25 +1230,16 @@ async function startServer() {
             iteraSharePercent: iPercent
           });
           const validationErrors = validateClaim(calculated);
-          validationErrors.push(...validateUniquePatientProvider(
-            calculated,
-            [...existingClaims, ...importedClaims]
-          ));
           validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
           validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
             calculated,
             feeSchedules,
-            [...existingClaims, ...importedClaims]
+            [...existingClaims, ...claimsToImport]
           ));
           if (validationErrors.length > 0) {
             errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
           } else {
-            try {
-              const added = await sheetsService.createClaim(calculated, operatorEmail);
-              importedClaims.push(added);
-            } catch (err: any) {
-              errors.push({ row: i + 1, claimId: calculated.claim_id, errors: [err.message || "Failed to write claim"] });
-            }
+            claimsToImport.push(calculated);
           }
           continue;
         }
@@ -1240,33 +1305,32 @@ async function startServer() {
         validationErrors.push(...(!canUserAccessProvider(req.appUser || {}, calculated.provider_id, calculated.provider_npi)
           ? ["Current user does not have access to this provider."]
           : []));
-        validationErrors.push(...validateUniquePatientProvider(
-          calculated,
-          [...existingClaims, ...importedClaims]
-        ));
         validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
         validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
           calculated,
           feeSchedules,
-          [...existingClaims, ...importedClaims]
+          [...existingClaims, ...claimsToImport]
         ));
         if (validationErrors.length > 0) {
           errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
         } else {
-          try {
-            const added = await sheetsService.createClaim(calculated, operatorEmail);
-            importedClaims.push(added);
-          } catch (err: any) {
-            errors.push({ row: i + 1, claimId: calculated.claim_id, errors: [err.message || "Failed to write claim"] });
-          }
+          claimsToImport.push(calculated);
         }
       }
 
+      let importedClaims: Claim[] = [];
+      if (claimsToImport.length > 0) {
+        importedClaims = await sheetsService.createClaimsBulk(claimsToImport, operatorEmail);
+      }
+
+      const summary = summarizeImport(importRows, importedClaims, errors);
+
       res.json({
-        success: errors.length === 0,
+        success: errors.length === 0 && summary.allRowsAccounted,
         importedCount: importedClaims.length,
         errorCount: errors.length,
-        errors: errors
+        errors: errors,
+        summary
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Import process failed" });

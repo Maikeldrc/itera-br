@@ -912,6 +912,9 @@ export default function App() {
       body: JSON.stringify(Array.isArray(payload) ? { rows: payload } : payload)
     });
     const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.error || "Import process failed");
+    }
     await fetchAllData();
     return data;
   };
