@@ -331,6 +331,7 @@ export function ClaimsTable({
     patientResponsibility: number;
     cpt?: string;
     notes?: string;
+    autoAmount?: boolean;
   }>>([]);
   const [rejectionData, setRejectionData] = useState({
     rejectionSource: "Clearinghouse",
@@ -1788,6 +1789,35 @@ export function ClaimsTable({
           }
           return [];
         })();
+        const selectableIssueLines = claimServiceLines.filter((line: any) => line.status !== "Paid");
+        const selectableIssueCpts = selectableIssueLines.map((line: any) => line.cpt);
+        const allSelectableLinesSelected = selectableIssueCpts.length > 0 && selectableIssueCpts.every((cpt: string) => selectedLines.includes(cpt));
+        const selectedChargeTotal = (lineCpts = selectedLines) => roundMoney(
+          claimServiceLines
+            .filter((line: any) => lineCpts.includes(line.cpt))
+            .reduce((sum: number, line: any) => sum + (Number(line.charged) || 0), 0)
+        );
+        const defaultCombinationAmount = (lineCpts = selectedLines) => {
+          const selectedTotal = selectedChargeTotal(lineCpts);
+          if (selectedTotal > 0) return selectedTotal;
+          const activeLine = activeIssueCpt ? claimServiceLines.find((line: any) => line.cpt === activeIssueCpt) : null;
+          return roundMoney(Number(activeLine?.charged) || 0);
+        };
+        const syncAutoCombinationAmounts = (lineCpts: string[]) => {
+          const nextAmount = defaultCombinationAmount(lineCpts);
+          setDenialCombinations(prev => prev.map(comb => {
+            if (!comb.autoAmount) return comb;
+            return {
+              ...comb,
+              amount: nextAmount,
+              patientResponsibility: comb.groupCode === "PR" ? nextAmount : comb.patientResponsibility
+            };
+          }));
+        };
+        const handleSelectedLinesChange = (lineCpts: string[]) => {
+          setSelectedLines(lineCpts);
+          syncAutoCombinationAmounts(lineCpts);
+        };
 
         const handleCancelIssue = () => {
           setActiveIssueClaim(null);
@@ -1795,6 +1825,7 @@ export function ClaimsTable({
         };
 
         const handleAddCombination = () => {
+          const amount = defaultCombinationAmount();
           setDenialCombinations(prev => [
             ...prev,
             {
@@ -1803,9 +1834,10 @@ export function ClaimsTable({
               groupCode: "CO",
               carc: "CO-16",
               rarcs: [],
-              amount: 0,
+              amount,
               patientResponsibility: 0,
-              cpt: activeIssueCpt || (claimServiceLines[0]?.cpt || "")
+              cpt: activeIssueCpt || (selectedLines[0] || claimServiceLines[0]?.cpt || ""),
+              autoAmount: true
             }
           ]);
         };
@@ -1828,6 +1860,7 @@ export function ClaimsTable({
               }
               if (field === "amount") {
                 updated.amount = Number(value) || 0;
+                updated.autoAmount = false;
                 if (updated.groupCode === "PR") {
                   updated.patientResponsibility = updated.amount;
                 }
@@ -1853,6 +1886,7 @@ export function ClaimsTable({
           const preset = getQuickIssuePreset(chip);
           if (!preset) return;
           setInternalCategory(preset.category);
+          const amount = defaultCombinationAmount();
 
           // Auto inject code combination
           setDenialCombinations([
@@ -1862,9 +1896,10 @@ export function ClaimsTable({
               groupCode: preset.carc.split("-")[0] as IssueGroupCode,
               carc: preset.carc,
               rarcs: preset.rarcs,
-              amount: activeIssueClaim.billed_charge,
-              patientResponsibility: preset.carc.startsWith("PR") ? activeIssueClaim.billed_charge : 0,
-              cpt: activeIssueCpt || (claimServiceLines[0]?.cpt || "")
+              amount,
+              patientResponsibility: preset.carc.startsWith("PR") ? amount : 0,
+              cpt: activeIssueCpt || (selectedLines[0] || claimServiceLines[0]?.cpt || ""),
+              autoAmount: true
             }
           ]);
           setCodingMode("advanced");
@@ -2012,12 +2047,13 @@ export function ClaimsTable({
                             <th className="p-2 w-8 text-center">
                               <input 
                                 type="checkbox"
-                                checked={selectedLines.length === claimServiceLines.length}
+                                checked={allSelectableLinesSelected}
+                                disabled={selectableIssueCpts.length === 0}
                                 onChange={(e) => {
                                   if (e.target.checked) {
-                                    setSelectedLines(claimServiceLines.map((l: any) => l.cpt));
+                                    handleSelectedLinesChange(selectableIssueCpts);
                                   } else {
-                                    setSelectedLines([]);
+                                    handleSelectedLinesChange([]);
                                   }
                                 }}
                                 className="rounded border-slate-300"
@@ -2038,9 +2074,9 @@ export function ClaimsTable({
                                   checked={selectedLines.includes(line.cpt)}
                                   onChange={(e) => {
                                     if (e.target.checked) {
-                                      setSelectedLines(prev => [...prev, line.cpt]);
+                                      handleSelectedLinesChange(Array.from(new Set([...selectedLines, line.cpt])));
                                     } else {
-                                      setSelectedLines(prev => prev.filter(c => c !== line.cpt));
+                                      handleSelectedLinesChange(selectedLines.filter(c => c !== line.cpt));
                                     }
                                   }}
                                   className="rounded border-slate-300"
