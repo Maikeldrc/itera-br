@@ -364,7 +364,7 @@ export function runReconciliationEngineTests() {
     }
   });
 
-  test("Validation: Denied service line requires ERA code", () => {
+  test("Validation: Denied service line requires ERA code unless Pending ERA", () => {
     const errors = validateClaim({
       claim_id: "CLM-TEST-002",
       billed_by: "ITERA",
@@ -391,6 +391,34 @@ export function runReconciliationEngineTests() {
 
     if (!errors.some(error => error.includes("denied/rejected lines require at least one CARC/RARC/MA code"))) {
       throw new Error("Validation did not catch denied service line without ERA code.");
+    }
+
+    const pendingEraErrors = validateClaim({
+      claim_id: "CLM-TEST-002-PENDING-ERA",
+      billed_by: "ITERA",
+      payment_received_by: "Unknown",
+      claim_status: ClaimStatus.Denied,
+      claim_classification: ClaimClassification.DeniedNeedsReview,
+      billed_charge: 100,
+      allowed_amount: 0,
+      paid_amount: 0,
+      service_lines_json: JSON.stringify([{
+        cpt: "99453",
+        charged: 100,
+        allowed: 0,
+        adj: 100,
+        patResp: 0,
+        paid: 0,
+        secondaryPaid: 0,
+        balance: 0,
+        codes: [],
+        status: "Denied",
+        nextAction: "Pending ERA"
+      }])
+    });
+
+    if (pendingEraErrors.some(error => error.includes("denied/rejected lines require at least one CARC/RARC/MA code"))) {
+      throw new Error("Validation should allow denied service lines without ERA codes when Next Action is Pending ERA.");
     }
   });
 

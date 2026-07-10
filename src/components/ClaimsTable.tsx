@@ -30,6 +30,7 @@ import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
+import { PENDING_ERA_ACTION } from "../serviceLineValidation";
 import {
   CARC_CATALOG,
   RARC_CATALOG,
@@ -2075,6 +2076,7 @@ export function ClaimsTable({
                           className="w-full py-1.5 px-2.5 border border-slate-200 bg-white rounded-lg font-semibold text-slate-700"
                         >
                           <option value="Correct and Resubmit">Correct and Resubmit</option>
+                          <option value={PENDING_ERA_ACTION}>{isEnglish ? "Pending ERA" : "ERA pendiente"}</option>
                           <option value="Appeal">Appeal Payer Denial</option>
                           <option value="Request Medical Records">Request Medical Records</option>
                           <option value="Request Authorization">Request Authorization</option>

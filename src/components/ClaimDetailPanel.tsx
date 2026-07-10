@@ -37,7 +37,7 @@ import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
-import { validateServiceLineDetails } from "../serviceLineValidation";
+import { PENDING_ERA_ACTION, validateServiceLineDetails } from "../serviceLineValidation";
 import { validateCptRepeatLimitsByLine } from "../cptRepeatLimits";
 
 const COMMON_CPT_DESCRIPTIONS: Record<string, string> = {
@@ -244,6 +244,7 @@ const SERVICE_LINE_STATUSES: ServiceLineStatus[] = [
 const SERVICE_LINE_ACTIONS = [
   "No action",
   "Registrar EFT / Pago",
+  PENDING_ERA_ACTION,
   "Verify ERA",
   "Request records",
   "Correct coding",
@@ -257,7 +258,11 @@ const SERVICE_LINE_ACTIONS = [
 ];
 
 const serviceLineActionLabel = (action: string, isEnglish: boolean) => {
-  if (!isEnglish) return action;
+  if (!isEnglish) {
+    if (action === PENDING_ERA_ACTION) return "ERA pendiente";
+    return action;
+  }
+  if (action === PENDING_ERA_ACTION) return "Pending ERA";
   return action === "Registrar EFT / Pago" ? "Record EFT / Payment" : action;
 };
 
@@ -1061,6 +1066,7 @@ export function ClaimDetailPanel({
       await onUpdate(updates);
       setShowValidationErrors(false);
       notify(isEnglish ? "Claim saved and reconciled successfully." : "Claim guardado y conciliado correctamente.", "success");
+      onClose();
     } catch (err: any) {
       notify(`${isEnglish ? "Claim save error" : "Error al guardar claim"}: ${err.message}`, "error");
     }

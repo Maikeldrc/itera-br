@@ -26,6 +26,7 @@ const MONEY_TOLERANCE = 0.01;
 const PAID_LINE_STATUSES = new Set(["Paid", "Partially Paid"]);
 const DENIAL_LINE_STATUSES = new Set(["Denied", "Rejected"]);
 const OPEN_LINE_STATUSES = new Set(["Not Billed", "Submitted", "Pending"]);
+export const PENDING_ERA_ACTION = "Pending ERA";
 
 function money(value: unknown) {
   return Number(value || 0);
@@ -73,6 +74,7 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
     const expectedBalance = Number(Math.max(0, charged - totalPaid - money(line.adj)).toFixed(2));
     const status = line.status || "Pending";
     const codes = Array.isArray(line.codes) ? line.codes.filter(Boolean) : [];
+    const isPendingEra = line.nextAction === PENDING_ERA_ACTION;
 
     if (!line.cpt || line.cpt.trim() === "") {
       addLineError(index, "CPT code is required.");
@@ -139,8 +141,8 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
       if (totalPaid > MONEY_TOLERANCE) {
         addLineError(index, "denied/rejected lines cannot include payments. Use Partially Paid if the payer paid part of the CPT.");
       }
-      if (codes.length === 0) {
-        addLineError(index, "denied/rejected lines require at least one CARC/RARC/MA code.");
+      if (codes.length === 0 && !isPendingEra) {
+        addLineError(index, "denied/rejected lines require at least one CARC/RARC/MA code unless Next Action is Pending ERA.");
       }
     }
 
