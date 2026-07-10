@@ -366,8 +366,16 @@ export function ClaimsTable({
       const actualStatus = statusOverride || issueStatus;
 
       // Smart Validation
+      if (selectedLines.length === 0 && actualStatus !== "Pending") {
+        notify(isEnglish ? "Select at least one affected CPT line before applying the issue." : "Seleccione al menos una línea CPT afectada antes de aplicar la incidencia.", "warning");
+        return;
+      }
       if (actualStatus === "Denied" && codingMode === "advanced" && denialCombinations.length === 0) {
         notify(isEnglish ? "Please add at least one CARC/RARC combination for a Denial." : "Por favor, agregue al menos una combinación de CARC/RARC para una denegación.", "warning");
+        return;
+      }
+      if ((actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment") && codingMode === "advanced" && denialCombinations.length === 0) {
+        notify(isEnglish ? "Please add at least one adjustment combination with the adjudicated amount." : "Agregue al menos una combinación de ajuste con el importe adjudicado.", "warning");
         return;
       }
       if (actualStatus === "Rejected" && !rejectionData.message && !rejectionData.statusCode) {
@@ -453,18 +461,31 @@ export function ClaimsTable({
           // Financial Updates for Denied / Adjusted
           let lineAdj = line.adj || 0;
           let linePatResp = line.patResp || 0;
+          let linePaid = Number(line.paid) || 0;
           if (actualStatus === "Denied" || actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment") {
             if (codingMode === "advanced") {
               const activeCombs = denialCombinations.filter(c => c.level === "Claim" || c.cpt === line.cpt);
               lineAdj = activeCombs.reduce((sum, c) => sum + (c.amount || 0), 0);
               linePatResp = activeCombs.reduce((sum, c) => sum + (c.patientResponsibility || 0), 0);
             } else {
-              lineAdj = line.charged;
+              if (actualStatus === "Denied") {
+                lineAdj = line.charged;
+                linePaid = 0;
+              } else if (actualStatus === "Partially Paid") {
+                const defaultPaid = linePaid > 0 ? linePaid : Number((line.charged / 2).toFixed(2));
+                lineAdj = Math.max(0, line.charged - defaultPaid);
+                linePaid = defaultPaid;
+              } else {
+                lineAdj = 0;
+                linePaid = linePaid > 0 ? linePaid : line.charged;
+              }
             }
           }
 
           const finalAllowed = Math.max(0, line.charged - lineAdj);
-          const finalPaid = Math.max(0, finalAllowed - linePatResp);
+          const finalPaid = actualStatus === "Partially Paid" || actualStatus === "Paid with Adjustment"
+            ? Math.min(Math.max(0, linePaid || finalAllowed - linePatResp), finalAllowed)
+            : Math.max(0, finalAllowed - linePatResp);
 
           return {
             ...line,
@@ -1787,7 +1808,7 @@ export function ClaimsTable({
 
         return (
           <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/50 p-4 animate-fade-in font-sans">
-            <div className="w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="w-full max-w-[82rem] max-h-[92vh] flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
               
               {/* Header */}
               <div className="flex items-start justify-between border-b border-slate-100 bg-slate-50 px-6 py-4.5">
