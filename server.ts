@@ -987,7 +987,7 @@ async function startServer() {
         if (isBillingWorklist) {
           const mrn = String(row.MRN || "").trim();
           const providerNpi = String(row["Provider NPI"] || "").trim();
-          const payerId = String(row["Payer ID"] || "").trim();
+          const payerCode = String(row["Primary Insurance Code"] || row["Payer ID"] || "").trim();
           const monthDate = excelSerialToIsoDate(String(row["Month Of"] || ""));
           const serviceFrom = firstDayOfMonth(monthDate);
           const serviceTo = monthDate || serviceFrom;
@@ -995,8 +995,16 @@ async function startServer() {
           const month = Number((serviceTo || serviceFrom).slice(5, 7));
           const isSemester2 = month >= 7;
           const provider = providers.find(item => item.npi === providerNpi && item.active !== false);
-          const payer = payers.find(item => item.payer_id === payerId && item.active !== false);
-          const codes = ["Code1", "Code2", "Code3", "Code4", "Code5"]
+          const normalizedPayerCode = payerCode.toLowerCase();
+          const payer = payers.find(item =>
+            item.active !== false &&
+            (
+              item.payer_id.toLowerCase() === normalizedPayerCode ||
+              String(item.pverify_payer_code || "").trim().toLowerCase() === normalizedPayerCode ||
+              item.payer_name.toLowerCase() === normalizedPayerCode
+            )
+          );
+          const codes = ["Code1", "Code2", "Code3", "Code4", "Code5", "Code6"]
             .map(key => String(row[key] || "").trim())
             .filter(Boolean);
 
@@ -1006,8 +1014,8 @@ async function startServer() {
           if (provider && !canUserAccessProvider(req.appUser || {}, provider.provider_id, provider.npi)) {
             rowErrors.push(`Current user does not have access to provider ${provider.provider_name}.`);
           }
-          if (!payerId) rowErrors.push("Payer ID is required.");
-          if (!payer) rowErrors.push(`Payer ID ${payerId || "(blank)"} is not registered in Settings.`);
+          if (!payerCode) rowErrors.push("Primary Insurance Code is required.");
+          if (!payer) rowErrors.push(`Primary Insurance Code ${payerCode || "(blank)"} is not registered in Settings.`);
           if (!serviceTo) rowErrors.push("Month Of is required.");
           if (codes.length === 0) rowErrors.push("At least one CPT code is required.");
 
@@ -1103,7 +1111,7 @@ async function startServer() {
             correction_status: "",
             resubmission_date: "",
             corrected_claim_reference: "",
-            last_note: `Imported as Draft from billing worklist. Policy: ${row["Primary Policy Number"] || "N/A"}. Eligibility: ${row.Eligibility || "N/A"}.`,
+            last_note: `Imported as Draft from billing worklist. Primary Insurance Code: ${payerCode || "N/A"}. Care Manager: ${row["Care Manager"] || "N/A"}. Sex: ${row.Sex || "N/A"}. DOB: ${row["Date of Birth"] || "N/A"}.`,
             service_lines_json: JSON.stringify(serviceLines)
           };
 

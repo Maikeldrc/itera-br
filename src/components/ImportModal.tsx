@@ -116,10 +116,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       if (isBillingWorklist) {
         if (!claimObj.MRN) errors.push(isEnglish ? "MRN is required." : "MRN es requerido.");
         if (!claimObj["Provider NPI"]) errors.push(isEnglish ? "Provider NPI is required." : "Provider NPI es requerido.");
-        if (!claimObj["Payer ID"]) errors.push(isEnglish ? "Payer ID is required." : "Payer ID es requerido.");
+        if (!claimObj["Primary Insurance Code"]) errors.push(isEnglish ? "Primary Insurance Code is required." : "Primary Insurance Code es requerido.");
         if (!claimObj["Month Of"]) errors.push(isEnglish ? "Month Of is required." : "Month Of es requerido.");
-        if (!["Code1", "Code2", "Code3", "Code4", "Code5"].some(key => claimObj[key])) {
-          errors.push(isEnglish ? "Include at least one CPT in Code1..Code5." : "Debe incluir al menos un CPT en Code1..Code5.");
+        if (!["Code1", "Code2", "Code3", "Code4", "Code5", "Code6"].some(key => claimObj[key])) {
+          errors.push(isEnglish ? "Include at least one CPT in Code1..Code6." : "Debe incluir al menos un CPT en Code1..Code6.");
         }
       } else if (!claim_id) {
         errors.push(isEnglish ? "Claim ID is required." : "Claim ID es requerido.");
@@ -189,8 +189,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <h5 className="font-semibold text-dark-blue mb-1">{isEnglish ? "ITERA Import Guidelines" : "Directrices de Importación de ITERA"}</h5>
               <p className="mb-2">
                 {isEnglish
-                  ? "Import the full reconciliation CSV or a Billing Worklist Excel file with MRN, Provider NPI, Payer ID, Month Of and Code1..Code5. Excel rows import as Draft and charges come from the Fee Schedule."
-                  : "Puede importar el CSV completo de conciliación o el Excel de Billing Worklist con MRN, Provider NPI, Payer ID, Month Of y Code1..Code5. El Excel se importa como Draft y los charges salen del Fee Schedule."}
+                  ? "Import the full reconciliation CSV or a Billing Worklist Excel file with MRN, First Name, Last Name, Sex, Date of Birth, Provider NPI, Care Manager, Service, Month Of, Primary Insurance Code and Code1..Code6. Excel rows import as Draft and charges come from the Fee Schedule."
+                  : "Puede importar el CSV completo de conciliación o el Excel de Billing Worklist con MRN, First Name, Last Name, Sex, Date of Birth, Provider NPI, Care Manager, Service, Month Of, Primary Insurance Code y Code1..Code6. El Excel se importa como Draft y los charges salen del Fee Schedule."}
               </p>
               <button
                 onClick={copyTemplate}
@@ -326,8 +326,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <h4 className="font-semibold text-dark-blue mb-1">{isEnglish ? "Billing Worklist XLSX ready" : "Billing Worklist XLSX listo"}</h4>
               <p className="text-xs leading-relaxed">
                 {isEnglish
-                  ? "The file will be processed on the server. Each row will import as a Draft claim using Provider NPI, Payer ID and Code1..Code5. Charges are calculated from System Settings / FCSO Fee Schedules."
-                  : "El archivo se procesará en el servidor. Cada fila se importará como claim en Draft, usando Provider NPI, Payer ID y Code1..Code5. Los charges se calcularán desde System Settings / FCSO Fee Schedules."}
+                  ? "The file will be processed on the server. Each row will import as a Draft claim using Provider NPI, Primary Insurance Code and Code1..Code6. Charges are calculated from System Settings / FCSO Fee Schedules."
+                  : "El archivo se procesará en el servidor. Cada fila se importará como claim en Draft, usando Provider NPI, Primary Insurance Code y Code1..Code6. Los charges se calcularán desde System Settings / FCSO Fee Schedules."}
               </p>
             </div>
           )}
