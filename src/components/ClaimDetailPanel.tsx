@@ -255,6 +255,11 @@ const SERVICE_LINE_ACTIONS = [
   "Close line"
 ];
 
+const serviceLineActionLabel = (action: string, isEnglish: boolean) => {
+  if (!isEnglish) return action;
+  return action === "Registrar EFT / Pago" ? "Record EFT / Payment" : action;
+};
+
 interface EraCodePickerProps {
   codes: string[];
   lineKey: string;
@@ -1549,7 +1554,7 @@ export function ClaimDetailPanel({
                       <th className="px-3 py-3 w-24 text-right">Pat. resp</th>
                       <th className="px-3 py-3 w-52 text-right">Paid (P + S + Total)</th>
                       <th className="px-3 py-3 w-20 text-right">Balance</th>
-                      <th className="px-3 py-3 w-36">EFT / Cheque #</th>
+                      <th className="px-3 py-3 w-36">{isEnglish ? "EFT / Check #" : "EFT / Cheque #"}</th>
                       <th className="px-3 py-3 w-32">{isEnglish ? "Payment Date" : "Fecha Pago"}</th>
                       <th className="px-3 py-3 min-w-[240px]">CARC / RARC / MA</th>
                       <th className="px-3 py-3 min-w-[170px]">Next action</th>
@@ -1618,8 +1623,8 @@ export function ClaimDetailPanel({
                                     value={line.paid}
                                     onChange={(e) => handleUpdateServiceLine(idx, "paid", e.target.value)}
                                     className="w-[4.5rem] rounded-lg border border-emerald-200 bg-emerald-50/40 py-1.5 pl-5 pr-1.5 text-right font-mono text-[10px] font-bold text-emerald-700 focus:bg-white disabled:opacity-50"
-                                    aria-label={`Pago primario CPT ${line.cpt}`}
-                                    title="Pago primario"
+                                    aria-label={`${isEnglish ? "Primary payment CPT" : "Pago primario CPT"} ${line.cpt}`}
+                                    title={isEnglish ? "Primary payment" : "Pago primario"}
                                   />
                                 </div>
                                 {line.hasSecondaryPayment && (
@@ -1632,8 +1637,8 @@ export function ClaimDetailPanel({
                                       value={line.secondaryPaid}
                                       onChange={(e) => handleUpdateServiceLine(idx, "secondaryPaid", e.target.value)}
                                       className="w-[4.5rem] rounded-lg border border-blue-200 bg-blue-50/50 py-1.5 pl-5 pr-1.5 text-right font-mono text-[10px] font-bold text-primary-blue focus:bg-white disabled:opacity-50"
-                                      aria-label={`Pago secundario CPT ${line.cpt}`}
-                                      title="Pago secundario"
+                                      aria-label={`${isEnglish ? "Secondary payment CPT" : "Pago secundario CPT"} ${line.cpt}`}
+                                      title={isEnglish ? "Secondary payment" : "Pago secundario"}
                                     />
                                   </div>
                                 )}
@@ -1701,7 +1706,7 @@ export function ClaimDetailPanel({
                                 onChange={(e) => handleUpdateServiceLine(idx, "nextAction", e.target.value)}
                                 className="w-full border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-[9px] font-semibold text-slate-600 disabled:opacity-50"
                               >
-                                {SERVICE_LINE_ACTIONS.map(action => <option key={action} value={action}>{action}</option>)}
+                                {SERVICE_LINE_ACTIONS.map(action => <option key={action} value={action}>{serviceLineActionLabel(action, isEnglish)}</option>)}
                               </select>
                             </td>
                             <td className="px-3 py-2.5 text-center">
@@ -2132,7 +2137,7 @@ export function ClaimDetailPanel({
                       <th className="p-2 text-right w-20">Resp. Pat.</th>
                       <th className="p-2 text-right w-48">{isEnglish ? "Paid (P + S + Total)" : "Pagado (P + S + Total)"}</th>
                       <th className="p-2 text-right w-20">Balance</th>
-                      <th className="p-2 w-36">EFT / Cheque #</th>
+                      <th className="p-2 w-36">{isEnglish ? "EFT / Check #" : "EFT / Cheque #"}</th>
                       <th className="p-2 w-28">{isEnglish ? "Payment Date" : "Fecha Pago"}</th>
                       <th className="p-2 w-48">{isEnglish ? "ERA / CARC Codes" : "Códigos ERA / CARC"}</th>
                       <th className="p-2 w-40">Next Action</th>
@@ -2322,7 +2327,7 @@ export function ClaimDetailPanel({
                               onChange={(e) => handleUpdateServiceLine(idx, "nextAction", e.target.value)}
                               className="w-full border border-slate-200 rounded p-1.5 bg-slate-50 text-[9px] font-semibold"
                             >
-                              {SERVICE_LINE_ACTIONS.map(action => <option key={action} value={action}>{action}</option>)}
+                              {SERVICE_LINE_ACTIONS.map(action => <option key={action} value={action}>{serviceLineActionLabel(action, isEnglish)}</option>)}
                             </select>
                           </td>
                           <td className="p-2 text-center">
