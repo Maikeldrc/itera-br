@@ -203,6 +203,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<ViewType>(() => viewFromPath(window.location.pathname));
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isClearingOperationalData, setIsClearingOperationalData] = useState(false);
   const [statusData, setStatusData] = useState<any>(null);
 
   // Master Data States
@@ -248,7 +249,7 @@ export default function App() {
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createNewClaimServiceLine()]);
 
   // Fee Schedule management UI states
-  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules">("language");
+  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "data-cleanup">("language");
   const [editingFs, setEditingFs] = useState<FeeSchedule | null>(null);
   const [isFsModalOpen, setIsFsModalOpen] = useState(false);
   const [fsSearchTerm, setFsSearchTerm] = useState("");
@@ -423,6 +424,51 @@ export default function App() {
       notify(`Data refresh network error: ${err.message}`, "error");
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  const handleClearOperationalData = async () => {
+    const confirmed = await confirmAction({
+      title: isEnglish ? "Clear operational test data" : "Limpiar datos operativos de prueba",
+      message: isEnglish
+        ? "This will empty Claims, Payments, Notes and Audit_Log only. Providers, Payers, Users, Settings, fee schedules and other catalogs will not be touched."
+        : "Esto vaciará solo Claims, Payments, Notes y Audit_Log. No tocará Providers, Payers, Users, Settings, tarifas ni otros catálogos.",
+      confirmLabel: isEnglish ? "Clear data" : "Limpiar datos",
+      tone: "danger"
+    });
+    if (!confirmed) return;
+
+    setIsClearingOperationalData(true);
+    try {
+      const res = await apiFetch("/api/admin/clear-operational-data", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-email": currentUser.email
+        }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to clear operational data.");
+      }
+
+      setClaims([]);
+      setPayments([]);
+      setNotes([]);
+      setAuditLogs([]);
+      setSelectedClaim(null);
+      setSelectedClaimIds([]);
+      notify(
+        isEnglish
+          ? "Operational sheets cleared: Claims, Payments, Notes and Audit_Log."
+          : "Hojas operativas limpiadas: Claims, Payments, Notes y Audit_Log.",
+        "success"
+      );
+      await fetchAllData();
+    } catch (err: any) {
+      notify(`${isEnglish ? "Cleanup error" : "Error al limpiar"}: ${err.message}`, "error");
+    } finally {
+      setIsClearingOperationalData(false);
     }
   };
 
@@ -2100,6 +2146,19 @@ export default function App() {
                   <Sliders className="w-4 h-4" />
                   <span>{isEnglish ? "Contract Rules (Shares)" : "Reglas Contractuales (Shares)"}</span>
                 </button>
+                {currentUser.role === UserRole.Admin && (
+                  <button
+                    onClick={() => setSettingsTab("data-cleanup")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+                      settingsTab === "data-cleanup"
+                        ? "border-rose-500 text-rose-700 bg-rose-50/70 rounded-t-lg"
+                        : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg"
+                    }`}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    <span>{isEnglish ? "Data Cleanup" : "Limpieza de Datos"}</span>
+                  </button>
+                )}
               </div>
 
               {/* Active Tab Content */}
@@ -2153,6 +2212,57 @@ export default function App() {
                     <p className="mt-4 text-[10px] leading-relaxed text-slate-400">
                       {isEnglish ? "The preference is saved in this browser and applied automatically on future visits." : "La preferencia se guarda en este navegador y se aplica automáticamente en futuras visitas."}
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === "data-cleanup" && currentUser.role === UserRole.Admin && (
+                <div className="bg-white rounded-xl border border-rose-200 p-6 shadow-xs">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="max-w-2xl">
+                      <div className="flex items-center gap-2.5">
+                        <div className="p-2 bg-rose-50 rounded-lg text-rose-600">
+                          <Trash2 className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h4 className="font-bold text-slate-900 text-sm">
+                            {isEnglish ? "Production Data Cleanup" : "Limpieza para Inicio en Producción"}
+                          </h4>
+                          <p className="text-[10px] text-slate-500 mt-0.5">
+                            {isEnglish
+                              ? "Removes only patient and test movement data from operational sheets."
+                              : "Elimina solo información de pacientes y movimientos de prueba de las hojas operativas."}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-[10px] font-bold uppercase text-slate-500">{isEnglish ? "Will be cleared" : "Se limpiará"}</p>
+                          <p className="mt-1 font-mono text-xs font-semibold text-slate-800">Claims, Payments, Notes, Audit_Log</p>
+                        </div>
+                        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                          <p className="text-[10px] font-bold uppercase text-emerald-700">{isEnglish ? "Will not be touched" : "No se tocará"}</p>
+                          <p className="mt-1 text-xs font-semibold text-emerald-900">
+                            Providers, Payers, Users, Settings, FeeSchedules, Fee_Schedule, Eligibility_Coverage
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleClearOperationalData}
+                      disabled={isClearingOperationalData}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>
+                        {isClearingOperationalData
+                          ? (isEnglish ? "Clearing..." : "Limpiando...")
+                          : (isEnglish ? "Clear Operational Data" : "Limpiar Datos Operativos")}
+                      </span>
+                    </button>
                   </div>
                 </div>
               )}

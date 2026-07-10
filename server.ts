@@ -305,6 +305,19 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/clear-operational-data", requireRoles(UserRole.Admin), async (_req: AppRequest, res) => {
+    try {
+      const result = await sheetsService.clearOperationalData();
+      res.json({
+        success: true,
+        message: "Operational test data cleared.",
+        ...result
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to clear operational data." });
+    }
+  });
+
   // GET Claims (with filter, search, sorting)
   app.get("/api/claims", async (req: AppRequest, res) => {
     try {

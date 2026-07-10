@@ -155,6 +155,35 @@ export class GoogleSheetsService {
     }
   }
 
+  private async clearTab(tabName: string) {
+    if (!this.isConfigured) return;
+    try {
+      await this.sheets.spreadsheets.values.clear({
+        spreadsheetId: this.sheetId,
+        range: `${tabName}!A:ZZ`,
+      });
+    } catch (err) {
+      console.error(`Google Sheets: Failed to clear tab ${tabName}`, err);
+      throw err;
+    }
+  }
+
+  private async overwriteTabStrict(tabName: string, headers: string[], rows: any[][]) {
+    if (!this.isConfigured) return;
+    await this.sheets.spreadsheets.values.clear({
+      spreadsheetId: this.sheetId,
+      range: `${tabName}!A:ZZ`,
+    });
+    await this.sheets.spreadsheets.values.update({
+      spreadsheetId: this.sheetId,
+      range: `${tabName}!A1`,
+      valueInputOption: "RAW",
+      requestBody: {
+        values: [headers, ...rows],
+      },
+    });
+  }
+
   /**
    * Sync Google Sheets with Local Store (and vice versa)
    */
@@ -788,6 +817,32 @@ export class GoogleSheetsService {
     if (this.isConfigured) {
       await this.appendRow("Audit_Log", mapObjectToRow("Audit_Log", auditRecord));
     }
+  }
+
+  public async clearOperationalData(): Promise<{ clearedSheets: string[]; counts: Record<string, number> }> {
+    const counts = {
+      Claims: this.claims.length,
+      Payments: this.payments.length,
+      Notes: this.notes.length,
+      Audit_Log: this.auditLogs.length
+    };
+
+    this.claims = [];
+    this.payments = [];
+    this.notes = [];
+    this.auditLogs = [];
+
+    if (this.isConfigured) {
+      await this.overwriteTabStrict("Claims", CLAIMS_HEADERS, []);
+      await this.overwriteTabStrict("Payments", PAYMENTS_HEADERS, []);
+      await this.overwriteTabStrict("Notes", NOTES_HEADERS, []);
+      await this.clearTab("Audit_Log");
+    }
+
+    return {
+      clearedSheets: ["Claims", "Payments", "Notes", "Audit_Log"],
+      counts
+    };
   }
 
   public async resetClaimsToSeeds(): Promise<void> {
