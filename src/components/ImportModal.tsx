@@ -206,6 +206,62 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     }, 700);
   };
 
+  const buildLocalImportSummary = (result?: Partial<ImportResult>, fallbackReason?: string): ImportSummary => {
+    const sourceRows = filePayload ? [] : parsedRows;
+    const cptCodeCounts: Record<string, number> = {};
+    const patientIds = new Set<string>();
+    const providerIds = new Set<string>();
+    const payerIds = new Set<string>();
+
+    sourceRows.forEach(row => {
+      const patientId = String(row.MRN || row.patient_id || "").trim();
+      const providerId = String(row["Provider NPI"] || row.provider_npi || row.provider_id || "").trim();
+      const payerId = String(row["Primary Insurance Code"] || row.payer_id || row.payer_name || "").trim();
+      if (patientId) patientIds.add(patientId);
+      if (providerId) providerIds.add(providerId);
+      if (payerId) payerIds.add(payerId);
+
+      const codes = ["Code1", "Code2", "Code3", "Code4", "Code5", "Code6"]
+        .map(key => String(row[key] || "").trim())
+        .filter(Boolean);
+      if (codes.length === 0 && row.cpt_hcpcs) {
+        String(row.cpt_hcpcs)
+          .split(/[\s,]+/)
+          .map(code => code.trim())
+          .filter(Boolean)
+          .forEach(code => codes.push(code));
+      }
+      codes.forEach(code => {
+        cptCodeCounts[code] = (cptCodeCounts[code] || 0) + 1;
+      });
+    });
+
+    const importedRows = Number(result?.importedCount || 0);
+    const rejectedRows = Number(result?.errorCount || (fallbackReason ? 1 : 0));
+    const totalRowsRead = sourceRows.length;
+    return {
+      totalRowsRead,
+      importedRows,
+      rejectedRows,
+      accountedRows: importedRows + rejectedRows,
+      allRowsAccounted: totalRowsRead > 0 ? importedRows + rejectedRows === totalRowsRead : importedRows + rejectedRows > 0,
+      uniquePatientsInFile: patientIds.size,
+      uniquePatientsImported: result?.summary?.uniquePatientsImported ?? 0,
+      uniqueProvidersImported: result?.summary?.uniqueProvidersImported ?? providerIds.size,
+      uniquePayersImported: result?.summary?.uniquePayersImported ?? payerIds.size,
+      uniqueCptCodesImported: result?.summary?.uniqueCptCodesImported ?? Object.keys(cptCodeCounts).length,
+      totalCptUnitsImported: result?.summary?.totalCptUnitsImported ?? Object.values(cptCodeCounts).reduce((sum, count) => sum + count, 0),
+      cptCodeCounts,
+      totalBilledChargeImported: result?.summary?.totalBilledChargeImported ?? 0,
+      topRejectionReasons: fallbackReason ? [{ reason: fallbackReason, count: 1 }] : []
+    };
+  };
+
+  const normalizeImportResult = (result: ImportResult): ImportResult => ({
+    ...result,
+    summary: result.summary || buildLocalImportSummary(result)
+  });
+
   const handleImportClick = async () => {
     setIsProcessing(true);
     startImportProgress();
@@ -216,7 +272,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         percent: 100,
         label: isEnglish ? "Import completed." : "Importación completada."
       });
-      setImportResult(res);
+      setImportResult(normalizeImportResult(res));
       if (res.success) {
         setParsedRows([]);
         setValidationResults([]);
@@ -230,6 +286,14 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         percent: 100,
         label: isEnglish ? "Import failed." : "Importación fallida."
       });
+      const message = err instanceof Error ? err.message : (isEnglish ? "Import process failed." : "El proceso de importación falló.");
+      setImportResult({
+        success: false,
+        importedCount: 0,
+        errorCount: 1,
+        errors: [{ row: 0, claimId: file?.name || "", errors: [message] }],
+        summary: buildLocalImportSummary({ importedCount: 0, errorCount: 1 }, message)
+      });
       notify(isEnglish ? "File import failed." : "Error al importar el archivo.", "error");
     } finally {
       setIsProcessing(false);
@@ -239,6 +303,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const triggerSelectFile = () => {
     fileInputRef.current?.click();
   };
+
+  const displayedSummary = importResult?.summary || null;
 
   return (
     <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
@@ -366,8 +432,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
 
           {/* Import Results Summary */}
           {importResult && (
-            <div className={`p-4 rounded-xl border flex gap-3 ${importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
-              {importResult.errorCount === 0 ? (
+            <div className={`p-4 rounded-xl border flex gap-3 ${importResult.success && importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
+              {importResult.success && importResult.errorCount === 0 ? (
                 <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               ) : (
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
@@ -378,7 +444,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 {importResult.errorCount > 0 && (
                   <p className="mt-1 font-semibold text-rose-700">{isEnglish ? "Rejected due to errors" : "Rechazados por errores"}: {importResult.errorCount} {isEnglish ? "records" : "registros"}.</p>
                 )}
-                {importResult.summary && !importResult.summary.allRowsAccounted && (
+                {displayedSummary && !displayedSummary.allRowsAccounted && (
                   <p className="mt-1 font-semibold text-rose-700">
                     {isEnglish
                       ? "Warning: not all source rows were accounted for. Review the import file and retry."
@@ -398,26 +464,26 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             </div>
           )}
 
-          {importResult?.summary && (
+          {displayedSummary && (
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h4 className="font-semibold text-slate-800 text-sm">
                   {isEnglish ? "Import Summary" : "Resumen de importación"}
                 </h4>
-                <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full ${importResult.summary.allRowsAccounted ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-                  {importResult.summary.allRowsAccounted ? (isEnglish ? "All rows accounted" : "Filas contabilizadas") : (isEnglish ? "Review required" : "Revisión requerida")}
+                <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full ${displayedSummary.allRowsAccounted ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+                  {displayedSummary.allRowsAccounted ? (isEnglish ? "All rows accounted" : "Filas contabilizadas") : (isEnglish ? "Review required" : "Revisión requerida")}
                 </span>
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 {[
-                  [isEnglish ? "Rows read" : "Filas leídas", importResult.summary.totalRowsRead],
-                  [isEnglish ? "Imported" : "Importadas", importResult.summary.importedRows],
-                  [isEnglish ? "Rejected" : "Rechazadas", importResult.summary.rejectedRows],
-                  [isEnglish ? "Unique patients" : "Pacientes únicos", importResult.summary.uniquePatientsImported],
-                  [isEnglish ? "Providers" : "Proveedores", importResult.summary.uniqueProvidersImported],
-                  [isEnglish ? "Payers" : "Payers", importResult.summary.uniquePayersImported],
-                  [isEnglish ? "CPT codes" : "Códigos CPT", importResult.summary.uniqueCptCodesImported],
-                  [isEnglish ? "CPT units" : "Unidades CPT", importResult.summary.totalCptUnitsImported]
+                  [isEnglish ? "Rows read" : "Filas leídas", displayedSummary.totalRowsRead],
+                  [isEnglish ? "Imported" : "Importadas", displayedSummary.importedRows],
+                  [isEnglish ? "Rejected" : "Rechazadas", displayedSummary.rejectedRows],
+                  [isEnglish ? "Unique patients" : "Pacientes únicos", displayedSummary.uniquePatientsImported || displayedSummary.uniquePatientsInFile],
+                  [isEnglish ? "Providers" : "Proveedores", displayedSummary.uniqueProvidersImported],
+                  [isEnglish ? "Payers" : "Payers", displayedSummary.uniquePayersImported],
+                  [isEnglish ? "CPT codes" : "Códigos CPT", displayedSummary.uniqueCptCodesImported],
+                  [isEnglish ? "CPT units" : "Unidades CPT", displayedSummary.totalCptUnitsImported]
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
                     <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold">{label}</p>
@@ -431,10 +497,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     {isEnglish ? "CPT imported" : "CPT importados"}
                   </p>
                   <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
-                    {Object.entries(importResult.summary.cptCodeCounts).length === 0 ? (
+                    {Object.entries(displayedSummary.cptCodeCounts).length === 0 ? (
                       <span className="text-xs text-slate-500">-</span>
                     ) : (
-                      Object.entries(importResult.summary.cptCodeCounts).map(([code, count]) => (
+                      Object.entries(displayedSummary.cptCodeCounts).map(([code, count]) => (
                         <span key={code} className="rounded-md bg-white border border-slate-200 px-2 py-1 text-[11px] font-mono text-slate-700">
                           {code}: {count}
                         </span>
@@ -447,10 +513,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     {isEnglish ? "Top rejection reasons" : "Principales razones de rechazo"}
                   </p>
                   <div className="space-y-1 max-h-24 overflow-y-auto">
-                    {importResult.summary.topRejectionReasons.length === 0 ? (
+                    {displayedSummary.topRejectionReasons.length === 0 ? (
                       <span className="text-xs text-slate-500">-</span>
                     ) : (
-                      importResult.summary.topRejectionReasons.map(item => (
+                      displayedSummary.topRejectionReasons.map(item => (
                         <div key={item.reason} className="flex justify-between gap-3 text-[11px] text-slate-700">
                           <span className="truncate" title={item.reason}>{item.reason}</span>
                           <span className="font-mono font-bold">{item.count}</span>
@@ -461,7 +527,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 </div>
               </div>
               <p className="text-[11px] text-slate-500 mt-3">
-                {isEnglish ? "Total billed charge imported" : "Cargo total importado"}: <span className="font-mono font-bold">${importResult.summary.totalBilledChargeImported.toFixed(2)}</span>
+                {isEnglish ? "Total billed charge imported" : "Cargo total importado"}: <span className="font-mono font-bold">${displayedSummary.totalBilledChargeImported.toFixed(2)}</span>
               </p>
             </div>
           )}
