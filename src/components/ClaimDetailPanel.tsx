@@ -614,6 +614,7 @@ export function ClaimDetailPanel({
   onSaveServiceLineNotes
 }: ClaimDetailPanelProps) {
   const { notify, confirmAction } = useFeedback();
+  const isEnglish = localStorage.getItem("itera-language") !== "es";
   // Local form states
   const [status, setStatus] = useState<ClaimStatus>(claim.claim_status);
   const [classification, setClassification] = useState<ClaimClassification>(claim.claim_classification);
@@ -1397,7 +1398,7 @@ export function ClaimDetailPanel({
           <button
             onClick={onClose}
             className="absolute right-3 top-3 z-10 rounded-lg border border-slate-200 bg-white p-1.5 text-slate-500 shadow-sm hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800"
-            aria-label="Cerrar panel"
+            aria-label={isEnglish ? "Close panel" : "Cerrar panel"}
           >
             <X className="w-4.5 h-4.5" />
           </button>
@@ -1413,30 +1414,30 @@ export function ClaimDetailPanel({
                   <StatusBadge status={claim.claim_status} />
                   <ClassificationBadge classification={claim.claim_classification} />
                 </div>
-                <p className="mt-0.5 truncate text-[9px] text-slate-500">Auditoría y conciliación rápida</p>
+                <p className="mt-0.5 truncate text-[9px] text-slate-500">{isEnglish ? "Quick audit and reconciliation" : "Auditoría y conciliación rápida"}</p>
               </div>
             </div>
 
             <div className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-              <span className="itera-label block">Paciente</span>
+              <span className="itera-label block">{isEnglish ? "Patient" : "Paciente"}</span>
               <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-800">{claim.patient_display_name_masked}</span>
               <span className="block truncate font-mono text-[9px] text-slate-400">ID: {claim.patient_id}</span>
             </div>
 
             <div className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-              <span className="itera-label block">Médico / Clinic</span>
+              <span className="itera-label block">{isEnglish ? "Provider / Clinic" : "Médico / Clinic"}</span>
               <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-800">{claim.provider_name}</span>
               <span className="block truncate font-mono text-[9px] text-slate-400">NPI: {claim.provider_npi} • {claim.practice_name}</span>
             </div>
 
             <div className="min-w-0 rounded-xl border border-emerald-200 bg-emerald-50/60 px-3 py-2.5 shadow-sm">
-              <span className="block text-[9px] font-bold uppercase tracking-wider text-emerald-700">Aseguradora</span>
+              <span className="block text-[9px] font-bold uppercase tracking-wider text-emerald-700">{isEnglish ? "Insurance" : "Aseguradora"}</span>
               <span className="mt-0.5 block truncate text-[11px] font-bold text-emerald-800">{claim.payer_name}</span>
               <span className="block truncate font-mono text-[9px] text-emerald-600/70">ID: {claim.payer_id}</span>
             </div>
 
             <div className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
-              <span className="itera-label block">Visita</span>
+              <span className="itera-label block">{isEnglish ? "Visit" : "Visita"}</span>
               <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-800">DOS: {claim.date_of_service_from}</span>
               <span className="block truncate font-mono text-[9px] text-slate-400">Tipo: {claim.service_type || "N/A"}</span>
             </div>
@@ -1455,7 +1456,7 @@ export function ClaimDetailPanel({
               }`}
             >
               <Zap className="w-3.5 h-3.5" />
-              <span>Carga Rápida ERA (Optimizado PC)</span>
+              <span>{isEnglish ? "Quick ERA Entry" : "Carga Rápida ERA (Optimizado PC)"}</span>
             </button>
             <button
               onClick={() => setIsQuickEntryMode(false)}
@@ -1466,12 +1467,12 @@ export function ClaimDetailPanel({
               }`}
             >
               <Sliders className="w-3.5 h-3.5" />
-              <span>Ficha Completa de Auditoría</span>
+              <span>{isEnglish ? "Full Audit Worksheet" : "Ficha Completa de Auditoría"}</span>
             </button>
           </div>
           <div className="hidden sm:flex items-center gap-2 text-[10px] text-slate-400 font-mono">
-            <span className="bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-500">Tip: [TAB] para saltar celdas</span>
-            <span>Ajustes calculan al instante</span>
+            <span className="bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-slate-500">{isEnglish ? "Tip: use [TAB] to move between cells" : "Tip: [TAB] para saltar celdas"}</span>
+            <span>{isEnglish ? "Adjustments calculate instantly" : "Ajustes calculan al instante"}</span>
           </div>
         </div>
 
@@ -3091,7 +3092,7 @@ export function ClaimDetailPanel({
             onClick={onClose}
             className="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-600 transition-colors"
           >
-            Cerrar Panel
+            {isEnglish ? "Close Panel" : "Cerrar Panel"}
           </button>
           
           {canEditClaims && (
@@ -3100,7 +3101,7 @@ export function ClaimDetailPanel({
               className="bg-primary-blue hover:bg-secondary-blue px-6 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition-all shadow-md shadow-blue-500/10"
             >
               <Send className="w-3.5 h-3.5" />
-              Guardar y Recalcular Conciliación
+              {isEnglish ? "Save and Recalculate Reconciliation" : "Guardar y Recalcular Conciliación"}
             </button>
           )}
         </div>

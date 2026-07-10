@@ -1070,7 +1070,11 @@ export function ClaimsTable({
                                   setActiveActionMenu(null);
                                   if (isLocked) {
                                     if (onUpdateClaim) {
-                                      await onUpdateClaim({ locked: false, lock_reason: "" }, claim.claim_id);
+                                      await onUpdateClaim({
+                                        locked: false,
+                                        lock_reason: "",
+                                        claim_status: claim.claim_status === ClaimStatus.BlockedByError ? ClaimStatus.Pending : claim.claim_status
+                                      }, claim.claim_id);
                                       notify(isEnglish ? "Claim unlocked successfully!" : "¡Reclamación desbloqueada con éxito!", "success");
                                     }
                                   } else {
@@ -1085,7 +1089,13 @@ export function ClaimsTable({
                                     });
                                     if (reason && reason.trim() !== "") {
                                       if (onUpdateClaim) {
-                                        await onUpdateClaim({ locked: true, lock_reason: reason.trim() }, claim.claim_id);
+                                        await onUpdateClaim({
+                                          locked: true,
+                                          lock_reason: reason.trim(),
+                                          error_flag: true,
+                                          error_category: "Billing Error" as any,
+                                          claim_status: ClaimStatus.BlockedByError
+                                        }, claim.claim_id);
                                         notify(isEnglish ? "Claim blocked successfully!" : "¡Reclamación bloqueada con éxito!", "success");
                                       }
                                     }

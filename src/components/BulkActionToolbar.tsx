@@ -25,6 +25,7 @@ export function BulkActionToolbar({
   const isEnglish = language === "en";
   const [noteText, setNoteText] = useState("");
   const [isNoteOpen, setIsNoteOpen] = useState(false);
+  const [openMenu, setOpenMenu] = useState<"status" | "classification" | "billed_by" | "payment_received_by" | null>(null);
 
   if (selectedCount === 0) return null;
 
@@ -33,6 +34,11 @@ export function BulkActionToolbar({
     onApplyAction("note", noteText);
     setNoteText("");
     setIsNoteOpen(false);
+  };
+
+  const applyMenuAction = (actionType: string, value: any) => {
+    setOpenMenu(null);
+    onApplyAction(actionType, value);
   };
 
   return (
@@ -50,65 +56,85 @@ export function BulkActionToolbar({
       <div className="flex flex-wrap items-center gap-2">
         {/* Change Status Dropdown */}
         <div className="relative group">
-          <button className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer">
+          <button
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "status" ? null : "status")}
+            aria-expanded={openMenu === "status"}
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+          >
             <Check className="w-3.5 h-3.5 text-emerald-400" />
             {isEnglish ? "Change Status" : "Cambiar Estado"}
           </button>
-          <div className="absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-44 hidden group-hover:block z-50">
-            <button onClick={() => onApplyAction("status", ClaimStatus.Paid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Paid</button>
-            <button onClick={() => onApplyAction("status", ClaimStatus.PartiallyPaid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Partially Paid</button>
-            <button onClick={() => onApplyAction("status", ClaimStatus.Denied)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-rose-600 font-medium">Denied</button>
-            <button onClick={() => onApplyAction("status", ClaimStatus.Rejected)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-red-600 font-medium">Rejected</button>
-            <button onClick={() => onApplyAction("status", ClaimStatus.Pending)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Pending</button>
-            <button onClick={() => onApplyAction("status", ClaimStatus.BlockedByError)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-amber-600">Blocked by Error</button>
-            <button onClick={() => onApplyAction("status", ClaimStatus.ReadyToRebill)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Ready to Rebill</button>
-            <button onClick={() => onApplyAction("status", ClaimStatus.Closed)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Closed</button>
+          <div className={`absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-44 ${openMenu === "status" ? "block" : "hidden"} group-hover:block z-50`}>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.Paid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Paid</button>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.PartiallyPaid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Partially Paid</button>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.Denied)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-rose-600 font-medium">Denied</button>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.Rejected)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-red-600 font-medium">Rejected</button>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.Pending)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Pending</button>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.BlockedByError)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-amber-600">Blocked by Error</button>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.ReadyToRebill)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Ready to Rebill</button>
+            <button onClick={() => applyMenuAction("status", ClaimStatus.Closed)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Closed</button>
           </div>
         </div>
 
         {/* Change Classification */}
         <div className="relative group">
-          <button className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer">
+          <button
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "classification" ? null : "classification")}
+            aria-expanded={openMenu === "classification"}
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+          >
             <Tag className="w-3.5 h-3.5 text-sky-400" />
             {isEnglish ? "Classification" : "Clasificación"}
           </button>
-          <div className="absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-48 hidden group-hover:block max-h-60 overflow-y-auto z-50">
-            <button onClick={() => onApplyAction("classification", ClaimClassification.CleanClaim)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Clean Claim</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.MissingPayment)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Missing Payment</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.MissingERA)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Missing ERA</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.PaymentMismatch)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Payment Mismatch</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.SplitCollection)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Split Collection</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.Underpaid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Underpaid</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.BillingError)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Billing Error</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.CodingError)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Coding Error</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.ReadyForResubmission)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Ready for Resubmission</button>
-            <button onClick={() => onApplyAction("classification", ClaimClassification.WriteOffCandidate)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Write-off Candidate</button>
+          <div className={`absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-48 ${openMenu === "classification" ? "block" : "hidden"} group-hover:block max-h-60 overflow-y-auto z-50`}>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.CleanClaim)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Clean Claim</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.MissingPayment)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Missing Payment</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.MissingERA)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Missing ERA</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.PaymentMismatch)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Payment Mismatch</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.SplitCollection)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Split Collection</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.Underpaid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Underpaid</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.BillingError)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Billing Error</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.CodingError)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Coding Error</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.ReadyForResubmission)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Ready for Resubmission</button>
+            <button onClick={() => applyMenuAction("classification", ClaimClassification.WriteOffCandidate)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Write-off Candidate</button>
           </div>
         </div>
 
         {/* Change Billed By */}
         <div className="relative group">
-          <button className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer">
+          <button
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "billed_by" ? null : "billed_by")}
+            aria-expanded={openMenu === "billed_by"}
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+          >
             <HelpCircle className="w-3.5 h-3.5 text-blue-400" />
             Billed By
           </button>
-          <div className="absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-32 hidden group-hover:block z-50">
-            <button onClick={() => onApplyAction("billed_by", "ITERA")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">ITERA</button>
-            <button onClick={() => onApplyAction("billed_by", "Provider")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Provider</button>
+          <div className={`absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-32 ${openMenu === "billed_by" ? "block" : "hidden"} group-hover:block z-50`}>
+            <button onClick={() => applyMenuAction("billed_by", "ITERA")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">ITERA</button>
+            <button onClick={() => applyMenuAction("billed_by", "Provider")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Provider</button>
           </div>
         </div>
 
         {/* Change Payment Received By */}
         <div className="relative group">
-          <button className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer">
+          <button
+            type="button"
+            onClick={() => setOpenMenu(openMenu === "payment_received_by" ? null : "payment_received_by")}
+            aria-expanded={openMenu === "payment_received_by"}
+            className="bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 cursor-pointer"
+          >
             <AlertTriangle className="w-3.5 h-3.5 text-yellow-400" />
             Received By
           </button>
-          <div className="absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-36 hidden group-hover:block z-50">
-            <button onClick={() => onApplyAction("payment_received_by", "ITERA")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">ITERA</button>
-            <button onClick={() => onApplyAction("payment_received_by", "Provider")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Provider</button>
-            <button onClick={() => onApplyAction("payment_received_by", "Split")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Split</button>
-            <button onClick={() => onApplyAction("payment_received_by", "Unknown")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Unknown</button>
+          <div className={`absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-36 ${openMenu === "payment_received_by" ? "block" : "hidden"} group-hover:block z-50`}>
+            <button onClick={() => applyMenuAction("payment_received_by", "ITERA")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">ITERA</button>
+            <button onClick={() => applyMenuAction("payment_received_by", "Provider")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Provider</button>
+            <button onClick={() => applyMenuAction("payment_received_by", "Split")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Split</button>
+            <button onClick={() => applyMenuAction("payment_received_by", "Unknown")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Unknown</button>
           </div>
         </div>
 
