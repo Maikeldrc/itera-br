@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { X, Upload, FileSpreadsheet, AlertTriangle, CheckCircle, Info } from "lucide-react";
 import { ClaimStatus, ClaimClassification } from "../types";
 import { useFeedback } from "./FeedbackProvider";
@@ -24,8 +24,18 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const [parsedRows, setParsedRows] = useState<any[]>([]);
   const [validationResults, setValidationResults] = useState<{ row: number; claim_id: string; status: "valid" | "invalid"; errors: string[] }[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
   const [importResult, setImportResult] = useState<{ importedCount: number; errorCount: number; errors: any[] } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const progressTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) {
+        window.clearInterval(progressTimerRef.current);
+      }
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -65,6 +75,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     setFile(selectedFile);
     setFilePayload(null);
     setImportResult(null);
+    setImportProgress(null);
     const reader = new FileReader();
     const isXlsx = selectedFile.name.toLowerCase().endsWith(".xlsx");
     reader.onload = (event) => {
@@ -143,10 +154,43 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     setValidationResults(validations);
   };
 
+  const clearProgressTimer = () => {
+    if (progressTimerRef.current) {
+      window.clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  };
+
+  const startImportProgress = () => {
+    clearProgressTimer();
+    setImportProgress({
+      percent: 8,
+      label: isEnglish ? "Preparing import..." : "Preparando importación..."
+    });
+
+    progressTimerRef.current = window.setInterval(() => {
+      setImportProgress(current => {
+        if (!current) return current;
+        const nextPercent = Math.min(88, current.percent + (filePayload ? 4 : 7));
+        let label = isEnglish ? "Uploading file..." : "Subiendo archivo...";
+        if (nextPercent >= 35) label = isEnglish ? "Processing rows..." : "Procesando filas...";
+        if (nextPercent >= 65) label = isEnglish ? "Writing claims to Google Sheets..." : "Guardando claims en Google Sheets...";
+        if (nextPercent >= 82) label = isEnglish ? "Refreshing imported data..." : "Actualizando datos importados...";
+        return { percent: nextPercent, label };
+      });
+    }, 700);
+  };
+
   const handleImportClick = async () => {
     setIsProcessing(true);
+    startImportProgress();
     try {
       const res = await onImport(filePayload || parsedRows);
+      clearProgressTimer();
+      setImportProgress({
+        percent: 100,
+        label: isEnglish ? "Import completed." : "Importación completada."
+      });
       setImportResult(res);
       if (res.success) {
         setParsedRows([]);
@@ -156,6 +200,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       }
     } catch (err) {
       console.error(err);
+      clearProgressTimer();
+      setImportProgress({
+        percent: 100,
+        label: isEnglish ? "Import failed." : "Importación fallida."
+      });
       notify(isEnglish ? "File import failed." : "Error al importar el archivo.", "error");
     } finally {
       setIsProcessing(false);
@@ -175,7 +224,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             <FileSpreadsheet className="w-5 h-5 text-primary-blue" />
             <h3 className="font-semibold text-lg font-display">{isEnglish ? "Import Claims from CSV / XLSX" : "Importar Claims desde CSV / XLSX"}</h3>
           </div>
-          <button onClick={onClose} className="p-1 hover:bg-white/10 rounded-full transition-colors text-white">
+          <button
+            onClick={onClose}
+            disabled={isProcessing}
+            className="p-1 hover:bg-white/10 rounded-full transition-colors text-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -238,16 +291,51 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               </div>
               <button
                 onClick={() => {
+                  if (isProcessing) return;
                   setFile(null);
                   setFilePayload(null);
                   setParsedRows([]);
                   setValidationResults([]);
                   setImportResult(null);
+                  setImportProgress(null);
                 }}
-                className="text-xs text-rose-500 hover:text-rose-700 font-medium font-mono"
+                disabled={isProcessing}
+                className="text-xs text-rose-500 hover:text-rose-700 disabled:text-slate-300 disabled:cursor-not-allowed font-medium font-mono"
               >
                 {isEnglish ? "Remove" : "Eliminar"}
               </button>
+            </div>
+          )}
+
+          {/* Import Progress */}
+          {importProgress && (
+            <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+              <div className="flex items-center justify-between gap-4 mb-2">
+                <div>
+                  <h4 className="font-semibold text-dark-blue text-sm">
+                    {isEnglish ? "Import progress" : "Progreso de importación"}
+                  </h4>
+                  <p className="text-xs text-slate-600 mt-0.5">{importProgress.label}</p>
+                </div>
+                <span className="text-xs font-bold text-dark-blue tabular-nums">{Math.round(importProgress.percent)}%</span>
+              </div>
+              <div
+                className="h-2.5 w-full overflow-hidden rounded-full bg-white border border-blue-100"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(importProgress.percent)}
+              >
+                <div
+                  className="h-full rounded-full bg-primary-blue transition-all duration-500 ease-out"
+                  style={{ width: `${importProgress.percent}%` }}
+                />
+              </div>
+              <p className="text-[11px] text-slate-500 mt-2">
+                {filePayload
+                  ? (isEnglish ? "Large XLSX files can take a few moments while the server validates rows and writes claims." : "Los XLSX grandes pueden tardar mientras el servidor valida filas y guarda claims.")
+                  : (isEnglish ? `${parsedRows.length} parsed records are being validated and imported.` : `${parsedRows.length} registros parseados se están validando e importando.`)}
+              </p>
             </div>
           )}
 
@@ -337,7 +425,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-600 transition-colors"
+            disabled={isProcessing}
+            className="px-4 py-2 border border-slate-200 hover:bg-slate-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed rounded-xl text-xs font-semibold text-slate-600 transition-colors"
           >
             {isEnglish ? "Close" : "Cerrar"}
           </button>
