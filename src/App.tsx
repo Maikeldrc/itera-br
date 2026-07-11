@@ -86,8 +86,8 @@ const DIGITAL_CARE_SERVICE_TYPES = ["RPM", "CCM", "APCM", "TCM", "BHI"];
 
 const createNewClaimServiceLine = (overrides: Partial<NewClaimServiceLine> = {}): NewClaimServiceLine => ({
   id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  serviceType: "RPM",
-  cpt: "99454",
+  serviceType: "",
+  cpt: "",
   ...overrides
 });
 
@@ -242,11 +242,11 @@ export default function App() {
   // Quick manually created claim state
   const [newPatientName, setNewPatientName] = useState("");
   const [newPatientId, setNewPatientId] = useState("");
-  const [newDos, setNewDos] = useState(new Date().toISOString().split("T")[0]);
-  const [newBilledBy, setNewBilledBy] = useState<"ITERA" | "Provider">("ITERA");
-  const [newProviderId, setNewProviderId] = useState("PROV_01");
-  const [newPayerId, setNewPayerId] = useState("PAY_01");
-  const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createNewClaimServiceLine()]);
+  const [newDos, setNewDos] = useState("");
+  const [newBilledBy, setNewBilledBy] = useState<"" | "ITERA" | "Provider">("");
+  const [newProviderId, setNewProviderId] = useState("");
+  const [newPayerId, setNewPayerId] = useState("");
+  const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
 
   // Fee Schedule management UI states
   const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "data-cleanup">("language");
@@ -322,7 +322,7 @@ export default function App() {
 
   useEffect(() => {
     const allowedProviderIds = new Set(visibleProviders.map(provider => provider.provider_id));
-    if (allowedProviderIds.size > 0 && !allowedProviderIds.has(newProviderId)) {
+    if (newProviderId && allowedProviderIds.size > 0 && !allowedProviderIds.has(newProviderId)) {
       setNewProviderId(visibleProviders[0].provider_id);
     }
   }, [visibleProviders, newProviderId]);
@@ -566,14 +566,14 @@ export default function App() {
   }));
   const newClaimTotalCharge = Number(newClaimLineCharges.reduce((sum, line) => sum + line.charge, 0).toFixed(2));
 
-  const getDefaultNewClaimLine = () => {
-    const serviceOptions = getServiceTypeOptions();
-    const serviceType = serviceOptions.includes("RPM") ? "RPM" : serviceOptions[0] || "RPM";
-    return createNewClaimServiceLine({ serviceType, cpt: getFirstAvailableCptForService(serviceType) });
-  };
-
   const handleOpenCreateClaim = () => {
-    setNewClaimLines([getDefaultNewClaimLine()]);
+    setNewPatientName("");
+    setNewPatientId("");
+    setNewDos("");
+    setNewBilledBy("");
+    setNewProviderId("");
+    setNewPayerId("");
+    setNewClaimLines([createBlankClaimServiceLine()]);
     setIsCreateOpen(true);
   };
 
@@ -589,6 +589,10 @@ export default function App() {
       charge: getManualClaimLineCharge(line)
     }));
 
+    if (!newPatientName.trim() || !newPatientId.trim() || !newProviderId || !newPayerId || !newDos || !newBilledBy) {
+      notify(isEnglish ? "Complete all claim header fields before saving." : "Complete todos los campos principales del claim antes de guardar.", "warning");
+      return;
+    }
     if (normalizedLines.length === 0) {
       notify(isEnglish ? "Add at least one CPT code to create the claim." : "Añade al menos un CPT code para crear el claim.", "warning");
       return;
@@ -668,15 +672,15 @@ export default function App() {
 
     const rawClaim: Partial<Claim> = {
       claim_id: "AUTO_GENERATE",
-      patient_id: newPatientId.trim() || `MRN-${Math.floor(100000 + Math.random() * 900000)}`,
-      patient_display_name_masked: newPatientName.trim() || (isEnglish ? "New Patient" : "Paciente Nuevo"),
-      practice_id: providerObj?.practice_id || "PRAC_01",
-      practice_name: providerObj?.practice_name || "Metropolitan Care Group",
+      patient_id: newPatientId.trim(),
+      patient_display_name_masked: newPatientName.trim(),
+      practice_id: providerObj?.practice_id || "",
+      practice_name: providerObj?.practice_name || "",
       provider_id: newProviderId,
-      provider_name: providerObj?.provider_name || "Dr. Robert Chen",
-      provider_npi: providerObj?.npi || "1982736450",
+      provider_name: providerObj?.provider_name || "",
+      provider_npi: providerObj?.npi || "",
       payer_id: newPayerId,
-      payer_name: payerObj?.payer_name || "Medicare Texas (Novitas)",
+      payer_name: payerObj?.payer_name || "",
       service_type: serviceTypes.join(", "),
       cpt_hcpcs: lineCharges.map(line => line.cpt).join(", "),
       units: lineCharges.length,
@@ -719,8 +723,11 @@ export default function App() {
       setIsCreateOpen(false);
       setNewPatientName("");
       setNewPatientId("");
-      setNewDos(new Date().toISOString().split("T")[0]);
-      setNewClaimLines([getDefaultNewClaimLine()]);
+      setNewDos("");
+      setNewBilledBy("");
+      setNewProviderId("");
+      setNewPayerId("");
+      setNewClaimLines([createBlankClaimServiceLine()]);
       await fetchAllData();
     } catch (err: any) {
       notify(`${isEnglish ? "Save error" : "Error al guardar"}: ${err.message}`, "error");
@@ -3134,7 +3141,9 @@ export default function App() {
                 </div>
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
                   <label className="block text-emerald-700 mb-1 font-bold uppercase tracking-wider text-[9px]">Total Billed Charge</label>
-                  <div className="font-mono text-lg font-bold text-emerald-800">${newClaimTotalCharge.toFixed(2)}</div>
+                  <div className="font-mono text-lg font-bold text-emerald-800">
+                    {newClaimLineCharges.length > 0 ? `$${newClaimTotalCharge.toFixed(2)}` : "--"}
+                  </div>
                   <p className="mt-1 text-[9px] text-emerald-700">{isEnglish ? "Auto-calculated from Fee Schedules by CPT." : "Autocalculado desde Fee Schedules por CPT."}</p>
                 </div>
               </div>
@@ -3168,10 +3177,12 @@ export default function App() {
                 <div>
                   <label className="block text-slate-500 mb-1">{isEnglish ? "Provider" : "Médico (Provider)"}</label>
                   <select
+                    required
                     value={newProviderId}
                     onChange={(e) => setNewProviderId(e.target.value)}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 text-slate-700"
                   >
+                    <option value="" disabled>{isEnglish ? "Select provider" : "Selecciona provider"}</option>
                     {visibleProviders.map(p => (
                       <option key={p.provider_id} value={p.provider_id}>{p.provider_name}</option>
                     ))}
@@ -3180,10 +3191,12 @@ export default function App() {
                 <div>
                   <label className="block text-slate-500 mb-1">{isEnglish ? "Insurance (Payer)" : "Aseguradora (Payer)"}</label>
                   <select
+                    required
                     value={newPayerId}
                     onChange={(e) => setNewPayerId(e.target.value)}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 text-slate-700"
                   >
+                    <option value="" disabled>{isEnglish ? "Select payer" : "Selecciona payer"}</option>
                     {payers.map(p => (
                       <option key={p.payer_id} value={p.payer_id}>{p.payer_name}</option>
                     ))}
@@ -3205,10 +3218,12 @@ export default function App() {
                 <div>
                   <label className="block text-slate-500 mb-1">Billed By</label>
                   <select
+                    required
                     value={newBilledBy}
-                    onChange={(e) => setNewBilledBy(e.target.value as any)}
+                    onChange={(e) => setNewBilledBy(e.target.value as "" | "ITERA" | "Provider")}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 text-slate-700 font-semibold"
                   >
+                    <option value="" disabled>{isEnglish ? "Select" : "Selecciona"}</option>
                     <option value="ITERA">ITERA</option>
                     <option value="Provider">Provider</option>
                   </select>
@@ -3283,8 +3298,8 @@ export default function App() {
                             </option>
                           ))}
                         </select>
-                        <div className={`flex items-center rounded-lg border px-2 py-1.5 font-mono text-[11px] font-bold ${charge > 0 ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
-                          ${charge.toFixed(2)}
+                        <div className={`flex items-center rounded-lg border px-2 py-1.5 font-mono text-[11px] font-bold ${line.cpt && charge > 0 ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-400"}`}>
+                          {line.cpt ? `$${charge.toFixed(2)}` : "--"}
                         </div>
                         <button
                           type="button"
