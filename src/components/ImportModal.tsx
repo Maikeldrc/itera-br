@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useRef, useState } from "react";
-import { X, Upload, FileSpreadsheet, AlertTriangle, CheckCircle, Info } from "lucide-react";
+import { X, Upload, FileSpreadsheet, AlertTriangle, CheckCircle, Info, Download, RefreshCw } from "lucide-react";
 import { ClaimStatus, ClaimClassification } from "../types";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
@@ -308,6 +308,67 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const displayedSummary = importResult?.summary || null;
+  const importErrorRows = (importResult?.errors || []).flatMap((err, index) => {
+    const messages = Array.isArray(err.errors) ? err.errors : [String(err.errors || "")].filter(Boolean);
+    return messages.map((message: string, messageIndex: number) => ({
+      key: `${index}-${messageIndex}`,
+      row: err.row,
+      claimId: err.claimId || "-",
+      message,
+      action: message.includes("Max/DOS") || message.includes("per DOS")
+        ? (isEnglish ? "Review CPT duplicates or Max/DOS settings." : "Revise CPT duplicados o configuración Max/DOS.")
+        : (isEnglish ? "Correct the source row and re-import it." : "Corrija la fila origen y vuelva a importarla.")
+    }));
+  });
+
+  const escapeCsvValue = (value: unknown) => {
+    const text = String(value ?? "");
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  const downloadRejectedRowsCsv = () => {
+    if (!importResult || importResult.errors.length === 0) return;
+    if (filePayload || parsedRows.length === 0) {
+      notify(
+        isEnglish
+          ? "For XLSX imports, correct the source workbook and upload it again."
+          : "Para importaciones XLSX, corrija el workbook original y vuelva a cargarlo.",
+        "warning"
+      );
+      return;
+    }
+
+    const rejectedByRow = new Map<number, string>();
+    importResult.errors.forEach(err => {
+      rejectedByRow.set(Number(err.row), (err.errors || []).join("; "));
+    });
+    const rejectedRows = parsedRows
+      .map((row, index) => ({ rowNumber: index + 1, row }))
+      .filter(item => rejectedByRow.has(item.rowNumber));
+    if (rejectedRows.length === 0) {
+      notify(isEnglish ? "No rejected source rows are available to export." : "No hay filas rechazadas disponibles para exportar.", "warning");
+      return;
+    }
+
+    const headers = Array.from(new Set<string>(rejectedRows.flatMap(item => Object.keys(item.row))));
+    const csv = [
+      ["source_row", "import_errors", ...headers].map(escapeCsvValue).join(","),
+      ...rejectedRows.map(item => [
+        item.rowNumber,
+        rejectedByRow.get(item.rowNumber) || "",
+        ...headers.map(header => item.row[header] || "")
+      ].map(escapeCsvValue).join(","))
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ITERA_Rejected_Import_Rows_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
@@ -329,6 +390,14 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
 
         {/* Scrollable Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.xlsx"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+
           {/* Instructions and Template */}
           <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex items-start gap-3">
             <Info className="w-5 h-5 text-secondary-blue shrink-0 mt-0.5" />
@@ -361,13 +430,6 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 <p className="text-sm font-semibold text-slate-700">{isEnglish ? "Drag and drop your CSV or XLSX file here" : "Arrastre y suelte su archivo CSV o XLSX aquí"}</p>
                 <p className="text-xs text-slate-500 mt-1">{isEnglish ? "or click to select a local file" : "o haga clic para seleccionar un archivo local"}</p>
               </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv,.xlsx"
-                className="hidden"
-                onChange={handleFileChange}
-              />
             </div>
           )}
 
@@ -454,15 +516,61 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                       : "Advertencia: no todas las filas del archivo fueron contabilizadas. Revise el archivo e intente nuevamente."}
                   </p>
                 )}
-                {importResult.errors.length > 0 && (
-                  <div className="mt-2 bg-white/80 border border-rose-100 rounded-lg p-2.5 space-y-1 text-xs text-rose-700 max-h-40 overflow-y-auto font-mono">
-                    {importResult.errors.map((err, i) => (
-                      <div key={i}>
-                        {isEnglish ? "Row" : "Fila"} {err.row} (ID: {err.claimId}): {err.errors.join("; ")}
-                      </div>
+              </div>
+            </div>
+          )}
+
+          {importErrorRows.length > 0 && (
+            <div className="rounded-xl border border-rose-100 bg-white shadow-sm overflow-hidden">
+              <div className="px-4 py-3 border-b border-rose-100 bg-rose-50/70 flex items-center justify-between gap-3">
+                <div>
+                  <h4 className="font-semibold text-rose-900 text-sm">
+                    {isEnglish ? "Rows Requiring Correction" : "Filas que requieren corrección"}
+                  </h4>
+                  <p className="text-xs text-rose-700 mt-0.5">
+                    {isEnglish
+                      ? "Review each rejected row, correct the source data, then re-import only the corrected records."
+                      : "Revise cada fila rechazada, corrija el origen y luego importe solo los registros corregidos."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={downloadRejectedRowsCsv}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-rose-700 hover:bg-rose-50"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    {isEnglish ? "Download rejected rows" : "Descargar rechazadas"}
+                  </button>
+                  <button
+                    onClick={triggerSelectFile}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-dark-blue px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-secondary-blue"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    {isEnglish ? "Upload corrected file" : "Cargar archivo corregido"}
+                  </button>
+                </div>
+              </div>
+              <div className="max-h-72 overflow-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wide">
+                    <tr>
+                      <th className="p-3 w-20">{isEnglish ? "Row" : "Fila"}</th>
+                      <th className="p-3 w-56">Claim ID</th>
+                      <th className="p-3">{isEnglish ? "Issue" : "Problema"}</th>
+                      <th className="p-3 w-72">{isEnglish ? "Suggested correction" : "Corrección sugerida"}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {importErrorRows.map(item => (
+                      <tr key={item.key} className="hover:bg-slate-50/80">
+                        <td className="p-3 font-mono font-bold text-slate-800">{item.row || "-"}</td>
+                        <td className="p-3 font-mono text-slate-700">{item.claimId}</td>
+                        <td className="p-3 text-slate-800 leading-relaxed">{item.message}</td>
+                        <td className="p-3 text-slate-600">{item.action}</td>
+                      </tr>
                     ))}
-                  </div>
-                )}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
