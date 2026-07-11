@@ -83,8 +83,8 @@
   - `npm run test`: Passed.
   - `npm run lint`: Passed.
   - `npm run build`: Passed.
-- Frontend deployment: Pending.
-- Backend deployment: Not required unless full build deployment is executed by platform.
-- Production validation after fix: Pending.
-- Regression: Pending.
+- Frontend deployment: Passed. Initial CLI attempt linked to `itera-br-update`; relinked checkout to Vercel project `itera-br` and deployed production successfully.
+- Backend deployment: Not required; frontend-only change.
+- Production validation after fix: Passed on `https://itera-br.vercel.app/claims`. Import modal opens clean, close/reopen keeps it clean, and console errors/warnings were not observed.
+- Regression: Passed for QA-TC-012.
 - Decision: Continue.

@@ -7,7 +7,7 @@ Date: 2026-07-11
 | QA-DEF-001 | Backend logs raw payer-change update payload during claim update | Claims API | `/api/claims/:id` | High | High | Production code path | N/A | Admin/Billing/Reconciliation | Closed |
 | QA-DEF-002 | Missing browser security headers on frontend and incomplete API security headers | Platform Security | `/`, `/api/status` | Medium | High | Production | N/A | All | Closed |
 | QA-DEF-003 | No-op claim save creates misleading audit entries for empty fields and equivalent service lines | Audit / Claims API | `/api/claims/:id` | Medium | High | Production | Chrome/IAB | Admin | Closed |
-| QA-DEF-004 | Import modal reopens with previous file, progress and summary state | Import UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin | Fixed locally, pending deploy validation |
+| QA-DEF-004 | Import modal reopens with previous file, progress and summary state | Import UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin | Closed |
 
 ## QA-DEF-001
 
@@ -61,6 +61,6 @@ Date: 2026-07-11
 - Files affected: `src/components/ImportModal.tsx`.
 - Correction applied: Added explicit reset on each modal open transition and centralized selected-file cleanup, including native file input value reset.
 - Regression test: `npm run test`; `npm run lint`; `npm run build`.
-- Commit: Pending.
-- Deployment: Pending.
-- Result after deployment: Pending.
+- Commit: `be94529`.
+- Deployment: Vercel production deployment for project `itera-br`.
+- Result after deployment: Closed. `https://itera-br.vercel.app/claims` opens Import Claims with dropzone visible, no prior XLSX filename, no progress bar, no import result, no Remove link, and no console errors after close/reopen.
