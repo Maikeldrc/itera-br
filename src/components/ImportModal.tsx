@@ -12,8 +12,10 @@ import { useLanguage } from "./LanguageProvider";
 interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImport: (payload: any[] | { fileName: string; fileBase64: string }) => Promise<ImportResult>;
+  onImport: (payload: ImportPayload) => Promise<ImportResult>;
 }
+
+type ImportPayload = any[] | { fileName: string; fileBase64: string; retryRows?: number[] };
 
 type ImportSummary = {
   totalRowsRead: number;
@@ -52,6 +54,7 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const correctedFileInputRef = useRef<HTMLInputElement>(null);
   const importResultRef = useRef<HTMLDivElement>(null);
   const progressTimerRef = useRef<number | null>(null);
 
@@ -130,31 +133,32 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     }
   };
 
-  const parseCSV = (text: string) => {
+  const extractCsvRows = (text: string) => {
     const lines = text.split(/\r?\n/);
-    if (lines.length < 2) return;
-
-    // Retrieve headers
+    if (lines.length < 2) return [];
     const headers = lines[0].split(",").map(h => h.trim().replace(/^"|"$/g, ""));
     const dataRows: any[] = [];
-    const validations: typeof validationResults = [];
-
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
-
-      // Handle quotes in split
       const rowValues = line.split(",").map(val => val.trim().replace(/^"|"$/g, ""));
       const claimObj: any = {};
       headers.forEach((header, index) => {
         claimObj[header] = rowValues[index] || "";
       });
-
       dataRows.push(claimObj);
+    }
+    return dataRows;
+  };
 
+  const parseCSV = (text: string) => {
+    const dataRows = extractCsvRows(text);
+    const validations: typeof validationResults = [];
+
+    dataRows.forEach((claimObj, index) => {
       // Simple frontend validation
       const errors: string[] = [];
-      const rowNum = i;
+      const rowNum = index + 1;
       const claim_id = claimObj.claim_id || "";
       const isBillingWorklist = !!(claimObj.MRN || claimObj["Provider NPI"] || claimObj.Code1);
 
@@ -182,7 +186,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         status: errors.length === 0 ? "valid" : "invalid",
         errors
       });
-    }
+    });
 
     setParsedRows(dataRows);
     setValidationResults(validations);
@@ -272,10 +276,14 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   });
 
   const handleImportClick = async () => {
+    await runImport(filePayload || parsedRows);
+  };
+
+  const runImport = async (payload: ImportPayload) => {
     setIsProcessing(true);
     startImportProgress();
     try {
-      const res = await onImport(filePayload || parsedRows);
+      const res = await onImport(payload);
       clearProgressTimer();
       setImportProgress({
         percent: 100,
@@ -308,6 +316,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const displayedSummary = importResult?.summary || null;
+  const rejectedSourceRows = new Set<number>(
+    (importResult?.errors || [])
+      .map(err => Number(err.row))
+      .filter((row): row is number => Number.isFinite(row) && row > 0)
+  );
   const importErrorRows = (importResult?.errors || []).flatMap((err, index) => {
     const messages = Array.isArray(err.errors) ? err.errors : [String(err.errors || "")].filter(Boolean);
     return messages.map((message: string, messageIndex: number) => ({
@@ -370,6 +383,57 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     URL.revokeObjectURL(url);
   };
 
+  const handleCorrectedFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    e.target.value = "";
+    if (!selectedFile || !importResult) return;
+
+    const isXlsx = selectedFile.name.toLowerCase().endsWith(".xlsx");
+    if (isXlsx) {
+      const reader = new FileReader();
+      reader.onload = async event => {
+        const fileBase64 = event.target?.result as string;
+        setFile(selectedFile);
+        setFilePayload({ fileName: selectedFile.name, fileBase64 });
+        setParsedRows([{ file_name: selectedFile.name, import_type: "Corrected Billing Worklist XLSX" }]);
+        setValidationResults([{ row: 1, claim_id: selectedFile.name, status: "valid", errors: [] }]);
+        await runImport({ fileName: selectedFile.name, fileBase64, retryRows: Array.from(rejectedSourceRows) });
+      };
+      reader.readAsDataURL(selectedFile);
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async event => {
+      const text = String(event.target?.result || "");
+      const rows = extractCsvRows(text);
+      const rowsToImport = rows.filter((row, index) => {
+        const sourceRow = Number(row.source_row || row.Source_Row || row.SOURCE_ROW || index + 1);
+        return rejectedSourceRows.has(sourceRow) || rejectedSourceRows.has(index + 1);
+      });
+      if (rowsToImport.length === 0) {
+        notify(
+          isEnglish
+            ? "No corrected rows matched the previous rejected row numbers."
+            : "Ninguna fila corregida coincide con las filas rechazadas anteriores.",
+          "warning"
+        );
+        return;
+      }
+      setFile(selectedFile);
+      setFilePayload(null);
+      setParsedRows(rowsToImport);
+      setValidationResults(rowsToImport.map((row, index) => ({
+        row: index + 1,
+        claim_id: row.claim_id || `[${isEnglish ? "Row" : "Fila"} ${index + 1}]`,
+        status: "valid",
+        errors: []
+      })));
+      await runImport(rowsToImport);
+    };
+    reader.readAsText(selectedFile);
+  };
+
   return (
     <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
       <div className="bg-white rounded-2xl max-w-4xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8 max-h-[90vh] flex flex-col">
@@ -396,6 +460,13 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             accept=".csv,.xlsx"
             className="hidden"
             onChange={handleFileChange}
+          />
+          <input
+            ref={correctedFileInputRef}
+            type="file"
+            accept=".csv,.xlsx"
+            className="hidden"
+            onChange={handleCorrectedFileChange}
           />
 
           {/* Instructions and Template */}
@@ -542,7 +613,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     {isEnglish ? "Download rejected rows" : "Descargar rechazadas"}
                   </button>
                   <button
-                    onClick={triggerSelectFile}
+                    onClick={() => correctedFileInputRef.current?.click()}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-dark-blue px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-secondary-blue"
                   >
                     <RefreshCw className="w-3.5 h-3.5" />

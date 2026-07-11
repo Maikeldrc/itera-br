@@ -1059,8 +1059,14 @@ async function startServer() {
   app.post("/api/import-csv", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64 } = req.body;
-      const importRows = fileBase64 ? parseXlsxRows(fileBase64) : rows;
+      const { rows, fileBase64, retryRows } = req.body;
+      const retryRowSet = Array.isArray(retryRows)
+        ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
+        : null;
+      const parsedRows = fileBase64 ? parseXlsxRows(fileBase64) : rows;
+      const importRows = retryRowSet
+        ? parsedRows?.filter((_: unknown, index: number) => retryRowSet.has(index + 1))
+        : parsedRows;
 
       if (!importRows || !Array.isArray(importRows)) {
         return res.status(400).json({ error: "Rows or XLSX file content are required for import." });

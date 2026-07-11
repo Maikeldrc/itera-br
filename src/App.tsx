@@ -903,7 +903,7 @@ export default function App() {
   };
 
   // Import claims CSV handler
-  const handleImportCSV = async (payload: any[] | { fileName: string; fileBase64: string }) => {
+  const handleImportCSV = async (payload: any[] | { fileName: string; fileBase64: string; retryRows?: number[] }) => {
     const res = await apiFetch("/api/import-csv", {
       method: "POST",
       headers: {
