@@ -58,11 +58,39 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const importResultRef = useRef<HTMLDivElement>(null);
   const progressTimerRef = useRef<number | null>(null);
 
+  function clearProgressTimer() {
+    if (progressTimerRef.current) {
+      window.clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  }
+
+  function resetImportState() {
+    clearProgressTimer();
+    setFile(null);
+    setFilePayload(null);
+    setParsedRows([]);
+    setValidationResults([]);
+    setIsProcessing(false);
+    setImportProgress(null);
+    setImportResult(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    if (correctedFileInputRef.current) {
+      correctedFileInputRef.current.value = "";
+    }
+  }
+
+  function handleClose() {
+    if (isProcessing) return;
+    resetImportState();
+    onClose();
+  }
+
   useEffect(() => {
     return () => {
-      if (progressTimerRef.current) {
-        window.clearInterval(progressTimerRef.current);
-      }
+      clearProgressTimer();
     };
   }, []);
 
@@ -190,13 +218,6 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
 
     setParsedRows(dataRows);
     setValidationResults(validations);
-  };
-
-  const clearProgressTimer = () => {
-    if (progressTimerRef.current) {
-      window.clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
-    }
   };
 
   const startImportProgress = () => {
@@ -444,7 +465,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             <h3 className="font-semibold text-lg font-display">{isEnglish ? "Import Claims from CSV / XLSX" : "Importar Claims desde CSV / XLSX"}</h3>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             disabled={isProcessing}
             className="p-1 hover:bg-white/10 rounded-full transition-colors text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -772,7 +793,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         {/* Footer */}
         <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-end gap-3">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             disabled={isProcessing}
             className="px-4 py-2 border border-slate-200 hover:bg-slate-100 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed rounded-xl text-xs font-semibold text-slate-600 transition-colors"
           >
