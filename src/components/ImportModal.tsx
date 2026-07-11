@@ -349,7 +349,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           </div>
 
           {/* Drag & Drop File Zone */}
-          {!file && (
+          {!file && !importResult && (
             <div
               onDragOver={handleDragOver}
               onDrop={handleDrop}

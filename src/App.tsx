@@ -327,8 +327,9 @@ export default function App() {
     }
   }, [visibleProviders, newProviderId]);
 
-  const fetchAllData = async () => {
-    if (claims.length === 0) {
+  const fetchAllData = async (options: { showInitialLoading?: boolean } = {}) => {
+    const showInitialLoading = options.showInitialLoading !== false;
+    if (showInitialLoading && claims.length === 0) {
       setIsLoading(true);
     }
     setErrorState(null);
@@ -915,7 +916,10 @@ export default function App() {
     if (!res.ok) {
       throw new Error(data.error || "Import process failed");
     }
-    await fetchAllData();
+    fetchAllData({ showInitialLoading: false }).catch(err => {
+      console.error("Post-import data refresh failed", err);
+      notify(isEnglish ? "Import completed, but refreshing the worklist failed." : "La importación terminó, pero falló la actualización del worklist.", "warning");
+    });
     return data;
   };
 
