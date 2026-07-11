@@ -642,13 +642,8 @@ async function startServer() {
 
       const updated = await sheetsService.updateClaim(req.params.id, calculated, operatorEmail);
 
-      console.log("[DEBUG Payer Change] prevPayerId:", prevPayerId);
-      console.log("[DEBUG Payer Change] updated.payer_id:", updated.payer_id);
-      console.log("[DEBUG Payer Change] rawClaimUpdates:", rawClaimUpdates);
-
       // Explicit insurance change audit log — bypass diff mechanism for reliability
       if (prevPayerId !== updated.payer_id) {
-        console.log("[DEBUG Payer Change] Payer change detected! Creating audit log...");
         const changeReason = (rawClaimUpdates.insurance_change_reason as string) || "Change reported while processing ERA";
         const memberId     = (rawClaimUpdates.insurance_change_member_id as string) || "";
         const reason = `Insurance changed from "${prevPayerName || prevPayerId}" to "${updated.payer_name || updated.payer_id}"` +

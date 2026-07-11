@@ -102,16 +102,18 @@ export function runRegisterIssueCodingTests() {
   };
 }
 
-const result = runRegisterIssueCodingTests();
-if (result.failures.length > 0) {
-  console.error("Register Claim Issue coding certification failed:");
-  result.failures.forEach(failure => console.error(`- ${failure}`));
-  process.exit(1);
-}
+if (process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, "/"))) {
+  const result = runRegisterIssueCodingTests();
+  if (result.failures.length > 0) {
+    console.error("Register Claim Issue coding certification failed:");
+    result.failures.forEach(failure => console.error(`- ${failure}`));
+    process.exit(1);
+  }
 
-console.log(
-  `Register Claim Issue coding certification passed: ${result.coverage.groupCodes} groups, ` +
-  `${result.coverage.carcCodes} CARCs, ${result.coverage.rarcCodes} RARCs, ` +
-  `${result.coverage.rarcSubsets} RARC subsets, ${result.coverage.advancedCombinations} advanced combinations, ` +
-  `${result.coverage.quickPresets} quick presets.`
-);
+  console.log(
+    `Register Claim Issue coding certification passed: ${result.coverage.groupCodes} groups, ` +
+    `${result.coverage.carcCodes} CARCs, ${result.coverage.rarcCodes} RARCs, ` +
+    `${result.coverage.rarcSubsets} RARC subsets, ${result.coverage.advancedCombinations} advanced combinations, ` +
+    `${result.coverage.quickPresets} quick presets.`
+  );
+}
