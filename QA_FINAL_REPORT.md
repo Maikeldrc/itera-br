@@ -6,8 +6,8 @@
 - Date: 2026-07-11.
 - URL validated: https://itera-br.vercel.app/
 - Current QA correction commit: `7d303f5`.
-- QA cycles completed: 0 complete, cycle 001 in progress.
-- Deployments in this QA objective: 1 backend deploy, Cloud Run revision `itera-claim-reconciliation-api-00025-nx7`.
+- QA cycles completed: 1 complete, cycle 002 in progress.
+- Deployments in this QA objective: 1 backend deploy completed, second frontend/backend deployment pending for security headers.
 - Recommendation final: `NOT APPROVED` until the full matrix, role/API/security/accessibility/regression gates are completed.
 
 ## Scope
@@ -19,7 +19,7 @@
 
 ## Test Results
 
-- Total tests in matrix: 12 initial entries.
+- Total tests in matrix: 14 initial entries.
 - Passed: 9.
 - Failed: 0 currently open from executed checks.
 - Blocked: 1.
@@ -34,11 +34,11 @@
 
 ## Defects
 
-- Defects found: 1.
-- Defects corrected locally: 1.
+- Defects found: 2.
+- Defects corrected locally: 2.
 - Critical open: unknown pending broader testing.
 - High open: 0 known from executed cycle checks. Broader role/API testing remains incomplete.
-- Medium open: bundle size warning and Moderate dependency advisory tracked as residual risks.
+- Medium open: QA-DEF-002 pending deployment validation; bundle size warning and Moderate dependency advisory tracked as residual risks.
 - Low open: none recorded.
 
 ## Coverage
@@ -68,7 +68,7 @@
 - No committed secrets found by initial pattern scan.
 - No High/Critical npm audit findings.
 - Raw backend debug logging defect corrected and validated in production.
-- Authorization, IDOR, upload validation and security headers remain pending.
+- Authorization, IDOR and upload validation remain pending. Security header gaps were found and fixed locally in cycle 002, pending production validation.
 
 ## Evidence
 

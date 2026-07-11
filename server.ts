@@ -19,6 +19,7 @@ import { validateClaimCptRepeatLimits, validateClaimCptRepeatLimitsAgainstExisti
 import { validateUniquePatientProvider } from "./src/patientRegistrationValidation";
 import { runPatientRegistrationValidationTests } from "./src/patientRegistrationValidation.test";
 import { canUserAccessProvider, filterClaimsForUser, filterProvidersForUser } from "./src/accessControl";
+import { applyApiSecurityHeaders } from "./src/securityHeaders";
 
 type AppRequest = express.Request & {
   appUser?: User;
@@ -283,9 +284,7 @@ async function startServer() {
     }
     res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-User-Email");
-    res.setHeader("X-Content-Type-Options", "nosniff");
-    res.setHeader("Referrer-Policy", "no-referrer");
-    res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    applyApiSecurityHeaders((name, value) => res.setHeader(name, value));
     if (process.env.NODE_ENV === "production") {
       res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
     }

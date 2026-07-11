@@ -2,6 +2,7 @@ import { runPatientRegistrationValidationTests } from "./patientRegistrationVali
 import { runReconciliationEngineTests } from "./reconciliationEngine.test";
 import { runRegisterIssueCodingTests } from "./registerIssueCoding.test";
 import { runReportsEngineTests } from "./reportsEngine.test";
+import { runSecurityHeadersTests } from "./securityHeaders.test";
 
 const failures: string[] = [];
 
@@ -18,6 +19,10 @@ for (const failure of runReportsEngineTests()) {
 
 for (const failure of runPatientRegistrationValidationTests()) {
   failures.push(`Patient registration validation: ${failure}`);
+}
+
+for (const failure of runSecurityHeadersTests()) {
+  failures.push(`Security headers: ${failure}`);
 }
 
 const codingResult = runRegisterIssueCodingTests();
