@@ -52,6 +52,7 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importResultRef = useRef<HTMLDivElement>(null);
   const progressTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -61,6 +62,14 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (importResult) {
+      window.setTimeout(() => {
+        importResultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
+  }, [importResult]);
 
   if (!isOpen) return null;
 
@@ -273,12 +282,6 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         label: isEnglish ? "Import completed." : "Importación completada."
       });
       setImportResult(normalizeImportResult(res));
-      if (res.success) {
-        setParsedRows([]);
-        setValidationResults([]);
-        setFile(null);
-        setFilePayload(null);
-      }
     } catch (err) {
       console.error(err);
       clearProgressTimer();
@@ -432,7 +435,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
 
           {/* Import Results Summary */}
           {importResult && (
-            <div className={`p-4 rounded-xl border flex gap-3 ${importResult.success && importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
+            <div ref={importResultRef} className={`p-4 rounded-xl border flex gap-3 ${importResult.success && importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
               {importResult.success && importResult.errorCount === 0 ? (
                 <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               ) : (
