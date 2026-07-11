@@ -14,8 +14,8 @@ Environment: Production and local source review
 | High/Critical dependency audit | Passed | `npm audit --audit-level=high` returned no High/Critical findings. |
 | Moderate dependency advisories | Open | 8 Moderate advisories via Google/Firebase transitive `uuid`; force fix would introduce breaking Firebase Admin upgrade. |
 | Secret pattern scan | Passed initial | `rg` scan for common key/secret markers found no committed secrets outside ignored lock/dist/node_modules. |
-| Raw payload logging | Fixed locally | QA-DEF-001 removed debug logs from claim update route. |
-| Cloud Run log inspection | Blocked | Local `gcloud` requires reauthentication. |
+| Raw payload logging | Closed | QA-DEF-001 removed debug logs from claim update route and no recent DEBUG logs were found after deployment. |
+| Cloud Run log inspection | Passed | Recent service logs after revision `itera-claim-reconciliation-api-00025-nx7` show normal startup and no repeated critical errors. |
 
 ## Residual Risks
 

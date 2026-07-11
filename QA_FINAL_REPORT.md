@@ -5,9 +5,9 @@
 - Status: In progress.
 - Date: 2026-07-11.
 - URL validated: https://itera-br.vercel.app/
-- Current QA correction commit: This QA cycle commit.
+- Current QA correction commit: `7d303f5`.
 - QA cycles completed: 0 complete, cycle 001 in progress.
-- Deployments in this QA objective: pending.
+- Deployments in this QA objective: 1 backend deploy, Cloud Run revision `itera-claim-reconciliation-api-00025-nx7`.
 - Recommendation final: `NOT APPROVED` until the full matrix, role/API/security/accessibility/regression gates are completed.
 
 ## Scope
@@ -37,7 +37,7 @@
 - Defects found: 1.
 - Defects corrected locally: 1.
 - Critical open: unknown pending broader testing.
-- High open: QA-DEF-001 pending deployment validation.
+- High open: 0 known from executed cycle checks. Broader role/API testing remains incomplete.
 - Medium open: bundle size warning and Moderate dependency advisory tracked as residual risks.
 - Low open: none recorded.
 
@@ -61,13 +61,13 @@
 - Audit: not tested with synthetic event.
 - Console: no dashboard errors observed.
 - Network: health check passed; browser fetch API unavailable in read-only page scope, so deeper API tests pending.
-- Logs: blocked by `gcloud` reauthentication.
+- Logs: recent Cloud Run logs inspected after reauthentication; no repeated critical errors or recent DEBUG messages observed.
 
 ## Security
 
 - No committed secrets found by initial pattern scan.
 - No High/Critical npm audit findings.
-- Raw backend debug logging defect corrected locally.
+- Raw backend debug logging defect corrected and validated in production.
 - Authorization, IDOR, upload validation and security headers remain pending.
 
 ## Evidence
@@ -80,7 +80,7 @@
 
 - Full production CRUD/import/payment/report flows are not yet validated with QA_AUTO data.
 - Full role matrix is not yet validated.
-- Cloud logs need renewed local authentication.
+- Broader Cloud log monitoring still needs more cycles, but initial post-deploy inspection passed.
 - Accessibility and performance testing are not complete.
 - Moderate dependency advisories remain open pending non-breaking upgrade assessment.
 

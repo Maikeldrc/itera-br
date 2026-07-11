@@ -4,7 +4,7 @@ Date: 2026-07-11
 
 | Defect ID | Title | Module | URL | Severity | Priority | Environment | Browser | Role | Status |
 |---|---|---|---|---|---|---|---|---|---|
-| QA-DEF-001 | Backend logs raw payer-change update payload during claim update | Claims API | `/api/claims/:id` | High | High | Production code path | N/A | Admin/Billing/Reconciliation | Fixed locally, pending deploy validation |
+| QA-DEF-001 | Backend logs raw payer-change update payload during claim update | Claims API | `/api/claims/:id` | High | High | Production code path | N/A | Admin/Billing/Reconciliation | Closed |
 
 ## QA-DEF-001
 
@@ -16,6 +16,6 @@ Date: 2026-07-11
 - Files affected: `server.ts`.
 - Correction applied: Removed debug `console.log` statements while preserving the audit log record for payer changes.
 - Regression test: Source grep for `[DEBUG Payer Change]` and `rawClaimUpdates` debug logs; `npm run test`; `npm run lint`; `npm run build`.
-- Commit: This QA cycle commit.
-- Deployment: Pending.
-- Result after deployment: Pending.
+- Commit: `7d303f5`.
+- Deployment: Cloud Run revision `itera-claim-reconciliation-api-00025-nx7`.
+- Result after deployment: Closed. Backend health returned 200 and recent Cloud Run logs show no DEBUG messages in the 15-minute post-deploy window.
