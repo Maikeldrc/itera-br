@@ -6,6 +6,7 @@ Date: 2026-07-11
 |---|---|---|---|---|---|---|---|---|---|
 | QA-DEF-001 | Backend logs raw payer-change update payload during claim update | Claims API | `/api/claims/:id` | High | High | Production code path | N/A | Admin/Billing/Reconciliation | Closed |
 | QA-DEF-002 | Missing browser security headers on frontend and incomplete API security headers | Platform Security | `/`, `/api/status` | Medium | High | Production | N/A | All | Closed |
+| QA-DEF-003 | No-op claim save creates misleading audit entries for empty fields and equivalent service lines | Audit / Claims API | `/api/claims/:id` | Medium | High | Production | Chrome/IAB | Admin | Fixed locally, pending deploy validation |
 
 ## QA-DEF-001
 
@@ -34,3 +35,17 @@ Date: 2026-07-11
 - Commit: `dc50a8a`.
 - Deployment: Frontend via Vercel from GitHub push; Cloud Run revision `itera-claim-reconciliation-api-00026-fjj`.
 - Result after deployment: Closed. Production frontend and backend now return the expected security headers; dashboard loads successfully without console errors; recent Cloud Run logs show no critical errors.
+
+## QA-DEF-003
+
+- Preconditions: Synthetic claim `CLM-QAAUTOMRN001-20260711-001` exists.
+- Steps: Open claim, save/recalculate without a meaningful business-field change.
+- Expected: Audit trail should record only real business changes.
+- Actual: Audit trail recorded `error_category` from `undefined` to empty and a generic `service_lines_json` update even though values were semantically equivalent.
+- Root cause: Google Sheets diff logic compared raw values and raw service line JSON, treating empty values and legacy JSON shape differences as real changes.
+- Files affected: `src/googleSheetsService.ts`, `src/googleSheetsService.test.ts`, `src/runAllTests.ts`.
+- Correction applied: Added audit comparison normalization for null/undefined/empty strings and canonical service line JSON fields. Added regression test.
+- Regression test: `npm run qa:full`.
+- Commit: Pending.
+- Deployment: Pending.
+- Result after deployment: Pending.

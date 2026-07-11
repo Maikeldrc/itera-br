@@ -9,4 +9,4 @@ Rules:
 
 | Type | Identifier | Created At | Test | Status | Preserve? | Notes |
 |---|---|---:|---|---|---|---|
-| None | None | 2026-07-11 | QA-CYCLE-001 | Not created | No | Cycle 001 used read-only production smoke and local synthetic unit data only. |
+| Claim | CLM-QAAUTOMRN001-20260711-001 | 2026-07-11 10:06 ET | QA-CYCLE-003 | Active synthetic production claim | Yes, until CRUD/regression cycle completes | Patient `QA_AUTO_PATIENT_001`, MRN `QA_AUTO_MRN_001`, provider `PROV_01`, payer `00283`, CPT `99453`, DOS `2026-07-11`. Automated QA synthetic data. Safe to delete. |

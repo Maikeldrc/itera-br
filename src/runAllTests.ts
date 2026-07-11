@@ -3,6 +3,7 @@ import { runReconciliationEngineTests } from "./reconciliationEngine.test";
 import { runRegisterIssueCodingTests } from "./registerIssueCoding.test";
 import { runReportsEngineTests } from "./reportsEngine.test";
 import { runSecurityHeadersTests } from "./securityHeaders.test";
+import { runGoogleSheetsServiceTests } from "./googleSheetsService.test";
 
 const failures: string[] = [];
 
@@ -23,6 +24,10 @@ for (const failure of runPatientRegistrationValidationTests()) {
 
 for (const failure of runSecurityHeadersTests()) {
   failures.push(`Security headers: ${failure}`);
+}
+
+for (const failure of runGoogleSheetsServiceTests()) {
+  failures.push(`Google Sheets service: ${failure}`);
 }
 
 const codingResult = runRegisterIssueCodingTests();

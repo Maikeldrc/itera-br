@@ -991,8 +991,47 @@ export class GoogleSheetsService {
   }
 }
 
+function normalizeAuditComparableValue(field: keyof Claim, value: unknown) {
+  if (value === undefined || value === null) return "";
+  if (field !== "service_lines_json") return value;
+
+  try {
+    const lines = typeof value === "string" && value.trim() ? JSON.parse(value) : [];
+    if (!Array.isArray(lines)) return "";
+    return JSON.stringify(lines.map(line => ({
+      cpt: String(line?.cpt ?? ""),
+      charged: Number(line?.charged || 0),
+      allowed: Number(line?.allowed || 0),
+      adj: Number(line?.adj || 0),
+      patResp: Number(line?.patResp || 0),
+      paid: Number(line?.paid || 0),
+      secondaryPaid: Number(line?.secondaryPaid || 0),
+      secondaryPayerId: String(line?.secondaryPayerId ?? ""),
+      hasSecondaryPayment: Boolean(line?.hasSecondaryPayment),
+      balance: Number(line?.balance || 0),
+      codes: Array.isArray(line?.codes) ? line.codes.map(String).sort() : [],
+      status: String(line?.status ?? ""),
+      notes: Array.isArray(line?.notes)
+        ? line.notes.map((note: any) => ({
+            id: String(note?.id ?? ""),
+            text: String(note?.text ?? "")
+          }))
+        : [],
+      nextAction: String(line?.nextAction ?? ""),
+      eftNumber: String(line?.eftNumber ?? ""),
+      paymentDate: String(line?.paymentDate ?? "")
+    })));
+  } catch {
+    return String(value);
+  }
+}
+
+function auditValuesDiffer(field: keyof Claim, prev: unknown, curr: unknown) {
+  return normalizeAuditComparableValue(field, prev) !== normalizeAuditComparableValue(field, curr);
+}
+
 // --- Diff Helper ---
-function getClaimDifferences(prev: Claim, curr: Claim): { field: string, prev: any, curr: any, reason?: string }[] {
+export function getClaimDifferences(prev: Claim, curr: Claim): { field: string, prev: any, curr: any, reason?: string }[] {
   const diffs: { field: string, prev: any, curr: any, reason?: string }[] = [];
   const fieldsToCheck: Array<keyof Claim> = [
     "claim_status",
@@ -1020,7 +1059,7 @@ function getClaimDifferences(prev: Claim, curr: Claim): { field: string, prev: a
   ];
 
   fieldsToCheck.forEach(field => {
-    if (prev[field] !== curr[field]) {
+    if (auditValuesDiffer(field, prev[field], curr[field])) {
       let reason = "";
       if (field === "locked" && curr.locked) reason = curr.lock_reason || "Locked claim due to error";
       else if (field === "locked" && !curr.locked) reason = "Unlocked claim";
