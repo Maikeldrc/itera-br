@@ -9,6 +9,20 @@ import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSche
 import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS, SEED_PAYERS, SEED_USERS, SEED_SETTINGS, SEED_FEE_SCHEDULES, SEED_ELIGIBILITY_COVERAGE, SEED_REPORT_FEE_SCHEDULES } from "./seedData";
 import { normalizeUserAccess } from "./accessControl";
 
+function hasNonEmptySheetRow(row: unknown[]) {
+  return row.some(value => String(value ?? "").trim() !== "");
+}
+
+function hasMeaningfulAuditLog(log: Partial<AuditLog>) {
+  return [
+    log.audit_id,
+    log.claim_id,
+    log.action_type,
+    log.field_name,
+    log.changed_at
+  ].some(value => String(value ?? "").trim() !== "");
+}
+
 /**
  * Service to manage read/write operations to Google Sheets.
  * Falls back to an in-memory database with seed data only for local/demo mode.
@@ -285,7 +299,7 @@ export class GoogleSheetsService {
 
         const rows = response.data.values || [];
         const headers = rows[0] || getHeadersForTab(tab);
-        const dataRows = rows.length > 1 ? rows.slice(1) : [];
+        const dataRows = rows.length > 1 ? rows.slice(1).filter((row: unknown[]) => hasNonEmptySheetRow(row)) : [];
         const mappedObjects = dataRows.map((row: string[]) => mapRowToObject(tab, headers, row));
 
         // Save in memory even when the sheet is empty, so old seed/cache data cannot leak into production.
@@ -574,7 +588,7 @@ export class GoogleSheetsService {
   }
 
   public async getAuditLogs(): Promise<AuditLog[]> {
-    return this.auditLogs;
+    return this.auditLogs.filter(hasMeaningfulAuditLog);
   }
 
   public async getProviders(): Promise<Provider[]> {

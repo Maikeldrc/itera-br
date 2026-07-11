@@ -1,4 +1,4 @@
-import { getClaimDifferences } from "./googleSheetsService";
+import { getClaimDifferences, GoogleSheetsService } from "./googleSheetsService";
 import { ClaimClassification, ClaimStatus, type Claim } from "./types";
 
 function baseClaim(overrides: Partial<Claim> = {}): Claim {
@@ -83,7 +83,7 @@ function baseClaim(overrides: Partial<Claim> = {}): Claim {
   };
 }
 
-export function runGoogleSheetsServiceTests() {
+export async function runGoogleSheetsServiceTests() {
   const failures: string[] = [];
 
   const previous = baseClaim({
@@ -116,6 +116,40 @@ export function runGoogleSheetsServiceTests() {
   }
   if (diffs.some(diff => diff.field === "service_lines_json")) {
     failures.push("Equivalent service lines generated a false audit diff.");
+  }
+
+  const service = new GoogleSheetsService();
+  service.auditLogs = [
+    {
+      audit_id: "",
+      claim_id: "",
+      action_type: "" as any,
+      field_name: "",
+      previous_value: "",
+      new_value: "",
+      reason: "",
+      changed_by: "",
+      changed_at: ""
+    },
+    {
+      audit_id: "AUD-QA",
+      claim_id: "CLM-QA",
+      action_type: "Create",
+      field_name: "all",
+      previous_value: "",
+      new_value: "Claim Created",
+      reason: "QA",
+      changed_by: "qa",
+      changed_at: "2026-07-11T14:00:00.000Z"
+    }
+  ];
+  try {
+    const logs = await service.getAuditLogs();
+    if (logs.length !== 1 || logs[0].audit_id !== "AUD-QA") {
+      failures.push("Blank audit log rows were not filtered.");
+    }
+  } catch (err: any) {
+    failures.push(`Audit log filtering threw: ${err.message || String(err)}`);
   }
 
   return failures;

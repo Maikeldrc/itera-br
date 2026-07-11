@@ -26,7 +26,7 @@ for (const failure of runSecurityHeadersTests()) {
   failures.push(`Security headers: ${failure}`);
 }
 
-for (const failure of runGoogleSheetsServiceTests()) {
+for (const failure of await runGoogleSheetsServiceTests()) {
   failures.push(`Google Sheets service: ${failure}`);
 }
 
