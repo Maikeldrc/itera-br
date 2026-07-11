@@ -5,7 +5,7 @@ Date: 2026-07-11
 | Defect ID | Title | Module | URL | Severity | Priority | Environment | Browser | Role | Status |
 |---|---|---|---|---|---|---|---|---|---|
 | QA-DEF-001 | Backend logs raw payer-change update payload during claim update | Claims API | `/api/claims/:id` | High | High | Production code path | N/A | Admin/Billing/Reconciliation | Closed |
-| QA-DEF-002 | Missing browser security headers on frontend and incomplete API security headers | Platform Security | `/`, `/api/status` | Medium | High | Production | N/A | All | Fixed locally, pending deploy validation |
+| QA-DEF-002 | Missing browser security headers on frontend and incomplete API security headers | Platform Security | `/`, `/api/status` | Medium | High | Production | N/A | All | Closed |
 
 ## QA-DEF-001
 
@@ -31,6 +31,6 @@ Date: 2026-07-11
 - Files affected: `vercel.json`, `server.ts`, `src/securityHeaders.ts`, `src/securityHeaders.test.ts`, `src/runAllTests.ts`.
 - Correction applied: Added Vercel security headers, centralized API security headers, added automated header regression tests.
 - Regression test: `npm run qa:full`.
-- Commit: Pending.
-- Deployment: Pending.
-- Result after deployment: Pending.
+- Commit: `dc50a8a`.
+- Deployment: Frontend via Vercel from GitHub push; Cloud Run revision `itera-claim-reconciliation-api-00026-fjj`.
+- Result after deployment: Closed. Production frontend and backend now return the expected security headers; dashboard loads successfully without console errors; recent Cloud Run logs show no critical errors.

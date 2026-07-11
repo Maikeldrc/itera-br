@@ -16,8 +16,8 @@ Environment: Production and local source review
 | Secret pattern scan | Passed initial | `rg` scan for common key/secret markers found no committed secrets outside ignored lock/dist/node_modules. |
 | Raw payload logging | Closed | QA-DEF-001 removed debug logs from claim update route and no recent DEBUG logs were found after deployment. |
 | Cloud Run log inspection | Passed | Recent service logs after revision `itera-claim-reconciliation-api-00025-nx7` show normal startup and no repeated critical errors. |
-| Frontend security headers | Fixed locally | QA-DEF-002 adds CSP, X-Frame-Options, nosniff, Referrer-Policy and Permissions-Policy in `vercel.json`; production validation pending. |
-| API security/cache headers | Fixed locally | QA-DEF-002 centralizes restrictive API CSP, anti-framing and no-store headers; production validation pending. |
+| Frontend security headers | Closed | QA-DEF-002 adds CSP, X-Frame-Options, nosniff, Referrer-Policy and Permissions-Policy in `vercel.json`; production validation passed. |
+| API security/cache headers | Closed | QA-DEF-002 centralizes restrictive API CSP, anti-framing and no-store headers; production validation passed. |
 
 ## Residual Risks
 

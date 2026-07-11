@@ -39,10 +39,10 @@
   - `npm run test`: Passed.
   - `npm run lint`: Passed.
   - `npm run qa:full`: Passed.
-- Frontend deployment: Pending.
-- Backend deployment: Pending.
-- Production validation: Pending.
-- Regression: Pending.
+- Frontend deployment: Passed. Vercel serves the new headers from `vercel.json`.
+- Backend deployment: Passed. Cloud Run revision `itera-claim-reconciliation-api-00026-fjj` serves 100% traffic.
+- Production validation: Passed for QA-DEF-002. Frontend and backend headers verified; dashboard loaded without console errors; API health 200.
+- Regression: Related security header regression passed. Full app regression remains pending.
 - Remaining Critical: Unknown until broader testing.
 - Remaining High: No known open High from executed checks; role/API/E2E flows pending.
 - Decision: Continue.

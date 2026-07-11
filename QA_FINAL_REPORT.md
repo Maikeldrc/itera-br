@@ -5,9 +5,9 @@
 - Status: In progress.
 - Date: 2026-07-11.
 - URL validated: https://itera-br.vercel.app/
-- Current QA correction commit: `7d303f5`.
-- QA cycles completed: 1 complete, cycle 002 in progress.
-- Deployments in this QA objective: 1 backend deploy completed, second frontend/backend deployment pending for security headers.
+- Current QA correction commit: `dc50a8a`.
+- QA cycles completed: 2 complete.
+- Deployments in this QA objective: 2 backend deploys completed; latest Cloud Run revision `itera-claim-reconciliation-api-00026-fjj`; Vercel frontend headers validated.
 - Recommendation final: `NOT APPROVED` until the full matrix, role/API/security/accessibility/regression gates are completed.
 
 ## Scope
@@ -38,7 +38,7 @@
 - Defects corrected locally: 2.
 - Critical open: unknown pending broader testing.
 - High open: 0 known from executed cycle checks. Broader role/API testing remains incomplete.
-- Medium open: QA-DEF-002 pending deployment validation; bundle size warning and Moderate dependency advisory tracked as residual risks.
+- Medium open: bundle size warning and Moderate dependency advisory tracked as residual risks.
 - Low open: none recorded.
 
 ## Coverage
@@ -68,7 +68,7 @@
 - No committed secrets found by initial pattern scan.
 - No High/Critical npm audit findings.
 - Raw backend debug logging defect corrected and validated in production.
-- Authorization, IDOR and upload validation remain pending. Security header gaps were found and fixed locally in cycle 002, pending production validation.
+- Authorization, IDOR and upload validation remain pending. Security header gaps were found, fixed and validated in production in cycle 002.
 
 ## Evidence
 
