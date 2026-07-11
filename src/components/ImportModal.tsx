@@ -57,6 +57,7 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const correctedFileInputRef = useRef<HTMLInputElement>(null);
   const importResultRef = useRef<HTMLDivElement>(null);
   const progressTimerRef = useRef<number | null>(null);
+  const wasOpenRef = useRef(false);
 
   function clearProgressTimer() {
     if (progressTimerRef.current) {
@@ -82,6 +83,21 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
     }
   }
 
+  function clearSelectedFile() {
+    setFile(null);
+    setFilePayload(null);
+    setParsedRows([]);
+    setValidationResults([]);
+    setImportResult(null);
+    setImportProgress(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    if (correctedFileInputRef.current) {
+      correctedFileInputRef.current.value = "";
+    }
+  }
+
   function handleClose() {
     if (isProcessing) return;
     resetImportState();
@@ -93,6 +109,13 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
       clearProgressTimer();
     };
   }, []);
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      resetImportState();
+    }
+    wasOpenRef.current = isOpen;
+  }, [isOpen]);
 
   useEffect(() => {
     if (importResult) {
@@ -540,12 +563,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <button
                 onClick={() => {
                   if (isProcessing) return;
-                  setFile(null);
-                  setFilePayload(null);
-                  setParsedRows([]);
-                  setValidationResults([]);
-                  setImportResult(null);
-                  setImportProgress(null);
+                  clearSelectedFile();
                 }}
                 disabled={isProcessing}
                 className="text-xs text-rose-500 hover:text-rose-700 disabled:text-slate-300 disabled:cursor-not-allowed font-medium font-mono"

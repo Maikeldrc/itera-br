@@ -66,8 +66,25 @@
   - `npm run test`: Passed.
   - `npm run lint`: Passed.
   - `npm run qa:full`: Passed.
+- Frontend deployment: Passed from GitHub push.
+- Backend deployment: Passed. Cloud Run revision `itera-claim-reconciliation-api-00028-tln` serves 100% traffic after blank audit-row filter.
+- Production validation after fix: Passed for executed regression. No-op save no longer creates visible timeline events; Audit Log shows `0 saved actions`, no `Invalid Date`, and no console errors.
+- Regression: Passed for no-op audit normalization and blank Audit_Log row rendering. Broader audit persistence scenarios remain to be expanded.
+- Decision: Continue.
+
+## QA-CYCLE-004
+
+- Date: 2026-07-11
+- Starting commit: `9a08164`
+- Errors found: QA-DEF-004 import modal reopens with previous XLSX file, completed progress bar and prior result after closing and opening a new import session.
+- Corrections: reset Import Claims modal state on every closed-to-open transition; clear native file inputs when removing selected file.
+- Files changed: `src/components/ImportModal.tsx`, QA documentation.
+- Local tests:
+  - `npm run test`: Passed.
+  - `npm run lint`: Passed.
+  - `npm run build`: Passed.
 - Frontend deployment: Pending.
-- Backend deployment: Pending.
+- Backend deployment: Not required unless full build deployment is executed by platform.
 - Production validation after fix: Pending.
 - Regression: Pending.
 - Decision: Continue.

@@ -6,7 +6,8 @@ Date: 2026-07-11
 |---|---|---|---|---|---|---|---|---|---|
 | QA-DEF-001 | Backend logs raw payer-change update payload during claim update | Claims API | `/api/claims/:id` | High | High | Production code path | N/A | Admin/Billing/Reconciliation | Closed |
 | QA-DEF-002 | Missing browser security headers on frontend and incomplete API security headers | Platform Security | `/`, `/api/status` | Medium | High | Production | N/A | All | Closed |
-| QA-DEF-003 | No-op claim save creates misleading audit entries for empty fields and equivalent service lines | Audit / Claims API | `/api/claims/:id` | Medium | High | Production | Chrome/IAB | Admin | Fixed locally, pending deploy validation |
+| QA-DEF-003 | No-op claim save creates misleading audit entries for empty fields and equivalent service lines | Audit / Claims API | `/api/claims/:id` | Medium | High | Production | Chrome/IAB | Admin | Closed |
+| QA-DEF-004 | Import modal reopens with previous file, progress and summary state | Import UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin | Fixed locally, pending deploy validation |
 
 ## QA-DEF-001
 
@@ -44,8 +45,22 @@ Date: 2026-07-11
 - Actual: Audit trail recorded `error_category` from `undefined` to empty and a generic `service_lines_json` update even though values were semantically equivalent.
 - Root cause: Google Sheets diff logic compared raw values and raw service line JSON, treating empty values and legacy JSON shape differences as real changes.
 - Files affected: `src/googleSheetsService.ts`, `src/googleSheetsService.test.ts`, `src/runAllTests.ts`.
-- Correction applied: Added audit comparison normalization for null/undefined/empty strings and canonical service line JSON fields. Added regression test.
+- Correction applied: Added audit comparison normalization for null/undefined/empty strings and canonical service line JSON fields. Added regression test. Added filtering for blank Google Sheets rows so empty `Audit_Log` rows do not render as `Invalid Date` saved actions.
 - Regression test: `npm run qa:full`.
+- Commit: `1217048`, `9a08164`.
+- Deployment: Cloud Run revisions `itera-claim-reconciliation-api-00027-bjj` and `itera-claim-reconciliation-api-00028-tln`.
+- Result after deployment: Closed. No-op save no longer creates visible claim timeline events; global Audit Log now shows `0 saved actions` instead of blank rows with `Invalid Date`.
+
+## QA-DEF-004
+
+- Preconditions: An import completed or an XLSX file was selected in the Import Claims modal.
+- Steps: Close the modal, then click Import CSV again.
+- Expected: New import session starts clean with the drag/drop area, no selected file, no progress bar, and no previous import result.
+- Actual: Modal reopened with the previous XLSX file name, 100% progress, and prior result summary.
+- Root cause: Import modal state lived in the mounted component and only reset on specific close/remove paths, not on every closed-to-open transition.
+- Files affected: `src/components/ImportModal.tsx`.
+- Correction applied: Added explicit reset on each modal open transition and centralized selected-file cleanup, including native file input value reset.
+- Regression test: `npm run test`; `npm run lint`; `npm run build`.
 - Commit: Pending.
 - Deployment: Pending.
 - Result after deployment: Pending.
