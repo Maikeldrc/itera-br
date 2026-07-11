@@ -12,7 +12,8 @@ export type ReportView =
   | "collections"
   | "denials"
   | "pending"
-  | "coverage";
+  | "coverage"
+  | "settlement-matrix";
 
 export type ReportGroupBy =
   | "month"
@@ -127,6 +128,18 @@ interface ReportLine {
   iteraFee: number;
 }
 
+export type SettlementMatrixRowTone = "section" | "normal" | "input" | "subtotal" | "total" | "formula";
+
+export interface SettlementMatrixRow {
+  id: string;
+  section: string;
+  label: string;
+  tone: SettlementMatrixRowTone;
+  formula: string;
+  values: Record<string, number>;
+  total: number;
+}
+
 const PENDING_STATUSES = new Set<ClaimStatus>([ClaimStatus.Pending, ClaimStatus.Submitted]);
 const INVALID_STATUSES = new Set<ClaimStatus>([ClaimStatus.Rejected, ClaimStatus.BlockedByError]);
 
@@ -161,6 +174,10 @@ function round(value: number) {
 
 function textValue(value: unknown) {
   return String(value ?? "").trim();
+}
+
+function monthKeyFromClaim(claim: Claim) {
+  return textValue(claim.month_of_service) || dateText(claim.date_of_service_from).slice(0, 7);
 }
 
 function splitCpts(claim: Claim) {
@@ -287,6 +304,185 @@ function matchesFilters(line: ReportLine, filters: ReportFiltersState) {
   if (filters.paymentStartDate && (!paymentDate || paymentDate < filters.paymentStartDate)) return false;
   if (filters.paymentEndDate && (!paymentDate || paymentDate > filters.paymentEndDate)) return false;
   return true;
+}
+
+function matchesClaimFilters(claim: Claim, filters: ReportFiltersState) {
+  const serviceDate = dateText(claim.date_of_service_from);
+  const submissionDate = dateText(claim.submission_date) || dateText(claim.created_at);
+  const paymentDate = dateText(claim.payment_date);
+  const search = filters.search.trim().toLowerCase();
+
+  if (search && ![
+    claim.claim_id,
+    claim.patient_id,
+    claim.practice_name,
+    claim.provider_name,
+    claim.cpt_hcpcs,
+    claim.payer_name
+  ].some(value => String(value || "").toLowerCase().includes(search))) return false;
+  if (filters.startDate && serviceDate < filters.startDate) return false;
+  if (filters.endDate && serviceDate > filters.endDate) return false;
+  if (filters.month && monthKeyFromClaim(claim) !== filters.month) return false;
+  if (filters.practiceId && textValue(claim.practice_id) !== filters.practiceId) return false;
+  if (filters.providerId && textValue(claim.provider_id) !== filters.providerId) return false;
+  if (filters.serviceType && !textValue(claim.service_type).split(",").map(item => item.trim()).includes(filters.serviceType)) return false;
+  if (filters.cptCode && !textValue(claim.cpt_hcpcs).split(/[\s,]+/).includes(filters.cptCode)) return false;
+  if (filters.billedBy && textValue(claim.billed_by) !== filters.billedBy) return false;
+  if (filters.paymentReceivedBy && textValue(claim.payment_received_by) !== filters.paymentReceivedBy) return false;
+  if (filters.claimStatus && textValue(claim.claim_status) !== filters.claimStatus) return false;
+  if (filters.payerId && textValue(claim.payer_id) !== filters.payerId) return false;
+  if (filters.submissionStartDate && submissionDate < filters.submissionStartDate) return false;
+  if (filters.submissionEndDate && submissionDate > filters.submissionEndDate) return false;
+  if (filters.paymentStartDate && (!paymentDate || paymentDate < filters.paymentStartDate)) return false;
+  if (filters.paymentEndDate && (!paymentDate || paymentDate > filters.paymentEndDate)) return false;
+  return true;
+}
+
+const MATRIX_MONTHS = ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"];
+
+function emptyMonthValues(year: number) {
+  return Object.fromEntries(MATRIX_MONTHS.map(month => [`${year}-${month}`, 0])) as Record<string, number>;
+}
+
+function sumClaims(
+  claims: Claim[],
+  year: number,
+  predicate: (claim: Claim) => boolean,
+  selector: (claim: Claim) => number
+) {
+  const values = emptyMonthValues(year);
+  claims.filter(predicate).forEach(claim => {
+    const month = monthKeyFromClaim(claim);
+    if (month in values) {
+      values[month] += selector(claim);
+    }
+  });
+  return Object.fromEntries(Object.entries(values).map(([key, value]) => [key, round(value)]));
+}
+
+function addMonthValues(year: number, ...valueSets: Record<string, number>[]) {
+  const values = emptyMonthValues(year);
+  Object.keys(values).forEach(month => {
+    values[month] = round(valueSets.reduce((sum, set) => sum + number(set[month]), 0));
+  });
+  return values;
+}
+
+function subtractMonthValues(year: number, left: Record<string, number>, right: Record<string, number>) {
+  const values = emptyMonthValues(year);
+  Object.keys(values).forEach(month => {
+    values[month] = round(number(left[month]) - number(right[month]));
+  });
+  return values;
+}
+
+function totalMonthValues(values: Record<string, number>) {
+  return round(Object.values(values).reduce((sum, value) => sum + number(value), 0));
+}
+
+function matrixRow(
+  id: string,
+  section: string,
+  label: string,
+  tone: SettlementMatrixRowTone,
+  formula: string,
+  values: Record<string, number>
+): SettlementMatrixRow {
+  return { id, section, label, tone, formula, values, total: totalMonthValues(values) };
+}
+
+export function buildSettlementMatrix(claims: Claim[], filters: ReportFiltersState) {
+  const filteredClaims = claims.filter(claim => matchesClaimFilters(claim, filters));
+  const year = Number((filters.month || filters.startDate || new Date().toISOString()).slice(0, 4)) || new Date().getFullYear();
+  const monthKeys = MATRIX_MONTHS.map(month => `${year}-${month}`);
+  const itera = (claim: Claim) => claim.billed_by === "ITERA";
+  const provider = (claim: Claim) => claim.billed_by === "Provider";
+  const grossBilled = (claim: Claim) => number(claim.billed_charge);
+  const adjustments = (claim: Claim) => number(claim.insurance_adjustment);
+  const deniedWriteOff = (claim: Claim) => number(claim.denied_amount) + number(claim.write_off_amount) + number(claim.uncollectible_amount);
+  const netCollectible = (claim: Claim) => number(claim.net_collectible_revenue) || Math.max(0, grossBilled(claim) - adjustments(claim) - deniedWriteOff(claim));
+  const collections = (claim: Claim) => number(claim.total_collections) || number(claim.paid_amount) || number(claim.itera_direct_collection) + number(claim.provider_direct_collection);
+  const iteraCollections = (claim: Claim) => number(claim.itera_direct_collection) || (claim.payment_received_by === "ITERA" ? collections(claim) : 0);
+  const providerCollections = (claim: Claim) => number(claim.provider_direct_collection) || (claim.payment_received_by === "Provider" ? collections(claim) : 0);
+  const pending = (claim: Claim) => number(claim.ar_balance);
+  const amountDuePhysician = (claim: Claim) => number(claim.account_payable_to_physician);
+  const paidToPhysician = (claim: Claim) => number(claim.payment_to_physician);
+  const iteraFeeEarned = (claim: Claim) => number(claim.itera_billed_fee) || number(claim.net_itera_revenue);
+  const paidToItera = (claim: Claim) => number(claim.itera_direct_collection);
+
+  const iteraBilled = sumClaims(filteredClaims, year, itera, grossBilled);
+  const iteraAdj = sumClaims(filteredClaims, year, itera, adjustments);
+  const iteraDenied = sumClaims(filteredClaims, year, itera, deniedWriteOff);
+  const iteraNetCollectible = sumClaims(filteredClaims, year, itera, netCollectible);
+  const iteraCollected = sumClaims(filteredClaims, year, itera, iteraCollections);
+  const iteraPayerPending = sumClaims(filteredClaims, year, itera, pending);
+  const physicianFeeEarned = sumClaims(filteredClaims, year, itera, amountDuePhysician);
+  const iteraToPhysician = sumClaims(filteredClaims, year, itera, paidToPhysician);
+  const iteraAp = subtractMonthValues(year, physicianFeeEarned, iteraToPhysician);
+  const iteraNetRevenue = subtractMonthValues(year, iteraCollected, physicianFeeEarned);
+
+  const physicianBilled = sumClaims(filteredClaims, year, provider, grossBilled);
+  const physicianAdj = sumClaims(filteredClaims, year, provider, adjustments);
+  const physicianDenied = sumClaims(filteredClaims, year, provider, deniedWriteOff);
+  const physicianNetCollectible = sumClaims(filteredClaims, year, provider, netCollectible);
+  const physicianCollected = sumClaims(filteredClaims, year, provider, providerCollections);
+  const physicianPayerPending = sumClaims(filteredClaims, year, provider, pending);
+  const iteraFeeFromPhysician = sumClaims(filteredClaims, year, provider, iteraFeeEarned);
+  const physicianToItera = sumClaims(filteredClaims, year, provider, paidToItera);
+  const physicianAr = subtractMonthValues(year, iteraFeeFromPhysician, physicianToItera);
+  const physicianBillingRevenue = iteraFeeFromPhysician;
+
+  const totalBilled = addMonthValues(year, iteraBilled, physicianBilled);
+  const totalAdjustments = addMonthValues(year, iteraAdj, physicianAdj);
+  const totalDenied = addMonthValues(year, iteraDenied, physicianDenied);
+  const totalNetCollectible = addMonthValues(year, iteraNetCollectible, physicianNetCollectible);
+  const totalCollections = addMonthValues(year, iteraCollected, physicianCollected);
+  const totalPayerPending = addMonthValues(year, iteraPayerPending, physicianPayerPending);
+  const totalIteraRevenue = addMonthValues(year, iteraNetRevenue, physicianBillingRevenue);
+  const netSettlementBalance = subtractMonthValues(year, physicianAr, iteraAp);
+
+  const rows: SettlementMatrixRow[] = [
+    matrixRow("section-itera", "Program / Line Item", "Digital Care Management - ITERA Billing", "section", "", emptyMonthValues(year)),
+    matrixRow("itera-billed", "Digital Care Management - ITERA Billing", "Billed Charges by ITERA", "normal", "Sum of payer billed charges submitted by ITERA.", iteraBilled),
+    matrixRow("itera-adjustments", "Digital Care Management - ITERA Billing", "(-) Insurance Adjustments", "normal", "Sum of insurance adjustments from ITERA-billed claims.", iteraAdj),
+    matrixRow("itera-denials", "Digital Care Management - ITERA Billing", "(-) Denials / Write-offs / Uncollectible", "normal", "Denied, write-off and uncollectible amounts from ITERA-billed claims.", iteraDenied),
+    matrixRow("itera-net-collectible", "Digital Care Management - ITERA Billing", "Net Collectible Revenue by ITERA", "subtotal", "Billed Charges by ITERA - Adjustments - Uncollectible.", iteraNetCollectible),
+    matrixRow("itera-collections", "Digital Care Management - ITERA Billing", "Collections by ITERA", "normal", "Collections received by ITERA.", iteraCollected),
+    matrixRow("itera-pending", "Digital Care Management - ITERA Billing", "ITERA Payer Balance Pending Reconciliation", "input", "Operational tracking only: payer balance still pending reconciliation.", iteraPayerPending),
+    matrixRow("physician-fee-earned", "Digital Care Management - ITERA Billing", "Physician Fee / Revenue Share Earned", "normal", "Amount due to physician from ITERA billing.", physicianFeeEarned),
+    matrixRow("itera-payment-to-physician", "Digital Care Management - ITERA Billing", "Payment from ITERA to Physician", "input", "Payments sent from ITERA to the physician.", iteraToPhysician),
+    matrixRow("itera-ap-to-physician", "Digital Care Management - ITERA Billing", "A/P to Physician", "formula", "Physician Fee Earned - Payments from ITERA to Physician.", iteraAp),
+    matrixRow("itera-net-revenue", "Digital Care Management - ITERA Billing", "Net ITERA Revenue from ITERA Billing", "total", "Collections by ITERA - Physician Revenue Share Earned.", iteraNetRevenue),
+    matrixRow("section-physician", "Program / Line Item", "Digital Care Management - Physician Billing", "section", "", emptyMonthValues(year)),
+    matrixRow("physician-billed", "Digital Care Management - Physician Billing", "Billed Charges by Physician", "normal", "Sum of payer billed charges submitted by the physician/practice.", physicianBilled),
+    matrixRow("physician-adjustments", "Digital Care Management - Physician Billing", "(-) Insurance Adjustments", "normal", "Sum of insurance adjustments from physician-billed claims.", physicianAdj),
+    matrixRow("physician-denials", "Digital Care Management - Physician Billing", "(-) Denials / Write-offs / Uncollectible", "normal", "Denied, write-off and uncollectible amounts from physician-billed claims.", physicianDenied),
+    matrixRow("physician-net-collectible", "Digital Care Management - Physician Billing", "Net Collectible Revenue by Physician", "subtotal", "Billed Charges by Physician - Adjustments - Uncollectible.", physicianNetCollectible),
+    matrixRow("physician-collections", "Digital Care Management - Physician Billing", "Collections by Physician", "normal", "Collections received by physician/practice.", physicianCollected),
+    matrixRow("physician-pending", "Digital Care Management - Physician Billing", "Physician Payer Balance Pending Reconciliation", "input", "Operational tracking only: payer balance still pending reconciliation.", physicianPayerPending),
+    matrixRow("itera-fee-earned", "Digital Care Management - Physician Billing", "ITERA Fee / Revenue Share Earned", "normal", "Amount due to ITERA from physician billing.", iteraFeeFromPhysician),
+    matrixRow("physician-payment-to-itera", "Digital Care Management - Physician Billing", "Payment from Physician to ITERA", "input", "Payments made by physician/practice to ITERA.", physicianToItera),
+    matrixRow("physician-ar", "Digital Care Management - Physician Billing", "A/R from Physician", "formula", "ITERA Revenue Share Earned - Payments from Physician.", physicianAr),
+    matrixRow("physician-net-revenue", "Digital Care Management - Physician Billing", "Net ITERA Revenue from Physician Billing", "total", "Accrual view: ITERA revenue earned from physician billing programs.", physicianBillingRevenue),
+    matrixRow("section-operational", "Program / Line Item", "Operational Totals", "section", "", emptyMonthValues(year)),
+    matrixRow("total-billed", "Operational Totals", "Total Billed Charges", "normal", "Billed Charges by ITERA + Billed Charges by Physician.", totalBilled),
+    matrixRow("total-adjustments", "Operational Totals", "Total Insurance Adjustments", "normal", "Insurance adjustments from both billing models.", totalAdjustments),
+    matrixRow("total-denials", "Operational Totals", "Total Denials / Write-offs / Uncollectible", "normal", "Denial/write-off/uncollectible amounts from both billing models.", totalDenied),
+    matrixRow("total-net-collectible", "Operational Totals", "Total Net Collectible Revenue", "subtotal", "Net Collectible Revenue by ITERA + Physician.", totalNetCollectible),
+    matrixRow("total-collections", "Operational Totals", "Total Collections", "normal", "Collections by ITERA + Collections by Physician.", totalCollections),
+    matrixRow("total-pending", "Operational Totals", "Total Payer Balance Pending Reconciliation", "input", "ITERA payer pending + Physician payer pending.", totalPayerPending),
+    matrixRow("total-itera-revenue", "Operational Totals", "Total Net ITERA Revenue", "total", "Net ITERA Revenue from ITERA Billing + Physician Billing.", totalIteraRevenue),
+    matrixRow("section-settlement", "Program / Line Item", "ITERA-Physician Settlement Summary", "section", "", emptyMonthValues(year)),
+    matrixRow("settlement-due-physician", "ITERA-Physician Settlement Summary", "Amount Due to Physician", "normal", "Amount due to physician from ITERA billing model.", physicianFeeEarned),
+    matrixRow("settlement-paid-physician", "ITERA-Physician Settlement Summary", "Payments from ITERA to Physician", "input", "Payments from ITERA to physician.", iteraToPhysician),
+    matrixRow("settlement-ap", "ITERA-Physician Settlement Summary", "Outstanding A/P to Physician", "formula", "Amount Due to Physician - Payments from ITERA.", iteraAp),
+    matrixRow("settlement-due-itera", "ITERA-Physician Settlement Summary", "Amount Due to ITERA", "normal", "Amount due to ITERA from physician billing model.", iteraFeeFromPhysician),
+    matrixRow("settlement-paid-itera", "ITERA-Physician Settlement Summary", "Payments from Physician to ITERA", "input", "Payments from physician/practice to ITERA.", physicianToItera),
+    matrixRow("settlement-ar", "ITERA-Physician Settlement Summary", "Outstanding A/R from Physician", "formula", "Amount Due to ITERA - Payments from Physician.", physicianAr),
+    matrixRow("settlement-net", "ITERA-Physician Settlement Summary", "Net Settlement Balance", "total", "Outstanding A/R from Physician - Outstanding A/P to Physician. Positive is in favor of ITERA.", netSettlementBalance)
+  ];
+
+  return { year, monthKeys, rows };
 }
 
 function groupValue(line: ReportLine, groupBy: ReportGroupBy) {

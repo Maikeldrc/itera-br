@@ -74,7 +74,8 @@ const TAB_LABELS: Record<ReportView, string> = {
   collections: "Collections",
   denials: "Denials",
   pending: "Pending Claims",
-  coverage: "Coverage"
+  coverage: "Coverage",
+  "settlement-matrix": "Settlement Matrix"
 };
 
 export function ReportTabs({ value, onChange }: { value: ReportView; onChange: (view: ReportView) => void }) {

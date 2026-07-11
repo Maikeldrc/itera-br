@@ -3,6 +3,7 @@ import { BarChart3 } from "lucide-react";
 import { Claim, EligibilityCoverage, FeeSchedule, Payer, Provider, ReportFeeSchedule } from "../../types";
 import {
   aggregateReports,
+  buildSettlementMatrix,
   calculateReportKpis,
   DEFAULT_REPORT_FILTERS,
   filterRowsForView,
@@ -17,6 +18,7 @@ import {
   ReportTabs
 } from "./ReportComponents";
 import { ReportsTable } from "./ReportsTable";
+import { SettlementMatrixReport } from "./SettlementMatrixReport";
 import { useFeedback } from "../FeedbackProvider";
 import { useLanguage } from "../LanguageProvider";
 
@@ -95,6 +97,54 @@ function exportExcelRows(rows: ReportRow[], view: ReportView) {
   URL.revokeObjectURL(url);
 }
 
+function exportSettlementMatrixExcel(matrix: ReturnType<typeof buildSettlementMatrix>) {
+  const monthLabels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const moneyCell = (value: number) => value === 0 ? "" : value.toFixed(2);
+  const worksheet = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+      <head>
+        <meta charset="utf-8" />
+        <!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>Settlement Matrix</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+        <style>
+          table { border-collapse: collapse; font-family: Arial, sans-serif; font-size: 10px; }
+          th { background: #1f6d9f; color: white; font-weight: bold; border: 1px solid #2c7aa9; padding: 4px; }
+          td { border: 1px solid #d9e2ec; padding: 3px; }
+          .section { background: #005a91; color: white; font-weight: bold; }
+          .subtotal { background: #eef2f7; font-weight: bold; }
+          .total { background: #d9ead3; font-weight: bold; }
+          .input { background: #fff2cc; }
+          .num { text-align: right; mso-number-format: "$"#,##0.00; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <thead>
+            <tr><th>Program / Line Item</th><th>${matrix.year}</th>${monthLabels.map(label => `<th>${label}</th>`).join("")}<th>Total</th><th>Formula / Notes</th></tr>
+          </thead>
+          <tbody>
+            ${matrix.rows.map(row => {
+              const cls = row.tone === "section" ? "section" : row.tone === "total" ? "total" : row.tone === "subtotal" ? "subtotal" : row.tone === "input" ? "input" : "";
+              return `<tr class="${cls}">
+                <td>${excelValue(row.label)}</td>
+                <td>${row.tone === "section" ? "" : matrix.year}</td>
+                ${matrix.monthKeys.map(month => `<td class="num">${moneyCell(row.values[month] || 0)}</td>`).join("")}
+                <td class="num">${row.tone === "section" ? "" : moneyCell(row.total)}</td>
+                <td>${excelValue(row.formula)}</td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </body>
+    </html>`;
+  const blob = new Blob([worksheet], { type: "application/vnd.ms-excel;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `itera-settlement-matrix-${matrix.year}-${new Date().toISOString().slice(0, 10)}.xls`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 function serviceTypesForClaim(claim: Claim) {
   const values = new Set(textValue(claim.service_type).split(",").map(item => item.trim()).filter(Boolean));
   try {
@@ -130,7 +180,7 @@ export function ReportsPage({
   const isEnglish = language !== "es";
   const [view, setView] = useState<ReportView>(() => {
     const path = window.location.pathname.split("/").filter(Boolean)[1];
-    return (["billing-summary", "provider-vs-itera", "collections", "denials", "pending", "coverage"].includes(path) ? path : "billing-summary") as ReportView;
+    return (["billing-summary", "provider-vs-itera", "collections", "denials", "pending", "coverage", "settlement-matrix"].includes(path) ? path : "billing-summary") as ReportView;
   });
   const [filters, setFilters] = useState<ReportFiltersState>(() => {
     try {
@@ -152,6 +202,7 @@ export function ReportsPage({
   const allRows = aggregateReports(claims, filters, eligibilityCoverage, feeSchedules, reportFeeSchedules);
   const rows = filterRowsForView(allRows, view);
   const kpis = calculateReportKpis(rows);
+  const settlementMatrix = buildSettlementMatrix(claims, filters);
   const practices = Array.from(new Map(claims.map(claim => [claim.practice_id, { id: claim.practice_id, name: claim.practice_name }])).values());
   const serviceTypes = Array.from(new Set(claims.flatMap(serviceTypesForClaim))).sort();
   const cptCodes = Array.from(new Set(claims.flatMap(claim => textValue(claim.cpt_hcpcs).split(/[\s,]+/).filter(Boolean)))).sort();
@@ -174,8 +225,14 @@ export function ReportsPage({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <ExportButton onClick={() => exportRows(rows, view)} />
-            <ExportButton onClick={() => exportExcelRows(rows, view)} label="Export Excel" />
+            {view === "settlement-matrix" ? (
+              <ExportButton onClick={() => exportSettlementMatrixExcel(settlementMatrix)} label="Export Excel" />
+            ) : (
+              <>
+                <ExportButton onClick={() => exportRows(rows, view)} />
+                <ExportButton onClick={() => exportExcelRows(rows, view)} label="Export Excel" />
+              </>
+            )}
           </div>
         </div>
         <ReportTabs value={view} onChange={setView} />
@@ -193,7 +250,7 @@ export function ReportsPage({
         onSave={saveView}
       />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      {view !== "settlement-matrix" && <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
         <ReportKpiCard title="Total Billed" value={money(kpis.totalBilledCharges)} />
         <ReportKpiCard title="Total Paid" value={money(kpis.totalPaid)} tone="green" />
         <ReportKpiCard title="Difference" value={money(kpis.difference)} tone={kpis.difference > 0 ? "red" : "green"} />
@@ -205,17 +262,21 @@ export function ReportsPage({
         <ReportKpiCard title="Provider Billed" value={money(kpis.providerBilledCharges)} tone="orange" />
         <ReportKpiCard title="ITERA Pending" value={money(kpis.iteraPending)} tone="orange" />
         <ReportKpiCard title="Provider Pending" value={money(kpis.providerPending)} tone="orange" />
-      </div>
+      </div>}
 
-      <div className="flex items-center justify-between">
+      {view !== "settlement-matrix" && <div className="flex items-center justify-between">
         <p className="text-[10px] text-slate-500"><strong className="text-slate-700">{rows.length}</strong> aggregated report rows</p>
         {kpis.coveragePercent === null && (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[9px] text-amber-700" title="Eligible patient denominator is missing for this period.">
             Coverage is N/A where Eligibility_Coverage denominators are missing.
           </p>
         )}
-      </div>
-      <ReportsTable rows={rows} view={view} />
+      </div>}
+      {view === "settlement-matrix" ? (
+        <SettlementMatrixReport year={settlementMatrix.year} monthKeys={settlementMatrix.monthKeys} rows={settlementMatrix.rows} />
+      ) : (
+        <ReportsTable rows={rows} view={view} />
+      )}
     </div>
   );
 }
