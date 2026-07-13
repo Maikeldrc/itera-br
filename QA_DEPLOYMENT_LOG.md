@@ -101,8 +101,8 @@
   - `npm run test`: Passed.
   - `npm run lint`: Passed.
   - `npm run build`: Passed.
-- Frontend deployment: Pending.
-- Backend deployment: Pending.
-- Production validation after fix: Pending.
-- Regression: Pending.
+- Frontend deployment: Passed. Vercel production serves updated bundle `assets/index-pUogs4WR.js`.
+- Backend deployment: Passed. Cloud Run revision `itera-claim-reconciliation-api-00029-ltl` serves 100% traffic.
+- Production validation after fix: Passed on `https://itera-br.vercel.app/claims`. The compact CARC/RARC/MA popover renders through a fixed portal, stays fully visible and above lower content, and console errors/warnings were not observed.
+- Regression: Passed for QA-TC-018 and backend health.
 - Decision: Continue.

@@ -8,7 +8,7 @@ Date: 2026-07-11
 | QA-DEF-002 | Missing browser security headers on frontend and incomplete API security headers | Platform Security | `/`, `/api/status` | Medium | High | Production | N/A | All | Closed |
 | QA-DEF-003 | No-op claim save creates misleading audit entries for empty fields and equivalent service lines | Audit / Claims API | `/api/claims/:id` | Medium | High | Production | Chrome/IAB | Admin | Closed |
 | QA-DEF-004 | Import modal reopens with previous file, progress and summary state | Import UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin | Closed |
-| QA-DEF-005 | Compact CARC/RARC/MA picker is clipped behind lower claim detail content | Claim Detail UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin/Billing/Reconciliation | Fixed locally, pending deploy validation |
+| QA-DEF-005 | Compact CARC/RARC/MA picker is clipped behind lower claim detail content | Claim Detail UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin/Billing/Reconciliation | Closed |
 
 ## QA-DEF-001
 
@@ -76,6 +76,6 @@ Date: 2026-07-11
 - Files affected: `src/components/ClaimDetailPanel.tsx`.
 - Correction applied: Rendered the compact picker popover through a React portal into `document.body`, positioned it from the trigger button, and raised its stacking context.
 - Regression test: `npm run test`; `npm run lint`; `npm run build`.
-- Commit: Pending.
-- Deployment: Pending.
-- Result after deployment: Pending.
+- Commit: `d86ca59`.
+- Deployment: Vercel production deployment and Cloud Run revision `itera-claim-reconciliation-api-00029-ltl`.
+- Result after deployment: Closed. Browser validation on `https://itera-br.vercel.app/claims` confirmed the popover is rendered as a fixed portal, remains fully in viewport, has `z-index: 80`, is the top element at its visible center, and emits no console errors.
