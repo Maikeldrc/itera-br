@@ -135,8 +135,8 @@
   - `npm run test`: Passed.
   - `npm run lint`: Passed.
   - `npm run build`: Passed.
-- Frontend deployment: Pending.
+- Frontend deployment: Passed. Vercel production serves updated bundle `assets/index-ulBpSdtZ.js`.
 - Backend deployment: Not required; frontend/menu access only.
-- Production validation after fix: Pending.
-- Regression: Pending.
+- Production validation after fix: Passed on `https://itera-br.vercel.app/rcm-work-queue`. Queue renders the QA `Verify ERA` CPT action, filters are visible, no `[object Object]` text leaks, the Open action opens claim detail, and console errors/warnings were not observed.
+- Regression: Passed for QA-TC-020.
 - Decision: Continue.
