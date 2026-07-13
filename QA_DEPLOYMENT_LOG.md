@@ -106,3 +106,20 @@
 - Production validation after fix: Passed on `https://itera-br.vercel.app/claims`. The compact CARC/RARC/MA popover renders through a fixed portal, stays fully visible and above lower content, and console errors/warnings were not observed.
 - Regression: Passed for QA-TC-018 and backend health.
 - Decision: Continue.
+
+## QA-CYCLE-006
+
+- Date: 2026-07-13
+- Starting commit: `6ad7f2c`
+- Enhancement requested: show a visible badge in Claims Worklist when a claim has user notes.
+- Corrections: added Notes data to `ClaimsTable`, calculated note counts by claim, and rendered a compact note badge beside the patient name using persisted Notes records with `last_note` fallback.
+- Files changed: `src/App.tsx`, `src/components/ClaimsTable.tsx`, QA documentation.
+- Local tests:
+  - `npm run test`: Passed.
+  - `npm run lint`: Passed.
+  - `npm run build`: Passed.
+- Frontend deployment: Pending.
+- Backend deployment: Not required; frontend-only change.
+- Production validation after fix: Pending.
+- Regression: Pending.
+- Decision: Continue.

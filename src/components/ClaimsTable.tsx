@@ -23,9 +23,10 @@ import {
   User,
   FileText,
   Check,
-  Loader2
+  Loader2,
+  MessageSquareText
 } from "lucide-react";
-import { Claim, ClaimStatus, ClaimClassification, UserRole, type User as AppUser } from "../types";
+import { Claim, ClaimStatus, ClaimClassification, UserRole, type Note, type User as AppUser } from "../types";
 import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
@@ -56,6 +57,7 @@ interface ClaimsTableProps {
   onDeleteClaim?: (claim: Claim, reason: string) => Promise<void>;
   userRole?: UserRole | string;
   allUsers?: AppUser[];
+  notes?: Note[];
 }
 
 interface ServiceLineRow {
@@ -282,7 +284,8 @@ export function ClaimsTable({
   onSaveServiceLineNotes,
   onDeleteClaim,
   userRole,
-  allUsers = []
+  allUsers = [],
+  notes = []
 }: ClaimsTableProps) {
   const [viewMode, setViewMode] = useState<"patient" | "cpt">("patient");
   const [sortField, setSortField] = useState<SortField>("updated_at");
@@ -294,6 +297,17 @@ export function ClaimsTable({
     .sort((a, b) => a.name.localeCompare(b.name));
   const defaultAssignedUserId = activeAssignableUsers[0]?.user_id || "unassigned";
   const getAssignedUser = (userId: string) => activeAssignableUsers.find(user => user.user_id === userId);
+  const noteCountByClaim = notes.reduce<Record<string, number>>((acc, note) => {
+    const claimId = textValue(note.claim_id);
+    const noteText = textValue(note.note_text);
+    if (!claimId || !noteText) return acc;
+    acc[claimId] = (acc[claimId] || 0) + 1;
+    return acc;
+  }, {});
+  const getClaimNoteCount = (claim: Claim) => {
+    const persistedCount = noteCountByClaim[claim.claim_id] || 0;
+    return persistedCount > 0 ? persistedCount : (textValue(claim.last_note) ? 1 : 0);
+  };
 
   // State to track which row has its actions menu open
   const [activeActionMenu, setActiveActionMenu] = useState<string | null>(null);
@@ -1024,6 +1038,7 @@ export function ClaimsTable({
                   const isSelected = selectedClaimIds.includes(claim.claim_id);
                   const hasError = claim.error_flag;
                   const isLocked = claim.locked;
+                  const noteCount = getClaimNoteCount(claim);
 
                   return (
                     <tr
@@ -1047,6 +1062,15 @@ export function ClaimsTable({
                       <td className="px-4 py-3 font-sans">
                         <div className="flex items-center gap-1.5">
                           <div className="font-semibold text-slate-700">{claim.patient_display_name_masked}</div>
+                          {noteCount > 0 && (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-700"
+                              title={claim.last_note ? `Notes registered. Latest: ${claim.last_note}` : "Notes registered for this claim"}
+                            >
+                              <MessageSquareText className="h-3 w-3" />
+                              {noteCount > 1 ? noteCount : ""}
+                            </span>
+                          )}
                           {isLocked && (
                             <Lock className="w-3.5 h-3.5 text-rose-600 shrink-0" title={`Locked: ${claim.lock_reason}`} />
                           )}
