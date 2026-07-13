@@ -112,7 +112,7 @@
 - Date: 2026-07-13
 - Starting commit: `6ad7f2c`
 - Enhancement requested: show a visible badge in Claims Worklist when a claim has user notes.
-- Corrections: added Notes data to `ClaimsTable`, calculated note counts by claim, and rendered a compact note badge beside the patient name using persisted Notes records with `last_note` fallback.
+- Corrections: added Notes data to `ClaimsTable`, calculated note counts by claim, and rendered a compact note badge beside the patient name using persisted Notes records, service-line/CPT notes, and `last_note` fallback.
 - Files changed: `src/App.tsx`, `src/components/ClaimsTable.tsx`, QA documentation.
 - Local tests:
   - `npm run test`: Passed.

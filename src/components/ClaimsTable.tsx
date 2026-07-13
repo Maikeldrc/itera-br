@@ -306,7 +306,18 @@ export function ClaimsTable({
   }, {});
   const getClaimNoteCount = (claim: Claim) => {
     const persistedCount = noteCountByClaim[claim.claim_id] || 0;
-    return persistedCount > 0 ? persistedCount : (textValue(claim.last_note) ? 1 : 0);
+    let serviceLineNoteCount = 0;
+    try {
+      const serviceLines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+      if (Array.isArray(serviceLines)) {
+        serviceLineNoteCount = serviceLines.reduce((count, line) => {
+          const lineNotes = Array.isArray(line?.notes) ? line.notes : [];
+          return count + lineNotes.filter((note: unknown) => textValue(note)).length;
+        }, 0);
+      }
+    } catch {}
+    const fallbackCount = textValue(claim.last_note) ? 1 : 0;
+    return persistedCount + serviceLineNoteCount + fallbackCount;
   };
 
   // State to track which row has its actions menu open
