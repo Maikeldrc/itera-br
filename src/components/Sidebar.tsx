@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   FileSpreadsheet,
   Coins,
+  ListChecks,
   FileX,
   FileWarning,
   Hospital,
@@ -26,6 +27,7 @@ export type ViewType =
   | "dashboard"
   | "claims"
   | "payments"
+  | "rcm-work-queue"
   | "denials"
   | "errors"
   | "providers"
@@ -63,6 +65,12 @@ export function Sidebar({ currentView, onViewChange, currentUser, isCollapsed, o
       label: isEnglish ? "Payment Control" : "Control de Pagos",
       icon: Coins,
       roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist, UserRole.ProviderViewer],
+    },
+    {
+      id: "rcm-work-queue" as ViewType,
+      label: isEnglish ? "RCM Work Queue" : "Cola de Trabajo RCM",
+      icon: ListChecks,
+      roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist, UserRole.ProviderViewer, UserRole.Auditor],
     },
     {
       id: "denials" as ViewType,

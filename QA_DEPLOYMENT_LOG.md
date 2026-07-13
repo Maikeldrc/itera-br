@@ -123,3 +123,20 @@
 - Production validation after fix: Passed on `https://itera-br.vercel.app/claims`. Claim `QA_AUTO_PATIENT_001` shows compact note badge count `4` beside the patient name and console errors/warnings were not observed.
 - Regression: Passed for QA-TC-019.
 - Decision: Continue.
+
+## QA-CYCLE-007
+
+- Date: 2026-07-13
+- Starting commit: `2f0a918`
+- Enhancement requested: implement a dedicated RCM Work Queue for claims/CPT lines with open Next Action values.
+- Corrections: added `RCM Work Queue` menu item, route `/rcm-work-queue`, role/menu access support, and a CPT-level queue with filters for Next Action, provider, payer, status and search.
+- Files changed: `src/accessControl.ts`, `src/components/Sidebar.tsx`, `src/components/RcmWorkQueue.tsx`, `src/App.tsx`, QA documentation.
+- Local tests:
+  - `npm run test`: Passed.
+  - `npm run lint`: Passed.
+  - `npm run build`: Passed.
+- Frontend deployment: Pending.
+- Backend deployment: Not required; frontend/menu access only.
+- Production validation after fix: Pending.
+- Regression: Pending.
+- Decision: Continue.

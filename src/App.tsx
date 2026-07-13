@@ -41,6 +41,7 @@ import { ClaimDetailPanel } from "./components/ClaimDetailPanel";
 import { ImportModal } from "./components/ImportModal";
 import { PremiumDashboard } from "./components/PremiumDashboard";
 import { ReportsPage } from "./components/reports/ReportsPage";
+import { RcmWorkQueue } from "./components/RcmWorkQueue";
 import { useFeedback } from "./components/FeedbackProvider";
 import { AppLanguage, useLanguage } from "./components/LanguageProvider";
 import { useAuth } from "./auth";
@@ -115,6 +116,7 @@ const VIEW_PATHS: Record<ViewType, string> = {
   dashboard: "/",
   claims: "/claims",
   payments: "/payments",
+  "rcm-work-queue": "/rcm-work-queue",
   denials: "/denials",
   errors: "/claims-with-errors",
   providers: "/physician-balances",
@@ -1714,6 +1716,16 @@ export default function App() {
             </div>
           )}
 
+          {/* VIEW: RCM WORK QUEUE */}
+          {currentView === "rcm-work-queue" && (
+            <RcmWorkQueue
+              claims={visibleClaims}
+              users={users}
+              onOpenClaim={(claim) => setSelectedClaim(claim)}
+              isEnglish={isEnglish}
+            />
+          )}
+
           {/* VIEW: PAYMENTS CONTROL MODULE */}
           {currentView === "payments" && (
             <div className="space-y-6">
@@ -2440,6 +2452,7 @@ export default function App() {
                               dashboard: isEnglish ? "Dashboard" : "Tablero",
                               claims: isEnglish ? "Claims Worklist" : "Worklist de Claims",
                               payments: isEnglish ? "Payment Control" : "Control de Pagos",
+                              "rcm-work-queue": isEnglish ? "RCM Work Queue" : "Cola RCM",
                               denials: isEnglish ? "Denials Report" : "Reporte de Denials",
                               errors: isEnglish ? "Claims with Errors" : "Claims con Errores",
                               providers: isEnglish ? "Physician Balances" : "Balance de Médicos",
