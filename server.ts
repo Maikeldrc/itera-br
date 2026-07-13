@@ -20,6 +20,7 @@ import { validateUniquePatientProvider } from "./src/patientRegistrationValidati
 import { runPatientRegistrationValidationTests } from "./src/patientRegistrationValidation.test";
 import { canUserAccessProvider, filterClaimsForUser, filterProvidersForUser } from "./src/accessControl";
 import { applyApiSecurityHeaders } from "./src/securityHeaders";
+import { API_ROLE_GROUPS } from "./src/apiAuthorizationPolicy";
 
 type AppRequest = express.Request & {
   appUser?: User;
@@ -418,7 +419,7 @@ async function startServer() {
   });
 
   // Force sync from Google Sheets
-  app.post("/api/sync", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.post("/api/sync", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     const result = await sheetsService.syncWithGoogleSheets();
     if (result.success) {
       res.json({ success: true, message: result.message });
@@ -427,7 +428,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/clear-operational-data", requireRoles(UserRole.Admin), async (_req: AppRequest, res) => {
+  app.post("/api/admin/clear-operational-data", requireRoles(...API_ROLE_GROUPS.adminOnly), async (_req: AppRequest, res) => {
     try {
       const result = await sheetsService.clearOperationalData();
       res.json({
@@ -440,7 +441,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/supporting-documents", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
+  app.post("/api/supporting-documents", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const claimId = textValue(req.body.claimId);
       const fileName = textValue(req.body.fileName);
@@ -524,7 +525,7 @@ async function startServer() {
   });
 
   // POST Create New Claim
-  app.post("/api/claims", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
+  app.post("/api/claims", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
       const rawClaim = req.body;
@@ -588,7 +589,7 @@ async function startServer() {
   });
 
   // PUT Update Existing Claim
-  app.put("/api/claims/:id", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
+  app.put("/api/claims/:id", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
       const rawClaimUpdates = req.body;
@@ -670,7 +671,7 @@ async function startServer() {
   });
 
   // DELETE Claim (soft delete, Admin only)
-  app.delete("/api/claims/:id", requireRoles(UserRole.Admin), async (req: AppRequest, res) => {
+  app.delete("/api/claims/:id", requireRoles(...API_ROLE_GROUPS.adminOnly), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
       const reason = String(req.body?.reason || "").trim() || "Claim entered in error";
@@ -689,7 +690,7 @@ async function startServer() {
   });
 
   // POST Bulk Update Claims
-  app.post("/api/claims/bulk-update", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
+  app.post("/api/claims/bulk-update", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
       const { claimIds, updates } = req.body;
@@ -757,7 +758,7 @@ async function startServer() {
   });
 
   // POST Create Payment and link to Claim
-  app.post("/api/payments", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
+  app.post("/api/payments", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
       const paymentData = req.body as Payment;
@@ -825,7 +826,7 @@ async function startServer() {
   });
 
   // POST Create Note for Claim
-  app.post("/api/notes", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist), async (req: AppRequest, res) => {
+  app.post("/api/notes", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const authorEmail = getOperatorEmail(req);
       const noteData = req.body as Note;
@@ -856,7 +857,7 @@ async function startServer() {
   });
 
   // GET Audit Logs
-  app.get("/api/audit-logs", requireRoles(UserRole.Admin, UserRole.BillingManager, UserRole.Auditor), async (req: AppRequest, res) => {
+  app.get("/api/audit-logs", requireRoles(...API_ROLE_GROUPS.auditRead), async (req: AppRequest, res) => {
     try {
       const logs = await sheetsService.getAuditLogs();
       const visibleClaimIds = new Set(filterClaimsForUser(await sheetsService.getClaims(), req.appUser).map(claim => claim.claim_id));
@@ -871,7 +872,7 @@ async function startServer() {
     res.json(filterProvidersForUser(await sheetsService.getProviders(), req.appUser));
   });
 
-  app.post("/api/providers", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.post("/api/providers", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const provider = req.body as any;
       if (!provider.provider_id || !provider.provider_name || !provider.npi) {
@@ -883,7 +884,7 @@ async function startServer() {
     }
   });
 
-  app.put("/api/providers/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.put("/api/providers/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       res.json(await sheetsService.updateProvider(req.params.id, req.body));
     } catch (err: any) {
@@ -891,7 +892,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/providers/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.delete("/api/providers/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       await sheetsService.deleteProvider(req.params.id);
       res.json({ success: true });
@@ -905,7 +906,7 @@ async function startServer() {
     res.json(await sheetsService.getPayers());
   });
 
-  app.post("/api/payers", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.post("/api/payers", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const payer = req.body as Payer;
       if (!payer.payer_id?.trim() || !payer.payer_name?.trim() || !payer.payer_type?.trim()) {
@@ -917,7 +918,7 @@ async function startServer() {
     }
   });
 
-  app.post("/api/payers/import-pverify", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.post("/api/payers/import-pverify", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const rows = Array.isArray(req.body?.rows) ? req.body.rows : [];
       if (rows.length === 0) {
@@ -929,7 +930,7 @@ async function startServer() {
     }
   });
 
-  app.put("/api/payers/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.put("/api/payers/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       res.json(await sheetsService.updatePayer(req.params.id, req.body));
     } catch (err: any) {
@@ -937,7 +938,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/payers/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.delete("/api/payers/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       await sheetsService.deletePayer(req.params.id);
       res.status(204).send();
@@ -947,11 +948,11 @@ async function startServer() {
   });
 
   // GET Users
-  app.get("/api/users", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.get("/api/users", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     res.json(await sheetsService.getUsers());
   });
 
-  app.post("/api/users", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.post("/api/users", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const user = req.body as any;
       if (!user.name?.trim() || !user.email?.trim() || !user.role) {
@@ -966,7 +967,7 @@ async function startServer() {
     }
   });
 
-  app.put("/api/users/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.put("/api/users/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       if (req.body.role && !Object.values(UserRole).includes(req.body.role)) {
         return res.status(400).json({ error: "Invalid user role." });
@@ -977,7 +978,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/users/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.delete("/api/users/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       await sheetsService.deleteUser(req.params.id);
       res.status(204).send();
@@ -992,7 +993,7 @@ async function startServer() {
   });
 
   // PUT Settings
-  app.put("/api/settings", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.put("/api/settings", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const { key, value } = req.body;
       const updated = await sheetsService.updateSettings(key, value);
@@ -1020,7 +1021,7 @@ async function startServer() {
   });
 
   // POST Create Fee Schedule
-  app.post("/api/fee-schedules", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.post("/api/fee-schedules", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const created = await sheetsService.createFeeSchedule(req.body);
       res.status(201).json(created);
@@ -1030,7 +1031,7 @@ async function startServer() {
   });
 
   // PUT Update Fee Schedule
-  app.put("/api/fee-schedules/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.put("/api/fee-schedules/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const updated = await sheetsService.updateFeeSchedule(req.params.id, req.body);
       res.json(updated);
@@ -1040,7 +1041,7 @@ async function startServer() {
   });
 
   // DELETE Fee Schedule
-  app.delete("/api/fee-schedules/:id", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req, res) => {
+  app.delete("/api/fee-schedules/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       const success = await sheetsService.deleteFeeSchedule(req.params.id);
       res.json({ success });
@@ -1050,7 +1051,7 @@ async function startServer() {
   });
 
   // POST Import Claims CSV
-  app.post("/api/import-csv", requireRoles(UserRole.Admin, UserRole.BillingManager), async (req: AppRequest, res) => {
+  app.post("/api/import-csv", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
       const { rows, fileBase64, retryRows } = req.body;

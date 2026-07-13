@@ -4,6 +4,7 @@ import { runRegisterIssueCodingTests } from "./registerIssueCoding.test";
 import { runReportsEngineTests } from "./reportsEngine.test";
 import { runSecurityHeadersTests } from "./securityHeaders.test";
 import { runGoogleSheetsServiceTests } from "./googleSheetsService.test";
+import { runAccessControlTests } from "./accessControl.test";
 
 const failures: string[] = [];
 
@@ -24,6 +25,10 @@ for (const failure of runPatientRegistrationValidationTests()) {
 
 for (const failure of runSecurityHeadersTests()) {
   failures.push(`Security headers: ${failure}`);
+}
+
+for (const failure of runAccessControlTests()) {
+  failures.push(`Access control: ${failure}`);
 }
 
 for (const failure of await runGoogleSheetsServiceTests()) {

@@ -88,3 +88,21 @@
 - Production validation after fix: Passed on `https://itera-br.vercel.app/claims`. Import modal opens clean, close/reopen keeps it clean, and console errors/warnings were not observed.
 - Regression: Passed for QA-TC-012.
 - Decision: Continue.
+
+## QA-CYCLE-005
+
+- Date: 2026-07-13
+- Starting commit: `fde70e3`
+- Errors found: QA-DEF-005 compact CARC/RARC/MA picker in Claim Detail was clipped/hidden behind lower content.
+- Corrections: moved compact ERA code picker popover to a React portal with fixed viewport positioning and higher stacking context.
+- Additional coverage: centralized backend API role groups and added automated access-control tests for role groups, menu access and provider filtering.
+- Files changed: `src/components/ClaimDetailPanel.tsx`, `src/apiAuthorizationPolicy.ts`, `src/accessControl.test.ts`, `src/runAllTests.ts`, `server.ts`, QA documentation.
+- Local tests:
+  - `npm run test`: Passed.
+  - `npm run lint`: Passed.
+  - `npm run build`: Passed.
+- Frontend deployment: Pending.
+- Backend deployment: Pending.
+- Production validation after fix: Pending.
+- Regression: Pending.
+- Decision: Continue.

@@ -3,7 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   FileCheck,
@@ -282,6 +283,8 @@ function normalizeEraCode(value: string) {
 function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = false, isEnglish = true }: EraCodePickerProps) {
   const [draft, setDraft] = useState("");
   const [isExpanded, setIsExpanded] = useState(!compact);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const [popoverPosition, setPopoverPosition] = useState({ top: 0, left: 0 });
   const normalizedCodes = codes.map(normalizeEraCode).filter(Boolean);
   const normalizedDraft = normalizeEraCode(draft);
   const datalistId = `era-code-options-${lineKey}`;
@@ -310,6 +313,82 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
     );
   };
 
+  useEffect(() => {
+    if (!compact || !isExpanded || disabled) return;
+
+    const updatePosition = () => {
+      const rect = triggerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = 320;
+      const margin = 12;
+      const left = Math.min(
+        Math.max(margin, rect.right - width),
+        window.innerWidth - width - margin
+      );
+      setPopoverPosition({
+        top: rect.bottom + 8,
+        left
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [compact, disabled, isExpanded, normalizedCodes.length]);
+
+  const compactPopover = isExpanded && !disabled ? (
+    <div
+      className="fixed z-[80] w-80 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl"
+      style={{ top: popoverPosition.top, left: popoverPosition.left }}
+    >
+      <datalist id={datalistId}>
+        {ERA_CODE_OPTIONS.map(item => (
+          <option key={item.code} value={item.code}>{item.label}</option>
+        ))}
+      </datalist>
+      <div className="flex gap-1">
+        <input
+          type="text"
+          list={datalistId}
+          placeholder={isEnglish ? "Search code or description" : "Buscar código o descripción"}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addCode(draft);
+            }
+          }}
+          className="min-w-0 flex-1 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[10px] font-bold focus:bg-white"
+        />
+        <button type="button" onClick={() => addCode(draft)} className="rounded bg-primary-blue px-2 text-[9px] font-bold text-white">
+          Add
+        </button>
+      </div>
+      <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
+        {matchingOptions.map(item => (
+          <button
+            type="button"
+            key={item.code}
+            onClick={() => toggleCode(item.code)}
+            className={`rounded border px-1.5 py-0.5 font-mono text-[8px] ${
+              normalizedCodes.includes(item.code)
+                ? "border-primary-blue bg-primary-blue text-white"
+                : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-blue-50"
+            }`}
+            title={item.label}
+          >
+            {item.code}
+          </button>
+        ))}
+      </div>
+    </div>
+  ) : null;
+
   if (compact) {
     return (
       <div className="relative flex max-w-[220px] items-center gap-1">
@@ -331,6 +410,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
           ))}
         </div>
         <button
+          ref={triggerRef}
           disabled={disabled}
           type="button"
           onClick={() => setIsExpanded(value => !value)}
@@ -341,46 +421,7 @@ function EraCodePicker({ codes, lineKey, compact = false, onChange, disabled = f
           {isExpanded && !disabled ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
         </button>
 
-        {isExpanded && !disabled && (
-          <div className="absolute right-0 top-8 z-30 w-80 space-y-2 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
-            <div className="flex gap-1">
-              <input
-                type="text"
-                list={datalistId}
-                placeholder={isEnglish ? "Search code or description" : "Buscar código o descripción"}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addCode(draft);
-                  }
-                }}
-                className="min-w-0 flex-1 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[10px] font-bold focus:bg-white"
-              />
-              <button type="button" onClick={() => addCode(draft)} className="rounded bg-primary-blue px-2 text-[9px] font-bold text-white">
-                Add
-              </button>
-            </div>
-            <div className="flex max-h-32 flex-wrap gap-1 overflow-y-auto">
-              {matchingOptions.map(item => (
-                <button
-                  type="button"
-                  key={item.code}
-                  onClick={() => toggleCode(item.code)}
-                  className={`rounded border px-1.5 py-0.5 font-mono text-[8px] ${
-                    normalizedCodes.includes(item.code)
-                      ? "border-primary-blue bg-primary-blue text-white"
-                      : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-blue-50"
-                  }`}
-                  title={item.label}
-                >
-                  {item.code}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        {compactPopover ? createPortal(compactPopover, document.body) : null}
       </div>
     );
   }

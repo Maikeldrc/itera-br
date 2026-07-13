@@ -8,6 +8,7 @@ Date: 2026-07-11
 | QA-DEF-002 | Missing browser security headers on frontend and incomplete API security headers | Platform Security | `/`, `/api/status` | Medium | High | Production | N/A | All | Closed |
 | QA-DEF-003 | No-op claim save creates misleading audit entries for empty fields and equivalent service lines | Audit / Claims API | `/api/claims/:id` | Medium | High | Production | Chrome/IAB | Admin | Closed |
 | QA-DEF-004 | Import modal reopens with previous file, progress and summary state | Import UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin | Closed |
+| QA-DEF-005 | Compact CARC/RARC/MA picker is clipped behind lower claim detail content | Claim Detail UI | `/claims` | Medium | High | Production | Chrome/IAB | Admin/Billing/Reconciliation | Fixed locally, pending deploy validation |
 
 ## QA-DEF-001
 
@@ -64,3 +65,17 @@ Date: 2026-07-11
 - Commit: `be94529`.
 - Deployment: Vercel production deployment for project `itera-br`.
 - Result after deployment: Closed. `https://itera-br.vercel.app/claims` opens Import Claims with dropzone visible, no prior XLSX filename, no progress bar, no import result, no Remove link, and no console errors after close/reopen.
+
+## QA-DEF-005
+
+- Preconditions: Open a claim detail panel with ERA Service Line Capture visible.
+- Steps: Click the compact `Add CARC / RARC / MA` button inside a service line row.
+- Expected: The code search popover should render above adjacent sections and remain fully visible.
+- Actual: The popover rendered inside the horizontally scrolling table container and appeared behind/clipped by the section below.
+- Root cause: The compact picker used an absolutely positioned child inside an overflow container.
+- Files affected: `src/components/ClaimDetailPanel.tsx`.
+- Correction applied: Rendered the compact picker popover through a React portal into `document.body`, positioned it from the trigger button, and raised its stacking context.
+- Regression test: `npm run test`; `npm run lint`; `npm run build`.
+- Commit: Pending.
+- Deployment: Pending.
+- Result after deployment: Pending.
