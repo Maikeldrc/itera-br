@@ -118,8 +118,8 @@
   - `npm run test`: Passed.
   - `npm run lint`: Passed.
   - `npm run build`: Passed.
-- Frontend deployment: Pending.
+- Frontend deployment: Passed. Vercel production serves updated bundle `assets/index-DxdrngGr.js`.
 - Backend deployment: Not required; frontend-only change.
-- Production validation after fix: Pending.
-- Regression: Pending.
+- Production validation after fix: Passed on `https://itera-br.vercel.app/claims`. Claim `QA_AUTO_PATIENT_001` shows compact note badge count `4` beside the patient name and console errors/warnings were not observed.
+- Regression: Passed for QA-TC-019.
 - Decision: Continue.
