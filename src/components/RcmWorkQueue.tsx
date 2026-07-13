@@ -30,6 +30,13 @@ const CLOSED_ACTIONS = new Set(["", "No action", "Close line"]);
 
 const textValue = (value: unknown) => String(value ?? "").trim();
 
+const noteText = (value: unknown) => {
+  if (value && typeof value === "object" && "text" in value) {
+    return textValue((value as { text?: unknown }).text);
+  }
+  return textValue(value);
+};
+
 const money = (value: number) =>
   new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number.isFinite(value) ? value : 0);
 
@@ -61,7 +68,7 @@ function parseLines(claim: Claim): QueueLine[] {
         priority: textValue(line?.priority || ""),
         dueDate: textValue(line?.dueDate || line?.due_date || ""),
         followUpDate: textValue(line?.followUpDate || line?.follow_up_date || ""),
-        notes: Array.isArray(line?.notes) ? line.notes.map(textValue).filter(Boolean) : [],
+        notes: Array.isArray(line?.notes) ? line.notes.map(noteText).filter(Boolean) : [],
         balance: Number(line?.balance ?? claim.ar_balance ?? 0),
         payerName: textValue(claim.payer_name),
         providerName: textValue(claim.provider_name),
