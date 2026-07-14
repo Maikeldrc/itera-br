@@ -70,7 +70,7 @@ export function Sidebar({ currentView, onViewChange, currentUser, isCollapsed, o
     },
     {
       id: "payment-reconciliation-import" as ViewType,
-      label: isEnglish ? "Payment Reconciliation Import" : "Importar Conciliación de Pagos",
+      label: isEnglish ? "Payment Import" : "Importar Pagos",
       icon: ReceiptText,
       roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist],
     },

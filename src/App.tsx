@@ -2572,7 +2572,7 @@ export default function App() {
                               dashboard: isEnglish ? "Dashboard" : "Tablero",
                               claims: isEnglish ? "Claims Worklist" : "Worklist de Claims",
                               payments: isEnglish ? "Payment Control" : "Control de Pagos",
-                              "payment-reconciliation-import": isEnglish ? "Payment Reconciliation Import" : "Importar Conciliación de Pagos",
+                              "payment-reconciliation-import": isEnglish ? "Payment Import" : "Importar Pagos",
                               "rcm-work-queue": isEnglish ? "RCM Work Queue" : "Cola RCM",
                               denials: isEnglish ? "Denials Report" : "Reporte de Denials",
                               errors: isEnglish ? "Claims with Errors" : "Claims con Errores",

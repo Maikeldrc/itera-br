@@ -1121,7 +1121,7 @@ async function startServer() {
         });
       }
 
-      const traceNote = `Payment Reconciliation Import payer update: ${previousPayerName} -> ${newPayerName}.`;
+      const traceNote = `Payment Import payer update: ${previousPayerName} -> ${newPayerName}.`;
       const updated = await sheetsService.updateClaim(claimId, {
         ...claim,
         payer_id: newPayerId,
@@ -1136,7 +1136,7 @@ async function startServer() {
         field_name: "payer_id",
         previous_value: previousPayerId,
         new_value: newPayerId,
-        reason: `Insurance changed from "${previousPayerName}" to "${newPayerName}" from Payment Reconciliation Import report.`,
+        reason: `Insurance changed from "${previousPayerName}" to "${newPayerName}" from Payment Import report.`,
         changed_by: operatorEmail,
         changed_at: new Date().toISOString()
       });
@@ -1523,7 +1523,11 @@ async function startServer() {
       const claims = (await sheetsService.getClaims()).filter(claim => !claim.deleted_flag);
       const payments = await sheetsService.getPayments();
       const payers = await sheetsService.getPayers();
-      const existingPaymentIds = new Set(payments.map(payment => textValue(payment.payment_id).toLowerCase()).filter(Boolean));
+      const existingPaymentById = new Map(
+        payments
+          .map(payment => [textValue(payment.payment_id).toLowerCase(), payment] as const)
+          .filter(([paymentId]) => Boolean(paymentId))
+      );
 
       const normalizedRows = importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index));
       const analyzedRows = normalizedRows.map(row => {
@@ -1534,9 +1538,6 @@ async function startServer() {
         if (!row.serviceDate) errors.push("Service Date is required.");
         if (!row.paymentDate) warnings.push("Payment date is missing; today's date will be used if imported.");
         if (!Number.isFinite(row.payment) || row.payment <= 0) errors.push("Payment amount must be greater than zero.");
-        if (row.externalPaymentId && existingPaymentIds.has(row.externalPaymentId.toLowerCase())) {
-          errors.push(`Payment ID ${row.externalPaymentId} already exists in Payments.`);
-        }
 
         const claimNo = normalizeMatchText(row.claimNo);
         const patientAcct = normalizeMatchText(row.patientAcctNo);
@@ -1602,11 +1603,20 @@ async function startServer() {
         const unpaidLineIndex = sameCptLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
         const lineIndex = unpaidLineIndex ?? sameCptLineIndexes[0] ?? -1;
         const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
+        const existingPayment = row.externalPaymentId
+          ? existingPaymentById.get(row.externalPaymentId.toLowerCase()) || null
+          : null;
 
         if (errors.length === 0 && candidates.length === 0) errors.push("No matching claim/CPT found.");
         if (errors.length === 0 && candidates.length > 1) errors.push("Multiple matching claims found; requires human review.");
         if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
         if (errors.length === 0 && claim && lineIndex < 0) errors.push("Matched claim does not contain the CPT code.");
+        if (errors.length === 0 && claim && existingPayment && existingPayment.claim_id !== claim.claim_id) {
+          errors.push(`Payment ID ${row.externalPaymentId} already exists in Payments for claim ${existingPayment.claim_id || "unknown"}.`);
+        }
+        if (errors.length === 0 && claim && existingPayment && existingPayment.claim_id === claim.claim_id) {
+          warnings.push(`Payment ID ${row.externalPaymentId} already exists in Payments for this claim; the import will update the unpaid CPT line without creating a duplicate payment record.`);
+        }
 
         const claimPayerName = claim?.payer_name || "";
         const reportPayerName = row.payerName || "";
@@ -1635,6 +1645,8 @@ async function startServer() {
           payerMismatch,
           suggestedPayerId: suggestedPayer?.payer_id || "",
           suggestedPayerName: suggestedPayer?.payer_name || reportPayerName,
+          existingPaymentId: existingPayment?.payment_id || "",
+          existingPaymentClaimId: existingPayment?.claim_id || "",
           lineIndex,
           status: errors.length > 0 ? "rejected" : (hasExistingPayment || payerMismatch ? "needs_review" : "ready"),
           errors,
@@ -1715,7 +1727,7 @@ async function startServer() {
             const allowed = Number(Math.max(0, charged - adj).toFixed(2));
             const balance = Number(Math.max(0, charged - adj - paid - Number(line?.secondaryPaid || 0) - Number(line?.patResp || 0)).toFixed(2));
             const notes = Array.isArray(line?.notes) ? [...line.notes] : [];
-            notes.push(`Payment Reconciliation Import: payer ${payerPayment.toFixed(2)}, patient ${patientPayment.toFixed(2)}, contractual adjustment applied ${adj.toFixed(2)}${contractualAdjustment > adj ? ` (report adjustment ${contractualAdjustment.toFixed(2)} exceeded this CPT line capacity)` : ""}.`);
+            notes.push(`Payment Import: payer ${payerPayment.toFixed(2)}, patient ${patientPayment.toFixed(2)}, contractual adjustment applied ${adj.toFixed(2)}${contractualAdjustment > adj ? ` (report adjustment ${contractualAdjustment.toFixed(2)} exceeded this CPT line capacity)` : ""}.`);
             claimPaymentTotal = Number((claimPaymentTotal + totalPayment).toFixed(2));
             const paymentDate = matchingRows.map(row => row.paymentDate).filter(Boolean).sort().pop() || "";
             const checkNo = matchingRows.map(row => row.checkNo).filter(Boolean).pop() || "";
@@ -1763,7 +1775,7 @@ async function startServer() {
             eob_received: claimRows.some(row => row.paymentDate) ? "Yes" : claim.eob_received,
             payment_date: latestPaymentDate || new Date().toISOString().slice(0, 10),
             check_or_eft_number: latestCheckNo,
-            last_note: `Payment Reconciliation Import applied ${claimRows.length} payment row(s). ${claim.last_note || ""}`.trim()
+            last_note: `Payment Import applied ${claimRows.length} payment row(s). ${claim.last_note || ""}`.trim()
           }, {
             providerSharePercent: pPercent,
             iteraSharePercent: iPercent
@@ -1782,22 +1794,29 @@ async function startServer() {
           updatedClaims.push(savedClaim);
 
           for (const row of claimRows) {
-            const payment: Payment = {
-              payment_id: row.externalPaymentId || `PMT-IMP-${Date.now()}-${row.rowNumber}`,
-              claim_id: claimId,
-              payment_date: row.paymentDate || new Date().toISOString().slice(0, 10),
-              payment_received_by: paymentReceivedBy,
-              payer_name: row.payerName || savedClaim.payer_name,
-              amount: Number(row.payment || 0),
-              check_or_eft_number: row.checkNo || "",
-              era_id: "",
-              eob_id: row.paymentDate ? `EOB-${row.paymentDate}` : "",
-              payment_source: "Payment Reconciliation Import",
-              notes: `Imported from payer payment report row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.`,
-              created_at: "",
-              updated_at: ""
-            };
-            importedPayments.push(await sheetsService.createPayment(payment));
+            const existingPayment = row.externalPaymentId
+              ? existingPaymentById.get(row.externalPaymentId.toLowerCase()) || null
+              : null;
+            if (!existingPayment || existingPayment.claim_id !== claimId) {
+              const payment: Payment = {
+                payment_id: row.externalPaymentId || `PMT-IMP-${Date.now()}-${row.rowNumber}`,
+                claim_id: claimId,
+                payment_date: row.paymentDate || new Date().toISOString().slice(0, 10),
+                payment_received_by: paymentReceivedBy,
+                payer_name: row.payerName || savedClaim.payer_name,
+                amount: Number(row.payment || 0),
+                check_or_eft_number: row.checkNo || "",
+                era_id: "",
+                eob_id: row.paymentDate ? `EOB-${row.paymentDate}` : "",
+                payment_source: "Payment Import",
+                notes: `Imported from payer payment report row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.`,
+                created_at: "",
+                updated_at: ""
+              };
+              const savedPayment = await sheetsService.createPayment(payment);
+              existingPaymentById.set(textValue(savedPayment.payment_id).toLowerCase(), savedPayment);
+              importedPayments.push(savedPayment);
+            }
             row.status = "imported";
           }
         }
@@ -1813,13 +1832,13 @@ async function startServer() {
         matchedClaims: new Set(resultRows.map(row => row.claimId).filter(Boolean)).size,
         matchedCptCodes: new Set(resultRows.map(row => row.cptCode).filter(Boolean)).size,
         totalPaymentInFile: Number(normalizedRows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2)),
-        totalPaymentImported: Number(importedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0).toFixed(2))
+        totalPaymentImported: Number(resultRows.filter(row => row.status === "imported").reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2))
       };
 
       res.json({
         success: summary.rejectedRows === 0 && summary.needsReviewRows === 0,
         applied: Boolean(apply),
-        importedCount: importedPayments.length,
+        importedCount: resultRows.filter(row => row.status === "imported").length,
         updatedClaims: updatedClaims.length,
         summary,
         rows: resultRows.slice(0, 500)

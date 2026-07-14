@@ -188,7 +188,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
         body: JSON.stringify({ ...payload, apply })
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Payment reconciliation import failed.");
+      if (!response.ok) throw new Error(data.error || "Payment import failed.");
       setResult(data);
       if (apply) {
         notify(
@@ -274,7 +274,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
           <h2 className="font-display text-xl font-bold text-slate-900 md:text-2xl">
-            {isEnglish ? "Payment Reconciliation Import" : "Importación de Conciliación de Pagos"}
+            {isEnglish ? "Payment Import" : "Importación de Pagos"}
           </h2>
           <p className="mt-1 max-w-3xl text-xs text-slate-500">
             {isEnglish
@@ -373,7 +373,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-800">{isEnglish ? "Reconciliation Result" : "Resultado de conciliación"}</h3>
+              <h3 className="text-sm font-bold text-slate-800">{isEnglish ? "Payment Import Result" : "Resultado de importación de pagos"}</h3>
               <p className="mt-0.5 text-xs text-slate-500">
                 {isEnglish
                   ? "Rows marked Ready can be imported. Needs Review rows were intentionally not overwritten."
