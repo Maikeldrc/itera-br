@@ -8,6 +8,7 @@ import {
   LayoutDashboard,
   FileSpreadsheet,
   Coins,
+  ReceiptText,
   ListChecks,
   FileX,
   FileWarning,
@@ -27,6 +28,7 @@ export type ViewType =
   | "dashboard"
   | "claims"
   | "payments"
+  | "payment-reconciliation-import"
   | "rcm-work-queue"
   | "denials"
   | "errors"
@@ -65,6 +67,12 @@ export function Sidebar({ currentView, onViewChange, currentUser, isCollapsed, o
       label: isEnglish ? "Payment Control" : "Control de Pagos",
       icon: Coins,
       roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist, UserRole.ProviderViewer],
+    },
+    {
+      id: "payment-reconciliation-import" as ViewType,
+      label: isEnglish ? "Payment Reconciliation Import" : "Importar Conciliación de Pagos",
+      icon: ReceiptText,
+      roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist],
     },
     {
       id: "rcm-work-queue" as ViewType,

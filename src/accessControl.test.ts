@@ -45,6 +45,8 @@ export function runAccessControlTests() {
         assert(canUserAccessMenu({ role: UserRole.BillingManager }, "settings"), "Billing Manager should access Settings.");
         assert(!canUserAccessMenu({ role: UserRole.ReconciliationSpecialist }, "settings"), "Reconciliation Specialist must not access Settings.");
         assert(!canUserAccessMenu({ role: UserRole.ProviderViewer }, "settings"), "Provider Viewer must not access Settings.");
+        assert(canUserAccessMenu({ role: UserRole.ReconciliationSpecialist }, "payment-reconciliation-import"), "Reconciliation Specialist should access Payment Reconciliation Import.");
+        assert(!canUserAccessMenu({ role: UserRole.ProviderViewer }, "payment-reconciliation-import"), "Provider Viewer must not access Payment Reconciliation Import.");
         assert(canUserAccessMenu({ role: UserRole.Auditor }, "audit-log"), "Auditor should access Audit Log.");
         assert(!canUserAccessMenu({ role: UserRole.ProviderViewer }, "audit-log"), "Provider Viewer must not access Audit Log.");
         assert(!ROLE_DEFAULT_MENU_ACCESS[UserRole.Auditor].includes("payments"), "Auditor should not access Payment Control by default.");

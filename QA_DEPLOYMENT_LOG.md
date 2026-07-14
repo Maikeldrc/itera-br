@@ -173,3 +173,20 @@
 - Production validation after fix: Passed on `https://itera-br.vercel.app/rcm-work-queue`. Assignment cell retains the user selector and user icon, but no longer renders `CalendarClock` or a bare `-` when the line has no due date/follow-up metadata. Console errors/warnings were not observed.
 - Regression: Passed for QA-TC-020.
 - Decision: Continue.
+
+## QA-CYCLE-010
+
+- Date: 2026-07-14
+- Starting commit: `39b113c`
+- Enhancement requested: implement Payment Reconciliation Import for payer payment reports.
+- Corrections: added `Payment Reconciliation Import` menu/view, CSV/XLSX upload and analysis UI, backend matching by Claim No or Patient Acct No + CPT + Service Date, safe import mode, and review routing for claims/CPTs with existing payment activity.
+- Files changed: `server.ts`, `src/components/PaymentReconciliationImport.tsx`, `src/App.tsx`, `src/components/Sidebar.tsx`, `src/accessControl.ts`, `src/accessControl.test.ts`, QA documentation.
+- Local tests:
+  - `npm run lint`: Passed.
+  - `npm run test`: Passed.
+  - `npm run build`: Passed.
+- Frontend deployment: Pending.
+- Backend deployment: Pending.
+- Production validation after fix: Pending.
+- Regression: Pending for QA-TC-021.
+- Decision: Continue.

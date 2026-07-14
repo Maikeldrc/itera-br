@@ -171,6 +171,84 @@ function firstDayOfMonth(dateIso: string) {
   return dateIso ? `${dateIso.slice(0, 7)}-01` : new Date().toISOString().slice(0, 10);
 }
 
+function parseMoney(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return 0;
+  const negative = /^\(.*\)$/.test(text) || text.startsWith("-");
+  const numeric = Number(text.replace(/[,$()\s]/g, "").replace(/[^0-9.-]/g, ""));
+  if (!Number.isFinite(numeric)) return 0;
+  return Number((negative ? -Math.abs(numeric) : numeric).toFixed(2));
+}
+
+function normalizeMatchText(value: unknown) {
+  return textValue(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parseServiceLines(claim: Partial<Claim>) {
+  try {
+    const parsed = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  } catch {
+    // Fall through to CPT fallback.
+  }
+  const cpts = textValue(claim.cpt_hcpcs).split(/[,;/]+/).map(item => item.trim()).filter(Boolean);
+  return cpts.map(cpt => ({
+    cpt,
+    units: 1,
+    charged: cpts.length ? Number(claim.billed_charge || 0) / cpts.length : Number(claim.billed_charge || 0),
+    allowed: cpts.length ? Number(claim.allowed_amount || claim.billed_charge || 0) / cpts.length : Number(claim.allowed_amount || claim.billed_charge || 0),
+    adj: 0,
+    paid: 0,
+    secondaryPaid: 0,
+    patResp: 0,
+    balance: cpts.length ? Number(claim.ar_balance || claim.billed_charge || 0) / cpts.length : Number(claim.ar_balance || claim.billed_charge || 0),
+    status: claim.claim_status || "Pending",
+    nextAction: "No action",
+    notes: [],
+    codes: []
+  }));
+}
+
+function linePaymentTotal(line: any) {
+  return Number(line?.paid || 0) + Number(line?.secondaryPaid || 0);
+}
+
+function normalizePaymentImportRow(row: Record<string, unknown>, index: number) {
+  const payerPayment = parseMoney(importField(row, ["Payer Payment"]));
+  const patientPayment = parseMoney(importField(row, ["Patient Payment"]));
+  const explicitPayment = parseMoney(importField(row, ["Payment"]));
+  const payment = explicitPayment || Number((payerPayment + patientPayment).toFixed(2));
+  const paymentDate =
+    excelSerialToIsoDate(importField(row, ["Payment Date"])) ||
+    excelSerialToIsoDate(importField(row, ["Payment Posted Date"])) ||
+    excelSerialToIsoDate(importField(row, ["Payment Deposit Date"])) ||
+    excelSerialToIsoDate(importField(row, ["Payment Check Date"]));
+
+  return {
+    rowNumber: index + 1,
+    cptCode: importField(row, ["CPT Code", "CPT"]),
+    facilityName: importField(row, ["Facility Name"]),
+    renderingProviderName: importField(row, ["Rendering Provider Name", "Provider"]),
+    patientName: importField(row, ["Patient Name"]),
+    patientAcctNo: importField(row, ["Patient Acct No", "Patient Account No", "MRN", "Patient ID"]),
+    payerName: importField(row, ["Payer Name", "Payer"]),
+    serviceDate: excelSerialToIsoDate(importField(row, ["Service Date", "DOS"])),
+    claimDate: excelSerialToIsoDate(importField(row, ["Claim Date"])),
+    paymentDate,
+    checkNo: importField(row, ["Payment Check No", "Check No", "EFT", "Check"]),
+    paymentType: importField(row, ["Payment Type"]),
+    payerType: importField(row, ["Payer Type"]),
+    claimNo: importField(row, ["Claim No", "Claim ID", "Claim Number"]),
+    cptGroupName: importField(row, ["CPT Group Name"]),
+    externalPaymentId: importField(row, ["Payment ID"]),
+    payment,
+    payerPayment,
+    patientPayment,
+    contractualAdjustment: parseMoney(importField(row, ["Contractual Adjustment"])),
+    payerWithheld: parseMoney(importField(row, ["Payer Withheld"]))
+  };
+}
+
 function countBy<T>(items: T[], selector: (item: T) => string) {
   return items.reduce<Record<string, number>>((acc, item) => {
     const key = selector(item);
@@ -1335,6 +1413,254 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Import process failed" });
+    }
+  });
+
+  app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const { rows, fileBase64, apply } = req.body;
+      const importRows = fileBase64 ? parseXlsxRows(fileBase64) : rows;
+
+      if (!importRows || !Array.isArray(importRows)) {
+        return res.status(400).json({ error: "Rows or XLSX file content are required for payment reconciliation import." });
+      }
+
+      const settings = await sheetsService.getSettings();
+      const pPercent = Number(settings.find(s => s.setting_key === "PROVIDER_SHARE_PERCENT")?.setting_value || 70);
+      const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
+      const claims = (await sheetsService.getClaims()).filter(claim => !claim.deleted_flag);
+      const payments = await sheetsService.getPayments();
+      const existingPaymentIds = new Set(payments.map(payment => textValue(payment.payment_id).toLowerCase()).filter(Boolean));
+      const originallyPaidClaimIds = new Set(
+        claims
+          .filter(claim => Number(claim.paid_amount || 0) > 0 || payments.some(payment => payment.claim_id === claim.claim_id))
+          .map(claim => claim.claim_id)
+      );
+
+      const normalizedRows = importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index));
+      const analyzedRows = normalizedRows.map(row => {
+        const errors: string[] = [];
+        const warnings: string[] = [];
+
+        if (!row.cptCode) errors.push("CPT Code is required.");
+        if (!row.serviceDate) errors.push("Service Date is required.");
+        if (!row.paymentDate) warnings.push("Payment date is missing; today's date will be used if imported.");
+        if (!Number.isFinite(row.payment) || row.payment <= 0) errors.push("Payment amount must be greater than zero.");
+        if (row.externalPaymentId && existingPaymentIds.has(row.externalPaymentId.toLowerCase())) {
+          errors.push(`Payment ID ${row.externalPaymentId} already exists in Payments.`);
+        }
+
+        const claimNo = normalizeMatchText(row.claimNo);
+        const patientAcct = normalizeMatchText(row.patientAcctNo);
+        const payerName = normalizeMatchText(row.payerName);
+        const providerName = normalizeMatchText(row.renderingProviderName);
+        const cptCode = textValue(row.cptCode);
+
+        let candidates = claims.filter(claim => {
+          const serviceLines = parseServiceLines(claim);
+          const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode);
+          if (!hasCpt) return false;
+
+          if (claimNo) {
+            return normalizeMatchText(claim.claim_id) === claimNo;
+          }
+
+          const samePatient = patientAcct && normalizeMatchText(claim.patient_id) === patientAcct;
+          const sameDos = row.serviceDate && textValue(claim.date_of_service_from).slice(0, 10) === row.serviceDate;
+          return Boolean(samePatient && sameDos);
+        });
+
+        if (candidates.length > 1 && payerName) {
+          const payerFiltered = candidates.filter(claim => normalizeMatchText(claim.payer_name).includes(payerName) || payerName.includes(normalizeMatchText(claim.payer_name)));
+          if (payerFiltered.length > 0) candidates = payerFiltered;
+        }
+        if (candidates.length > 1 && providerName) {
+          const providerFiltered = candidates.filter(claim => normalizeMatchText(claim.provider_name).includes(providerName) || providerName.includes(normalizeMatchText(claim.provider_name)));
+          if (providerFiltered.length > 0) candidates = providerFiltered;
+        }
+        candidates = candidates.filter(claim => canAccessClaim(req, claim));
+
+        const claim = candidates.length === 1 ? candidates[0] : null;
+        const serviceLines = claim ? parseServiceLines(claim) : [];
+        const lineIndex = claim ? serviceLines.findIndex(line => textValue(line?.cpt) === cptCode) : -1;
+        const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
+
+        if (errors.length === 0 && candidates.length === 0) errors.push("No matching claim/CPT found.");
+        if (errors.length === 0 && candidates.length > 1) errors.push("Multiple matching claims found; requires human review.");
+        if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
+        if (errors.length === 0 && claim && lineIndex < 0) errors.push("Matched claim does not contain the CPT code.");
+
+        const hasExistingPayment = Boolean(
+          claim && (
+            originallyPaidClaimIds.has(claim.claim_id) ||
+            linePaymentTotal(targetLine) > 0
+          )
+        );
+        if (errors.length === 0 && hasExistingPayment) {
+          warnings.push("Matched claim/CPT already has payment activity. It was not overwritten.");
+        }
+
+        return {
+          ...row,
+          claimId: claim?.claim_id || "",
+          patientId: claim?.patient_id || "",
+          patientName: row.patientName || claim?.patient_display_name_masked || "",
+          providerName: claim?.provider_name || row.renderingProviderName || "",
+          payerName: claim?.payer_name || row.payerName || "",
+          lineIndex,
+          status: errors.length > 0 ? "rejected" : (hasExistingPayment ? "needs_review" : "ready"),
+          errors,
+          warnings
+        };
+      });
+
+      const readyRows = analyzedRows.filter(row => row.status === "ready");
+      const reviewRows = analyzedRows.filter(row => row.status === "needs_review");
+      const rejectedRows = analyzedRows.filter(row => row.status === "rejected");
+      const importedPayments: Payment[] = [];
+      const updatedClaims: Claim[] = [];
+
+      if (apply && readyRows.length > 0) {
+        const rowsByClaim = readyRows.reduce<Record<string, typeof readyRows>>((acc, row) => {
+          if (!row.claimId) return acc;
+          acc[row.claimId] = acc[row.claimId] || [];
+          acc[row.claimId].push(row);
+          return acc;
+        }, {});
+
+        for (const [claimId, claimRows] of Object.entries(rowsByClaim)) {
+          const claim = claims.find(item => item.claim_id === claimId);
+          if (!claim) continue;
+          let serviceLines = parseServiceLines(claim);
+          let claimPaymentTotal = 0;
+          let latestPaymentDate = claim.payment_date || "";
+          let latestCheckNo = claim.check_or_eft_number || "";
+
+          serviceLines = serviceLines.map((line, index) => {
+            const matchingRows = claimRows.filter(row => row.lineIndex === index);
+            if (matchingRows.length === 0) return line;
+            const totalPayment = Number(matchingRows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2));
+            const payerPayment = Number(matchingRows.reduce((sum, row) => sum + Number(row.payerPayment || 0), 0).toFixed(2));
+            const patientPayment = Number(matchingRows.reduce((sum, row) => sum + Number(row.patientPayment || 0), 0).toFixed(2));
+            const contractualAdjustment = Number(matchingRows.reduce((sum, row) => sum + Number(row.contractualAdjustment || 0), 0).toFixed(2));
+            const charged = Number(line?.charged || 0);
+            const adj = contractualAdjustment > 0 ? contractualAdjustment : Number(line?.adj || 0);
+            const paid = Number((Number(line?.paid || 0) + totalPayment).toFixed(2));
+            const allowed = Number(Math.max(0, charged - adj).toFixed(2));
+            const balance = Number(Math.max(0, charged - adj - paid - Number(line?.secondaryPaid || 0)).toFixed(2));
+            const notes = Array.isArray(line?.notes) ? [...line.notes] : [];
+            notes.push(`Payment Reconciliation Import: payer ${payerPayment.toFixed(2)}, patient ${patientPayment.toFixed(2)}, contractual adjustment ${adj.toFixed(2)}.`);
+            claimPaymentTotal = Number((claimPaymentTotal + totalPayment).toFixed(2));
+            const paymentDate = matchingRows.map(row => row.paymentDate).filter(Boolean).sort().pop() || "";
+            const checkNo = matchingRows.map(row => row.checkNo).filter(Boolean).pop() || "";
+            if (paymentDate) latestPaymentDate = paymentDate;
+            if (checkNo) latestCheckNo = checkNo;
+            return {
+              ...line,
+              charged,
+              allowed,
+              adj,
+              paid,
+              balance,
+              paymentDate: paymentDate || line?.paymentDate || "",
+              eftNumber: checkNo || line?.eftNumber || "",
+              status: balance <= 0 ? "Paid" : "Partially Paid",
+              nextAction: balance <= 0 ? "No action" : (line?.nextAction || "Monitor payment"),
+              notes
+            };
+          });
+
+          const totalLineCharged = Number(serviceLines.reduce((sum, line) => sum + Number(line.charged || 0), 0).toFixed(2));
+          const totalLineAllowed = Number(serviceLines.reduce((sum, line) => sum + Number(line.allowed || 0), 0).toFixed(2));
+          const totalLinePaid = Number(serviceLines.reduce((sum, line) => sum + Number(line.paid || 0) + Number(line.secondaryPaid || 0), 0).toFixed(2));
+          const totalLineAdj = Number(serviceLines.reduce((sum, line) => sum + Number(line.adj || 0), 0).toFixed(2));
+          const allLinesPaid = serviceLines.every(line => textValue(line.status) === "Paid");
+          const paymentReceivedBy = claim.billed_by === "Provider" ? "Provider" : "ITERA";
+
+          const updated = calculateClaimFinancials({
+            ...claim,
+            service_lines_json: JSON.stringify(serviceLines),
+            billed_charge: totalLineCharged || claim.billed_charge,
+            allowed_amount: totalLineAllowed,
+            paid_amount: totalLinePaid,
+            insurance_adjustment: totalLineAdj,
+            itera_direct_collection: paymentReceivedBy === "ITERA"
+              ? Number((Number(claim.itera_direct_collection || 0) + claimPaymentTotal).toFixed(2))
+              : Number(claim.itera_direct_collection || 0),
+            provider_direct_collection: paymentReceivedBy === "Provider"
+              ? Number((Number(claim.provider_direct_collection || 0) + claimPaymentTotal).toFixed(2))
+              : Number(claim.provider_direct_collection || 0),
+            payment_received_by: paymentReceivedBy,
+            claim_status: allLinesPaid ? ClaimStatus.Paid : ClaimStatus.PartiallyPaid,
+            claim_classification: paymentReceivedBy === "ITERA" ? ClaimClassification.IteraCollected : ClaimClassification.ProviderCollected,
+            era_received: "No",
+            eob_received: claimRows.some(row => row.paymentDate) ? "Yes" : claim.eob_received,
+            payment_date: latestPaymentDate || new Date().toISOString().slice(0, 10),
+            check_or_eft_number: latestCheckNo,
+            last_note: `Payment Reconciliation Import applied ${claimRows.length} payment row(s). ${claim.last_note || ""}`.trim()
+          }, {
+            providerSharePercent: pPercent,
+            iteraSharePercent: iPercent
+          });
+
+          const validationErrors = validateClaim(updated);
+          if (validationErrors.length > 0) {
+            claimRows.forEach(row => {
+              row.status = "rejected";
+              row.errors = validationErrors;
+            });
+            continue;
+          }
+
+          const savedClaim = await sheetsService.updateClaim(claimId, updated, operatorEmail);
+          updatedClaims.push(savedClaim);
+
+          for (const row of claimRows) {
+            const payment: Payment = {
+              payment_id: row.externalPaymentId || `PMT-IMP-${Date.now()}-${row.rowNumber}`,
+              claim_id: claimId,
+              payment_date: row.paymentDate || new Date().toISOString().slice(0, 10),
+              payment_received_by: paymentReceivedBy,
+              payer_name: row.payerName || savedClaim.payer_name,
+              amount: Number(row.payment || 0),
+              check_or_eft_number: row.checkNo || "",
+              era_id: "",
+              eob_id: row.paymentDate ? `EOB-${row.paymentDate}` : "",
+              payment_source: "Payment Reconciliation Import",
+              notes: `Imported from payer payment report row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.`,
+              created_at: "",
+              updated_at: ""
+            };
+            importedPayments.push(await sheetsService.createPayment(payment));
+            row.status = "imported";
+          }
+        }
+      }
+
+      const resultRows = analyzedRows;
+      const summary = {
+        totalRowsRead: importRows.length,
+        readyToImport: readyRows.length,
+        importedRows: apply ? resultRows.filter(row => row.status === "imported").length : 0,
+        needsReviewRows: resultRows.filter(row => row.status === "needs_review").length,
+        rejectedRows: resultRows.filter(row => row.status === "rejected").length,
+        matchedClaims: new Set(resultRows.map(row => row.claimId).filter(Boolean)).size,
+        matchedCptCodes: new Set(resultRows.map(row => row.cptCode).filter(Boolean)).size,
+        totalPaymentInFile: Number(normalizedRows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2)),
+        totalPaymentImported: Number(importedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0).toFixed(2))
+      };
+
+      res.json({
+        success: summary.rejectedRows === 0 && summary.needsReviewRows === 0,
+        applied: Boolean(apply),
+        importedCount: importedPayments.length,
+        updatedClaims: updatedClaims.length,
+        summary,
+        rows: resultRows.slice(0, 500)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Payment reconciliation import failed." });
     }
   });
 

@@ -42,6 +42,7 @@ import { ImportModal } from "./components/ImportModal";
 import { PremiumDashboard } from "./components/PremiumDashboard";
 import { ReportsPage } from "./components/reports/ReportsPage";
 import { RcmWorkQueue } from "./components/RcmWorkQueue";
+import { PaymentReconciliationImport } from "./components/PaymentReconciliationImport";
 import { useFeedback } from "./components/FeedbackProvider";
 import { AppLanguage, useLanguage } from "./components/LanguageProvider";
 import { useAuth } from "./auth";
@@ -116,6 +117,7 @@ const VIEW_PATHS: Record<ViewType, string> = {
   dashboard: "/",
   claims: "/claims",
   payments: "/payments",
+  "payment-reconciliation-import": "/payment-reconciliation-import",
   "rcm-work-queue": "/rcm-work-queue",
   denials: "/denials",
   errors: "/claims-with-errors",
@@ -1727,6 +1729,13 @@ export default function App() {
             />
           )}
 
+          {/* VIEW: PAYMENT RECONCILIATION IMPORT */}
+          {currentView === "payment-reconciliation-import" && (
+            <PaymentReconciliationImport
+              onImported={() => fetchAllData({ showInitialLoading: false })}
+            />
+          )}
+
           {/* VIEW: PAYMENTS CONTROL MODULE */}
           {currentView === "payments" && (
             <div className="space-y-6">
@@ -2453,6 +2462,7 @@ export default function App() {
                               dashboard: isEnglish ? "Dashboard" : "Tablero",
                               claims: isEnglish ? "Claims Worklist" : "Worklist de Claims",
                               payments: isEnglish ? "Payment Control" : "Control de Pagos",
+                              "payment-reconciliation-import": isEnglish ? "Payment Reconciliation Import" : "Importar Conciliación de Pagos",
                               "rcm-work-queue": isEnglish ? "RCM Work Queue" : "Cola RCM",
                               denials: isEnglish ? "Denials Report" : "Reporte de Denials",
                               errors: isEnglish ? "Claims with Errors" : "Claims con Errores",

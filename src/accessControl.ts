@@ -4,6 +4,7 @@ export type MenuAccessId =
   | "dashboard"
   | "claims"
   | "payments"
+  | "payment-reconciliation-import"
   | "rcm-work-queue"
   | "denials"
   | "errors"
@@ -16,6 +17,7 @@ export const MENU_ACCESS_IDS: MenuAccessId[] = [
   "dashboard",
   "claims",
   "payments",
+  "payment-reconciliation-import",
   "rcm-work-queue",
   "denials",
   "errors",
@@ -28,7 +30,7 @@ export const MENU_ACCESS_IDS: MenuAccessId[] = [
 export const ROLE_DEFAULT_MENU_ACCESS: Record<UserRole, MenuAccessId[]> = {
   [UserRole.Admin]: MENU_ACCESS_IDS,
   [UserRole.BillingManager]: MENU_ACCESS_IDS,
-  [UserRole.ReconciliationSpecialist]: ["dashboard", "claims", "payments", "rcm-work-queue", "denials", "errors", "reports"],
+  [UserRole.ReconciliationSpecialist]: ["dashboard", "claims", "payments", "payment-reconciliation-import", "rcm-work-queue", "denials", "errors", "reports"],
   [UserRole.ProviderViewer]: ["dashboard", "claims", "payments", "rcm-work-queue", "providers", "reports"],
   [UserRole.Auditor]: ["dashboard", "claims", "rcm-work-queue", "denials", "errors", "providers", "reports", "audit-log"]
 };
