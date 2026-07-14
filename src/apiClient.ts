@@ -15,5 +15,7 @@ export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {})
   const headers = new Headers(init.headers || {});
   const token = tokenProvider ? await tokenProvider() : null;
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(apiUrl(input), { ...init, headers });
+  const method = String(init.method || "GET").toUpperCase();
+  const cache = method === "GET" ? "no-store" : init.cache;
+  return fetch(apiUrl(input), { ...init, headers, cache });
 }
