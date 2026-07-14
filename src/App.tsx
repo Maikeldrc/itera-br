@@ -241,6 +241,8 @@ export default function App() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingClaim, setEditingClaim] = useState<Claim | null>(null);
+  const [isSavingClaim, setIsSavingClaim] = useState(false);
+  const [claimSaveProgress, setClaimSaveProgress] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [errorState, setErrorState] = useState<string | null>(null);
 
@@ -584,8 +586,10 @@ export default function App() {
   };
 
   const handleCloseClaimEditor = () => {
+    if (isSavingClaim) return;
     setIsCreateOpen(false);
     setEditingClaim(null);
+    setClaimSaveProgress(0);
   };
 
   const handleOpenEditClaim = (claim: Claim) => {
@@ -623,6 +627,24 @@ export default function App() {
   // Create claim manually with one or more CPT service lines
   const handleCreateClaimManually = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSavingClaim) return;
+
+    setIsSavingClaim(true);
+    setClaimSaveProgress(8);
+    const progressTimer = window.setInterval(() => {
+      setClaimSaveProgress(previous => Math.min(previous + (previous < 70 ? 7 : 3), 88));
+    }, 450);
+    const finishProgress = async () => {
+      window.clearInterval(progressTimer);
+      setClaimSaveProgress(100);
+      await new Promise(resolve => window.setTimeout(resolve, 300));
+    };
+    const stopWithMessage = async (message: string, tone: "success" | "error" | "warning") => {
+      await finishProgress();
+      setIsSavingClaim(false);
+      setClaimSaveProgress(0);
+      notify(message, tone);
+    };
 
     const claimBeingEdited = editingClaim;
     const providerObj = providers.find(p => p.provider_id === newProviderId);
@@ -634,11 +656,11 @@ export default function App() {
     }));
 
     if (!newPatientName.trim() || !newPatientId.trim() || !newProviderId || !newPayerId || !newDos || !newBilledBy) {
-      notify(isEnglish ? "Complete all claim header fields before saving." : "Complete todos los campos principales del claim antes de guardar.", "warning");
+      await stopWithMessage(isEnglish ? "Complete all claim header fields before saving." : "Complete todos los campos principales del claim antes de guardar.", "warning");
       return;
     }
     if (normalizedLines.length === 0) {
-      notify(isEnglish ? "Add at least one CPT code to create the claim." : "Añade al menos un CPT code para crear el claim.", "warning");
+      await stopWithMessage(isEnglish ? "Add at least one CPT code to create the claim." : "Añade al menos un CPT code para crear el claim.", "warning");
       return;
     }
     const duplicatePatientProviderErrors = validateUniquePatientProvider(
@@ -651,12 +673,12 @@ export default function App() {
       claimBeingEdited?.claim_id
     );
     if (duplicatePatientProviderErrors.length > 0) {
-      notify(isEnglish ? "This MRN (Patient ID) is already registered for the same Provider." : "Este MRN (Patient ID) ya está registrado para el mismo Provider.", "warning");
+      await stopWithMessage(isEnglish ? "This MRN (Patient ID) is already registered for the same Provider." : "Este MRN (Patient ID) ya está registrado para el mismo Provider.", "warning");
       return;
     }
     const invalidServiceCpts = normalizedLines.filter(line => !isCptAllowedForService(line.serviceType, line.cpt));
     if (invalidServiceCpts.length > 0) {
-      notify(
+      await stopWithMessage(
         isEnglish
           ? `CPT not allowed for the selected service: ${invalidServiceCpts.map(line => `${line.serviceType}/${line.cpt}`).join(", ")}.`
           : `CPT no permitido para el servicio seleccionado: ${invalidServiceCpts.map(line => `${line.serviceType}/${line.cpt}`).join(", ")}.`,
@@ -666,7 +688,7 @@ export default function App() {
     }
     const cptRepeatErrors = validateCptRepeatLimits(normalizedLines, feeSchedules, newDos);
     if (cptRepeatErrors.length > 0) {
-      notify(cptRepeatErrors[0], "warning");
+      await stopWithMessage(cptRepeatErrors[0], "warning");
       return;
     }
     const existingRepeatErrors = validateClaimCptRepeatLimitsAgainstExisting(
@@ -680,12 +702,12 @@ export default function App() {
       claimBeingEdited?.claim_id
     );
     if (existingRepeatErrors.length > 0) {
-      notify(existingRepeatErrors[0], "warning");
+      await stopWithMessage(existingRepeatErrors[0], "warning");
       return;
     }
     const missingRates = lineCharges.filter(line => line.charge <= 0);
     if (missingRates.length > 0) {
-      notify(
+      await stopWithMessage(
         isEnglish
           ? `Configure the rate in Settings for: ${missingRates.map(line => line.cpt).join(", ")}.`
           : `Configura la tarifa en Settings para: ${missingRates.map(line => line.cpt).join(", ")}.`,
@@ -693,6 +715,7 @@ export default function App() {
       );
       return;
     }
+    setClaimSaveProgress(35);
 
     let existingServiceLines: any[] = [];
     if (claimBeingEdited?.service_lines_json) {
@@ -784,6 +807,7 @@ export default function App() {
     };
 
     try {
+      setClaimSaveProgress(55);
       const res = await apiFetch(claimBeingEdited ? `/api/claims/${claimBeingEdited.claim_id}` : "/api/claims", {
         method: claimBeingEdited ? "PUT" : "POST",
         headers: {
@@ -798,6 +822,9 @@ export default function App() {
         throw new Error(errData.error || errData.details?.join("; ") || (claimBeingEdited ? "Failed to update claim" : "Failed to create claim"));
       }
 
+      setClaimSaveProgress(78);
+      await fetchAllData({ showInitialLoading: false });
+      await finishProgress();
       notify(
         claimBeingEdited
           ? (isEnglish ? "Claim updated successfully." : "Claim actualizado exitosamente.")
@@ -813,9 +840,10 @@ export default function App() {
       setNewProviderId("");
       setNewPayerId("");
       setNewClaimLines([createBlankClaimServiceLine()]);
-      await fetchAllData();
+      setIsSavingClaim(false);
+      setClaimSaveProgress(0);
     } catch (err: any) {
-      notify(`${isEnglish ? "Save error" : "Error al guardar"}: ${err.message}`, "error");
+      await stopWithMessage(`${isEnglish ? "Save error" : "Error al guardar"}: ${err.message}`, "error");
     }
   };
 
@@ -3235,11 +3263,15 @@ export default function App() {
                   ? (isEnglish ? "Edit Digital Care Claim" : "Editar Claim de Digital Care")
                   : (isEnglish ? "Create New Digital Care Claim" : "Crear Nuevo Claim de Digital Care")}
               </h4>
-              <button onClick={handleCloseClaimEditor} className="p-1 hover:bg-white/10 rounded-full text-white">
+              <button
+                onClick={handleCloseClaimEditor}
+                disabled={isSavingClaim}
+                className="p-1 hover:bg-white/10 rounded-full text-white disabled:cursor-wait disabled:opacity-50"
+              >
                 <X className="w-4.5 h-4.5" />
               </button>
             </div>
-            <form onSubmit={handleCreateClaimManually} className="max-h-[82vh] overflow-y-auto p-6 space-y-4 text-xs font-sans">
+            <form onSubmit={handleCreateClaimManually} className="max-h-[82vh] overflow-y-auto p-6 space-y-4 text-xs font-sans" aria-busy={isSavingClaim}>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-[1.2fr_0.8fr]">
                 <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
                   <label className="block text-primary-blue mb-1 font-bold uppercase tracking-wider text-[9px]">{editingClaim ? "Claim ID" : (isEnglish ? "Claim ID - Preview" : "Claim ID - Vista previa")}</label>
@@ -3358,7 +3390,8 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setNewClaimLines(prev => [...prev, createBlankClaimServiceLine()])}
-                    className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100"
+                    disabled={isSavingClaim}
+                    className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100 disabled:cursor-wait disabled:opacity-50"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     {isEnglish ? "Add CPT" : "Añadir CPT"}
@@ -3423,7 +3456,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => setNewClaimLines(prev => prev.length === 1 ? prev : prev.filter(item => item.id !== line.id))}
-                          disabled={newClaimLines.length === 1}
+                          disabled={newClaimLines.length === 1 || isSavingClaim}
                           className="flex items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 hover:border-rose-200 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-40"
                           title={isEnglish ? "Remove line" : "Eliminar línea"}
                         >
@@ -3435,21 +3468,47 @@ export default function App() {
                 </div>
               </div>
 
+              {isSavingClaim && (
+                <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-bold text-dark-blue">
+                      {editingClaim
+                        ? (isEnglish ? "Updating claim..." : "Actualizando claim...")
+                        : (isEnglish ? "Saving claim..." : "Guardando claim...")}
+                    </p>
+                    <span className="font-mono text-[11px] font-bold text-primary-blue">{Math.round(claimSaveProgress)}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-white/80 ring-1 ring-blue-100">
+                    <div
+                      className="h-full rounded-full bg-primary-blue transition-all duration-300 ease-out"
+                      style={{ width: `${claimSaveProgress}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[10px] text-slate-500">
+                    {isEnglish ? "Please wait while the claim is saved and the worklist refreshes." : "Espere mientras se guarda el claim y se actualiza el worklist."}
+                  </p>
+                </div>
+              )}
+
               <div className="pt-4 flex items-center justify-end gap-2.5">
                   <button
                     type="button"
                     onClick={handleCloseClaimEditor}
-                    className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl font-semibold text-slate-600 transition-colors"
+                    disabled={isSavingClaim}
+                    className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl font-semibold text-slate-600 transition-colors disabled:cursor-wait disabled:opacity-50"
                   >
                   {isEnglish ? "Cancel" : "Cancelar"}
                 </button>
                 <button
                   type="submit"
-                  className="bg-primary-blue hover:bg-secondary-blue text-white px-5 py-2 rounded-xl font-bold transition-all shadow-md"
+                  disabled={isSavingClaim}
+                  className="bg-primary-blue hover:bg-secondary-blue text-white px-5 py-2 rounded-xl font-bold transition-all shadow-md disabled:cursor-wait disabled:opacity-70"
                 >
-                  {editingClaim
-                    ? (isEnglish ? "Update Claim" : "Actualizar Claim")
-                    : (isEnglish ? "Save and Reconcile" : "Guardar y Conciliar")}
+                  {isSavingClaim
+                    ? (isEnglish ? "Saving..." : "Guardando...")
+                    : editingClaim
+                      ? (isEnglish ? "Update Claim" : "Actualizar Claim")
+                      : (isEnglish ? "Save and Reconcile" : "Guardar y Conciliar")}
                 </button>
               </div>
             </form>
