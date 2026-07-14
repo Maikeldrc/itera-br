@@ -152,8 +152,8 @@
   - `npm run test`: Passed.
   - `npm run lint`: Passed.
   - `npm run build`: Passed.
-- Frontend deployment: Pending.
+- Frontend deployment: Passed. Vercel production deployment returned `https://itera-eymhy99p1-mdavid-iterahealths-projects.vercel.app`; stable domain `https://itera-br.vercel.app/rcm-work-queue` responded HTTP 200.
 - Backend deployment: Not required; existing claim update endpoint is reused.
-- Production validation after fix: Pending.
-- Regression: Pending for QA-TC-020.
+- Production validation after fix: Passed on `https://itera-br.vercel.app/rcm-work-queue`. Assignment selector rendered for QA claim `CLM-QAAUTOMRN001-20260711-001`, task was assigned to `Nurse User` / `USR_06`, persisted after browser reload, and console errors/warnings were not observed.
+- Regression: Passed for QA-TC-020.
 - Decision: Continue.
