@@ -1722,6 +1722,7 @@ export default function App() {
               claims={visibleClaims}
               users={users}
               onOpenClaim={(claim) => setSelectedClaim(claim)}
+              onUpdateClaim={handleUpdateClaim}
               isEnglish={isEnglish}
             />
           )}

@@ -140,3 +140,20 @@
 - Production validation after fix: Passed on `https://itera-br.vercel.app/rcm-work-queue`. Queue renders the QA `Verify ERA` CPT action, filters are visible, no `[object Object]` text leaks, the Open action opens claim detail, and console errors/warnings were not observed.
 - Regression: Passed for QA-TC-020.
 - Decision: Continue.
+
+## QA-CYCLE-008
+
+- Date: 2026-07-14
+- Starting commit: `078dae0`
+- Enhancement requested: allow assigning an RCM Work Queue task to an application user.
+- Corrections: converted the Assignment column into an active-user selector, persisted the selected user into the matching service line inside `service_lines_json`, and preserved compatibility with both `assignedTo` and `assigned_to` fields.
+- Files changed: `src/components/RcmWorkQueue.tsx`, `src/App.tsx`, QA documentation.
+- Local tests:
+  - `npm run test`: Passed.
+  - `npm run lint`: Passed.
+  - `npm run build`: Passed.
+- Frontend deployment: Pending.
+- Backend deployment: Not required; existing claim update endpoint is reused.
+- Production validation after fix: Pending.
+- Regression: Pending for QA-TC-020.
+- Decision: Continue.

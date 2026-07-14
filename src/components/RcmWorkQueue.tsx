@@ -4,6 +4,7 @@ import { Claim, User } from "../types";
 
 type QueueLine = {
   id: string;
+  lineIndex: number;
   claim: Claim;
   cpt: string;
   status: string;
@@ -23,6 +24,7 @@ interface RcmWorkQueueProps {
   claims: Claim[];
   users: User[];
   onOpenClaim: (claim: Claim) => void;
+  onUpdateClaim: (updates: Partial<Claim>, targetClaimId?: string) => Promise<void>;
   isEnglish: boolean;
 }
 
@@ -59,7 +61,8 @@ function parseLines(claim: Claim): QueueLine[] {
     .map((line, index) => {
       const nextAction = textValue(line?.nextAction || line?.next_action || "No action");
       return {
-        id: `${claim.claim_id}-${line?.cpt || index}`,
+        id: `${claim.claim_id}-${index}-${line?.cpt || "line"}`,
+        lineIndex: index,
         claim,
         cpt: textValue(line?.cpt || claim.cpt_hcpcs),
         status: textValue(line?.status || claim.claim_status),
@@ -78,14 +81,16 @@ function parseLines(claim: Claim): QueueLine[] {
     .filter(line => !CLOSED_ACTIONS.has(line.nextAction));
 }
 
-export function RcmWorkQueue({ claims, users, onOpenClaim, isEnglish }: RcmWorkQueueProps) {
+export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEnglish }: RcmWorkQueueProps) {
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState("");
   const [providerFilter, setProviderFilter] = useState("");
   const [payerFilter, setPayerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
 
   const rows = useMemo(() => claims.flatMap(parseLines), [claims]);
+  const assignableUsers = users.filter(user => user.active);
   const actions = Array.from(new Set(rows.map(row => row.nextAction))).sort();
   const providers = Array.from(new Set(rows.map(row => row.providerName).filter(Boolean))).sort();
   const payers = Array.from(new Set(rows.map(row => row.payerName).filter(Boolean))).sort();
@@ -114,6 +119,27 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, isEnglish }: RcmWorkQ
 
   const pendingEra = rows.filter(row => row.nextAction === "Pending ERA").length;
   const overdue = rows.filter(row => row.dueDate && row.dueDate < new Date().toISOString().slice(0, 10)).length;
+
+  const updateLineAssignment = async (row: QueueLine, assignedTo: string) => {
+    let parsed: any[] = [];
+    try {
+      parsed = row.claim.service_lines_json ? JSON.parse(row.claim.service_lines_json) : [];
+    } catch {
+      parsed = [];
+    }
+    if (!Array.isArray(parsed)) return;
+
+    const nextLines = parsed.map((line, index) => (
+      index === row.lineIndex ? { ...line, assignedTo, assigned_to: assignedTo } : line
+    ));
+
+    setSavingAssignmentId(row.id);
+    try {
+      await onUpdateClaim({ service_lines_json: JSON.stringify(nextLines) }, row.claim.claim_id);
+    } finally {
+      setSavingAssignmentId(null);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -232,12 +258,26 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, isEnglish }: RcmWorkQ
                       <td className="px-3 py-3">
                         <div className="flex items-start gap-1.5">
                           <UserRound className="mt-0.5 h-3.5 w-3.5 text-slate-400" />
-                          <div>
-                            <p className="font-semibold text-slate-700">{assignedUser?.name || row.assignedTo || (isEnglish ? "Unassigned" : "Sin asignar")}</p>
+                          <div className="min-w-44">
+                            <select
+                              value={assignedUser?.user_id || row.assignedTo}
+                              disabled={savingAssignmentId === row.id}
+                              onChange={(event) => void updateLineAssignment(row, event.target.value)}
+                              aria-label={isEnglish ? `Assign task for claim ${row.claim.claim_id}` : `Asignar tarea para claim ${row.claim.claim_id}`}
+                              className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 outline-none transition focus:border-primary-blue focus:ring-2 focus:ring-blue-100 disabled:cursor-wait disabled:bg-slate-50"
+                            >
+                              <option value="">{isEnglish ? "Unassigned" : "Sin asignar"}</option>
+                              {assignableUsers.map(user => (
+                                <option key={user.user_id} value={user.user_id}>
+                                  {user.name || user.email}
+                                </option>
+                              ))}
+                            </select>
                             <p className="flex items-center gap-1 text-[10px] text-slate-400">
                               <CalendarClock className="h-3 w-3" />
                               {row.dueDate ? shortDate(row.dueDate) : (row.followUpDate ? shortDate(row.followUpDate) : "-")}
                               {row.priority ? ` · ${row.priority}` : ""}
+                              {savingAssignmentId === row.id ? ` · ${isEnglish ? "Saving..." : "Guardando..."}` : ""}
                             </p>
                           </div>
                         </div>
