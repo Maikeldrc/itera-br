@@ -185,8 +185,8 @@
   - `npm run lint`: Passed.
   - `npm run test`: Passed.
   - `npm run build`: Passed.
-- Frontend deployment: Pending.
-- Backend deployment: Pending.
-- Production validation after fix: Pending.
-- Regression: Pending for QA-TC-021.
+- Frontend deployment: Passed. Vercel production deployment returned `https://itera-rjtkm01pr-mdavid-iterahealths-projects.vercel.app`; stable route `https://itera-br.vercel.app/payment-reconciliation-import` returned HTTP 200.
+- Backend deployment: Passed. Cloud Run revision `itera-claim-reconciliation-api-00030-h6c` serves 100% traffic; health endpoint returned 200 with Google Sheets configured.
+- Production validation after fix: Passed. Production UI route displays `Payment Reconciliation Import`, expected report columns, file chooser, and no app console errors/warnings. Local endpoint smoke test passed without writing data: unpaid seed claim/CPT returned `ready`; paid seed claim/CPT returned `needs_review` and was not overwritten.
+- Regression: Passed for QA-TC-021.
 - Decision: Continue.
