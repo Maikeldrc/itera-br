@@ -1457,6 +1457,20 @@ async function startServer() {
         const providerName = normalizeMatchText(row.renderingProviderName);
         const cptCode = textValue(row.cptCode);
 
+        const matchesOperationalKeys = (claim: Claim) => {
+          const samePatient = patientAcct && normalizeMatchText(claim.patient_id) === patientAcct;
+          const claimDosFrom = textValue(claim.date_of_service_from).slice(0, 10);
+          const claimDosTo = textValue(claim.date_of_service_to).slice(0, 10);
+          const claimMonth = textValue(claim.month_of_service).slice(0, 7);
+          const rowMonth = row.serviceDate ? row.serviceDate.slice(0, 7) : "";
+          const sameDos = row.serviceDate && (
+            claimDosFrom === row.serviceDate ||
+            claimDosTo === row.serviceDate ||
+            (claimMonth && rowMonth && claimMonth === rowMonth)
+          );
+          return Boolean(samePatient && sameDos);
+        };
+
         let candidates = claims.filter(claim => {
           const serviceLines = parseServiceLines(claim);
           const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode);
@@ -1466,10 +1480,19 @@ async function startServer() {
             return normalizeMatchText(claim.claim_id) === claimNo;
           }
 
-          const samePatient = patientAcct && normalizeMatchText(claim.patient_id) === patientAcct;
-          const sameDos = row.serviceDate && textValue(claim.date_of_service_from).slice(0, 10) === row.serviceDate;
-          return Boolean(samePatient && sameDos);
+          return matchesOperationalKeys(claim);
         });
+
+        if (claimNo && candidates.length === 0) {
+          candidates = claims.filter(claim => {
+            const serviceLines = parseServiceLines(claim);
+            const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode);
+            return hasCpt && matchesOperationalKeys(claim);
+          });
+          if (candidates.length > 0) {
+            warnings.push("External Claim No did not match the internal claim ID; matched by Patient Acct No, CPT and DOS instead.");
+          }
+        }
 
         if (candidates.length > 1 && payerName) {
           const payerFiltered = candidates.filter(claim => normalizeMatchText(claim.payer_name).includes(payerName) || payerName.includes(normalizeMatchText(claim.payer_name)));
@@ -1536,14 +1559,78 @@ async function startServer() {
           let claimPaymentTotal = 0;
           let latestPaymentDate = claim.payment_date || "";
           let latestCheckNo = claim.check_or_eft_number || "";
+          const lineAllocations = new Map<number, {
+            rows: typeof claimRows;
+            totalPayment: number;
+            payerPayment: number;
+            patientPayment: number;
+            contractualAdjustment: number;
+          }>();
+
+          const addLineAllocation = (index: number, row: typeof claimRows[number], ratio: number) => {
+            const current = lineAllocations.get(index) || {
+              rows: [],
+              totalPayment: 0,
+              payerPayment: 0,
+              patientPayment: 0,
+              contractualAdjustment: 0
+            };
+            current.rows.push(row);
+            current.totalPayment = Number((current.totalPayment + Number(row.payment || 0) * ratio).toFixed(2));
+            current.payerPayment = Number((current.payerPayment + Number(row.payerPayment || 0) * ratio).toFixed(2));
+            current.patientPayment = Number((current.patientPayment + Number(row.patientPayment || 0) * ratio).toFixed(2));
+            current.contractualAdjustment = Number((current.contractualAdjustment + Number(row.contractualAdjustment || 0) * ratio).toFixed(2));
+            lineAllocations.set(index, current);
+          };
+
+          for (const row of claimRows) {
+            const primaryLine = serviceLines[row.lineIndex];
+            const rowImpact = Number((Number(row.payment || 0) + Number(row.contractualAdjustment || 0)).toFixed(2));
+            const primaryCapacity = primaryLine
+              ? Number((Number(primaryLine.charged || 0) - Number(primaryLine.adj || 0) - linePaymentTotal(primaryLine)).toFixed(2))
+              : 0;
+            const sameCptIndexes = serviceLines
+              .map((line, index) => ({ line, index }))
+              .filter(item => textValue(item.line?.cpt) === textValue(row.cptCode))
+              .map(item => item.index);
+            const targetIndexes = row.lineIndex >= 0 && rowImpact <= primaryCapacity + 0.01
+              ? [row.lineIndex]
+              : sameCptIndexes;
+            const totalTargetCharged = Number(targetIndexes.reduce((sum, index) => sum + Number(serviceLines[index]?.charged || 0), 0).toFixed(2));
+
+            let allocatedPayment = 0;
+            let allocatedPayer = 0;
+            let allocatedPatient = 0;
+            let allocatedAdjustment = 0;
+            targetIndexes.forEach((index, position) => {
+              const isLast = position === targetIndexes.length - 1;
+              const ratio = totalTargetCharged > 0 ? Number(serviceLines[index]?.charged || 0) / totalTargetCharged : 1 / targetIndexes.length;
+              const paymentShare = isLast ? Number((Number(row.payment || 0) - allocatedPayment).toFixed(2)) : Number((Number(row.payment || 0) * ratio).toFixed(2));
+              const payerShare = isLast ? Number((Number(row.payerPayment || 0) - allocatedPayer).toFixed(2)) : Number((Number(row.payerPayment || 0) * ratio).toFixed(2));
+              const patientShare = isLast ? Number((Number(row.patientPayment || 0) - allocatedPatient).toFixed(2)) : Number((Number(row.patientPayment || 0) * ratio).toFixed(2));
+              const adjustmentShare = isLast ? Number((Number(row.contractualAdjustment || 0) - allocatedAdjustment).toFixed(2)) : Number((Number(row.contractualAdjustment || 0) * ratio).toFixed(2));
+              allocatedPayment = Number((allocatedPayment + paymentShare).toFixed(2));
+              allocatedPayer = Number((allocatedPayer + payerShare).toFixed(2));
+              allocatedPatient = Number((allocatedPatient + patientShare).toFixed(2));
+              allocatedAdjustment = Number((allocatedAdjustment + adjustmentShare).toFixed(2));
+              addLineAllocation(index, {
+                ...row,
+                payment: paymentShare,
+                payerPayment: payerShare,
+                patientPayment: patientShare,
+                contractualAdjustment: adjustmentShare
+              }, 1);
+            });
+          }
 
           serviceLines = serviceLines.map((line, index) => {
-            const matchingRows = claimRows.filter(row => row.lineIndex === index);
-            if (matchingRows.length === 0) return line;
-            const totalPayment = Number(matchingRows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2));
-            const payerPayment = Number(matchingRows.reduce((sum, row) => sum + Number(row.payerPayment || 0), 0).toFixed(2));
-            const patientPayment = Number(matchingRows.reduce((sum, row) => sum + Number(row.patientPayment || 0), 0).toFixed(2));
-            const contractualAdjustment = Number(matchingRows.reduce((sum, row) => sum + Number(row.contractualAdjustment || 0), 0).toFixed(2));
+            const allocation = lineAllocations.get(index);
+            if (!allocation) return line;
+            const matchingRows = allocation.rows;
+            const totalPayment = allocation.totalPayment;
+            const payerPayment = allocation.payerPayment;
+            const patientPayment = allocation.patientPayment;
+            const contractualAdjustment = allocation.contractualAdjustment;
             const charged = Number(line?.charged || 0);
             const adj = contractualAdjustment > 0 ? contractualAdjustment : Number(line?.adj || 0);
             const paid = Number((Number(line?.paid || 0) + totalPayment).toFixed(2));
