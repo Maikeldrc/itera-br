@@ -184,6 +184,26 @@ function normalizeMatchText(value: unknown) {
   return textValue(value).toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
+function entityNamesMatch(left: unknown, right: unknown) {
+  const leftText = normalizeMatchText(left);
+  const rightText = normalizeMatchText(right);
+  return Boolean(leftText && rightText && (
+    leftText === rightText ||
+    leftText.includes(rightText) ||
+    rightText.includes(leftText)
+  ));
+}
+
+function findMatchingPayer(payers: Payer[], value: unknown) {
+  const normalized = normalizeMatchText(value);
+  if (!normalized) return null;
+  return payers.find(payer =>
+    normalizeMatchText(payer.payer_name) === normalized ||
+    normalizeMatchText(payer.payer_id) === normalized ||
+    normalizeMatchText(payer.pverify_payer_code) === normalized
+  ) || null;
+}
+
 function parseServiceLines(claim: Partial<Claim>) {
   try {
     const parsed = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
@@ -1065,6 +1085,77 @@ async function startServer() {
     }
   });
 
+  app.post("/api/payment-reconciliation-import/apply-payer-change", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const claimId = textValue(req.body?.claimId);
+      const reportPayerName = textValue(req.body?.reportPayerName);
+
+      if (!claimId || !reportPayerName) {
+        return res.status(400).json({ error: "claimId and reportPayerName are required." });
+      }
+
+      const claim = (await sheetsService.getClaims()).find(item => item.claim_id === claimId && !item.deleted_flag);
+      if (!claim) return res.status(404).json({ error: "Claim not found." });
+      if (!canAccessClaim(req, claim)) {
+        return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+
+      const payers = await sheetsService.getPayers();
+      const matchedPayer = findMatchingPayer(payers, reportPayerName);
+      const previousPayerId = claim.payer_id || "";
+      const previousPayerName = claim.payer_name || previousPayerId || "Unknown";
+      const newPayerId = matchedPayer?.payer_id || reportPayerName;
+      const newPayerName = matchedPayer?.payer_name || reportPayerName;
+
+      if (entityNamesMatch(previousPayerName || previousPayerId, newPayerName || newPayerId)) {
+        return res.json({
+          success: true,
+          changed: false,
+          claim,
+          previousPayerId,
+          previousPayerName,
+          newPayerId,
+          newPayerName,
+          matchedCatalogPayer: Boolean(matchedPayer)
+        });
+      }
+
+      const traceNote = `Payment Reconciliation Import payer update: ${previousPayerName} -> ${newPayerName}.`;
+      const updated = await sheetsService.updateClaim(claimId, {
+        ...claim,
+        payer_id: newPayerId,
+        payer_name: newPayerName,
+        last_note: `${traceNote} ${claim.last_note || ""}`.trim()
+      }, operatorEmail);
+
+      await sheetsService.addAuditLog({
+        audit_id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        claim_id: updated.claim_id,
+        action_type: "Update",
+        field_name: "payer_id",
+        previous_value: previousPayerId,
+        new_value: newPayerId,
+        reason: `Insurance changed from "${previousPayerName}" to "${newPayerName}" from Payment Reconciliation Import report.`,
+        changed_by: operatorEmail,
+        changed_at: new Date().toISOString()
+      });
+
+      res.json({
+        success: true,
+        changed: true,
+        claim: updated,
+        previousPayerId,
+        previousPayerName,
+        newPayerId,
+        newPayerName,
+        matchedCatalogPayer: Boolean(matchedPayer)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to apply payer change." });
+    }
+  });
+
   // GET Settings
   app.get("/api/settings", async (req, res) => {
     res.json(await sheetsService.getSettings());
@@ -1431,6 +1522,7 @@ async function startServer() {
       const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
       const claims = (await sheetsService.getClaims()).filter(claim => !claim.deleted_flag);
       const payments = await sheetsService.getPayments();
+      const payers = await sheetsService.getPayers();
       const existingPaymentIds = new Set(payments.map(payment => textValue(payment.payment_id).toLowerCase()).filter(Boolean));
 
       const normalizedRows = importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index));
@@ -1490,7 +1582,7 @@ async function startServer() {
         }
 
         if (candidates.length > 1 && payerName) {
-          const payerFiltered = candidates.filter(claim => normalizeMatchText(claim.payer_name).includes(payerName) || payerName.includes(normalizeMatchText(claim.payer_name)));
+          const payerFiltered = candidates.filter(claim => entityNamesMatch(claim.payer_name, payerName));
           if (payerFiltered.length > 0) candidates = payerFiltered;
         }
         if (candidates.length > 1 && providerName) {
@@ -1516,6 +1608,14 @@ async function startServer() {
         if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
         if (errors.length === 0 && claim && lineIndex < 0) errors.push("Matched claim does not contain the CPT code.");
 
+        const claimPayerName = claim?.payer_name || "";
+        const reportPayerName = row.payerName || "";
+        const payerMismatch = Boolean(claim && reportPayerName && claimPayerName && !entityNamesMatch(claimPayerName, reportPayerName));
+        const suggestedPayer = payerMismatch ? findMatchingPayer(payers, reportPayerName) : null;
+        if (payerMismatch) {
+          warnings.push(`Payer mismatch: claim has "${claimPayerName}", report has "${reportPayerName}".`);
+        }
+
         const hasExistingPayment = Boolean(
           claim && linePaymentTotal(targetLine) > 0
         );
@@ -1530,8 +1630,13 @@ async function startServer() {
           patientName: row.patientName || claim?.patient_display_name_masked || "",
           providerName: claim?.provider_name || row.renderingProviderName || "",
           payerName: claim?.payer_name || row.payerName || "",
+          claimPayerName,
+          reportPayerName,
+          payerMismatch,
+          suggestedPayerId: suggestedPayer?.payer_id || "",
+          suggestedPayerName: suggestedPayer?.payer_name || reportPayerName,
           lineIndex,
-          status: errors.length > 0 ? "rejected" : (hasExistingPayment ? "needs_review" : "ready"),
+          status: errors.length > 0 ? "rejected" : (hasExistingPayment || payerMismatch ? "needs_review" : "ready"),
           errors,
           warnings
         };

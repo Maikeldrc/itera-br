@@ -28,6 +28,11 @@ type PaymentImportRow = {
   serviceDate: string;
   paymentDate: string;
   payerName: string;
+  claimPayerName?: string;
+  reportPayerName?: string;
+  payerMismatch?: boolean;
+  suggestedPayerId?: string;
+  suggestedPayerName?: string;
   payment: number;
   errors: string[];
   warnings: string[];
@@ -141,6 +146,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<ImportPayload | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
   const [result, setResult] = useState<PaymentImportResult | null>(null);
 
   const reset = () => {
@@ -149,6 +155,8 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
     setResult(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
+
+  const rowKey = (row: PaymentImportRow) => `${row.rowNumber}-${row.claimId}-${row.cptCode}-${row.reportPayerName || row.payerName}`;
 
   const processFile = (file: File) => {
     setFileName(file.name);
@@ -195,6 +203,67 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       notify(`${isEnglish ? "Import error" : "Error de importación"}: ${err.message}`, "error");
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  const applyPayerChange = async (row: PaymentImportRow) => {
+    if (!row.claimId || !(row.reportPayerName || row.suggestedPayerName)) return;
+    const key = rowKey(row);
+    setPayerChangeState(current => ({ ...current, [key]: "applying" }));
+    try {
+      const response = await apiFetch("/api/payment-reconciliation-import/apply-payer-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          claimId: row.claimId,
+          reportPayerName: row.suggestedPayerName || row.reportPayerName
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Failed to apply payer change.");
+
+      setResult(current => {
+        if (!current) return current;
+        const rows = current.rows.map(item => {
+          if (rowKey(item) !== key) return item;
+          const newPayerName = data.newPayerName || item.suggestedPayerName || item.reportPayerName || item.payerName;
+          const warnings = item.warnings.filter(warning => !warning.toLowerCase().startsWith("payer mismatch:"));
+          const stillNeedsReview = warnings.some(warning => warning.toLowerCase().includes("already has payment activity"));
+          return {
+            ...item,
+            payerName: newPayerName,
+            claimPayerName: newPayerName,
+            payerMismatch: false,
+            status: item.status === "needs_review" && !stillNeedsReview && item.errors.length === 0 ? "ready" : item.status,
+            warnings
+          };
+        });
+        return {
+          ...current,
+          summary: {
+            ...current.summary,
+            readyToImport: rows.filter(item => item.status === "ready").length,
+            needsReviewRows: rows.filter(item => item.status === "needs_review").length,
+            rejectedRows: rows.filter(item => item.status === "rejected").length
+          },
+          rows
+        };
+      });
+      setPayerChangeState(current => ({ ...current, [key]: "applied" }));
+      notify(
+        data.changed
+          ? (isEnglish ? "Claim payer updated and audit trail recorded." : "Seguro del claim actualizado con trazabilidad registrada.")
+          : (isEnglish ? "Claim payer already matches the report payer." : "El seguro del claim ya coincide con el payer del reporte."),
+        "success"
+      );
+      await onImported();
+    } catch (err: any) {
+      setPayerChangeState(current => {
+        const next = { ...current };
+        delete next[key];
+        return next;
+      });
+      notify(`${isEnglish ? "Payer update error" : "Error actualizando seguro"}: ${err.message}`, "error");
     }
   };
 
@@ -338,7 +407,38 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
                       </td>
                       <td className="px-3 py-3 font-mono font-bold">{row.cptCode || "-"}</td>
                       <td className="px-3 py-3 font-mono text-slate-500">{row.serviceDate || "-"}</td>
-                      <td className="px-3 py-3">{row.payerName || "-"}</td>
+                      <td className="px-3 py-3">
+                        {row.payerMismatch ? (
+                          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">{isEnglish ? "Payer mismatch" : "Payer diferente"}</p>
+                              <p className="text-[11px] text-slate-700">
+                                <span className="font-bold">{isEnglish ? "Claim" : "Claim"}:</span> {row.claimPayerName || "-"}
+                              </p>
+                              <p className="text-[11px] text-slate-700">
+                                <span className="font-bold">{isEnglish ? "Report" : "Reporte"}:</span> {row.reportPayerName || row.suggestedPayerName || "-"}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void applyPayerChange(row)}
+                              disabled={payerChangeState[rowKey(row)] === "applying"}
+                              className="inline-flex items-center gap-1 rounded-md bg-dark-blue px-2 py-1 text-[10px] font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-50"
+                            >
+                              {payerChangeState[rowKey(row)] === "applying"
+                                ? (isEnglish ? "Applying..." : "Aplicando...")
+                                : (isEnglish ? "Apply report payer" : "Aplicar payer del reporte")}
+                            </button>
+                          </div>
+                        ) : (
+                          <div>
+                            <p>{row.payerName || "-"}</p>
+                            {payerChangeState[rowKey(row)] === "applied" && (
+                              <p className="mt-1 text-[10px] font-bold text-emerald-700">{isEnglish ? "Payer updated" : "Seguro actualizado"}</p>
+                            )}
+                          </div>
+                        )}
+                      </td>
                       <td className="px-3 py-3 text-right font-mono font-bold text-emerald-700">{money(Number(row.payment || 0))}</td>
                       <td className="max-w-sm px-3 py-3">
                         {row.errors.length > 0 ? (
