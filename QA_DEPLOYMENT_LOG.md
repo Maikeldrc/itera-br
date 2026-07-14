@@ -168,8 +168,8 @@
 - Local tests:
   - `npm run lint`: Passed.
   - `npm run build`: Passed.
-- Frontend deployment: Pending.
+- Frontend deployment: Passed. Vercel production deployment returned `https://itera-othanap1z-mdavid-iterahealths-projects.vercel.app`; stable domain `https://itera-br.vercel.app/rcm-work-queue` responded HTTP 200.
 - Backend deployment: Not required; frontend presentation only.
-- Production validation after fix: Pending.
-- Regression: Pending for QA-TC-020.
+- Production validation after fix: Passed on `https://itera-br.vercel.app/rcm-work-queue`. Assignment cell retains the user selector and user icon, but no longer renders `CalendarClock` or a bare `-` when the line has no due date/follow-up metadata. Console errors/warnings were not observed.
+- Regression: Passed for QA-TC-020.
 - Decision: Continue.
