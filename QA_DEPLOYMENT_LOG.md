@@ -157,3 +157,19 @@
 - Production validation after fix: Passed on `https://itera-br.vercel.app/rcm-work-queue`. Assignment selector rendered for QA claim `CLM-QAAUTOMRN001-20260711-001`, task was assigned to `Nurse User` / `USR_06`, persisted after browser reload, and console errors/warnings were not observed.
 - Regression: Passed for QA-TC-020.
 - Decision: Continue.
+
+## QA-CYCLE-009
+
+- Date: 2026-07-14
+- Starting commit: `19bc5a5`
+- UX issue found: Assignment column showed a calendar icon with a bare `-` when no due date or follow-up date existed, making the indicator look like a broken control.
+- Corrections: hide the assignment metadata row when no date, priority or saving state exists; when metadata exists, render explicit labels such as `Due`, `Follow-up` and `Priority`.
+- Files changed: `src/components/RcmWorkQueue.tsx`, QA documentation.
+- Local tests:
+  - `npm run lint`: Passed.
+  - `npm run build`: Passed.
+- Frontend deployment: Pending.
+- Backend deployment: Not required; frontend presentation only.
+- Production validation after fix: Pending.
+- Regression: Pending for QA-TC-020.
+- Decision: Continue.

@@ -234,6 +234,12 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
               ) : (
                 filteredRows.map(row => {
                   const assignedUser = users.find(user => user.user_id === row.assignedTo || user.email === row.assignedTo);
+                  const assignmentMeta = [
+                    row.dueDate ? `${isEnglish ? "Due" : "Vence"}: ${shortDate(row.dueDate)}` : "",
+                    !row.dueDate && row.followUpDate ? `${isEnglish ? "Follow-up" : "Seguimiento"}: ${shortDate(row.followUpDate)}` : "",
+                    row.priority ? `${isEnglish ? "Priority" : "Prioridad"}: ${row.priority}` : "",
+                    savingAssignmentId === row.id ? (isEnglish ? "Saving..." : "Guardando...") : ""
+                  ].filter(Boolean);
                   return (
                     <tr key={row.id} className="hover:bg-blue-50/30">
                       <td className="px-3 py-3">
@@ -273,12 +279,12 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
                                 </option>
                               ))}
                             </select>
-                            <p className="flex items-center gap-1 text-[10px] text-slate-400">
-                              <CalendarClock className="h-3 w-3" />
-                              {row.dueDate ? shortDate(row.dueDate) : (row.followUpDate ? shortDate(row.followUpDate) : "-")}
-                              {row.priority ? ` · ${row.priority}` : ""}
-                              {savingAssignmentId === row.id ? ` · ${isEnglish ? "Saving..." : "Guardando..."}` : ""}
-                            </p>
+                            {assignmentMeta.length > 0 && (
+                              <p className="mt-1 flex items-center gap-1 text-[10px] text-slate-400">
+                                {(row.dueDate || row.followUpDate) && <CalendarClock className="h-3 w-3" />}
+                                <span>{assignmentMeta.join(" · ")}</span>
+                              </p>
+                            )}
                           </div>
                         </div>
                       </td>
