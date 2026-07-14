@@ -240,6 +240,7 @@ export default function App() {
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingClaim, setEditingClaim] = useState<Claim | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorState, setErrorState] = useState<string | null>(null);
 
@@ -571,6 +572,7 @@ export default function App() {
   const newClaimTotalCharge = Number(newClaimLineCharges.reduce((sum, line) => sum + line.charge, 0).toFixed(2));
 
   const handleOpenCreateClaim = () => {
+    setEditingClaim(null);
     setNewPatientName("");
     setNewPatientId("");
     setNewDos("");
@@ -581,10 +583,48 @@ export default function App() {
     setIsCreateOpen(true);
   };
 
+  const handleCloseClaimEditor = () => {
+    setIsCreateOpen(false);
+    setEditingClaim(null);
+  };
+
+  const handleOpenEditClaim = (claim: Claim) => {
+    setEditingClaim(claim);
+    setNewPatientName(toText(claim.patient_display_name_masked));
+    setNewPatientId(toText(claim.patient_id));
+    setNewDos(toText(claim.date_of_service_from).slice(0, 10));
+    setNewBilledBy((claim.billed_by === "ITERA" || claim.billed_by === "Provider") ? claim.billed_by : "");
+    setNewProviderId(toText(claim.provider_id));
+    setNewPayerId(toText(claim.payer_id));
+
+    let parsedLines: any[] = [];
+    if (claim.service_lines_json) {
+      try {
+        const parsed = JSON.parse(claim.service_lines_json);
+        if (Array.isArray(parsed)) parsedLines = parsed;
+      } catch (err) {
+        console.warn("Failed to parse service_lines_json for edit", err);
+      }
+    }
+    const cptFallback = toText(claim.cpt_hcpcs).split(/[\s,]+/).filter(Boolean);
+    const lines = parsedLines.length > 0
+      ? parsedLines.map(line => createNewClaimServiceLine({
+          serviceType: normalizeServiceType(line?.serviceType || line?.service_type || serviceTypeFromDescription(line?.description)),
+          cpt: toText(line?.cpt)
+        }))
+      : cptFallback.map(cpt => createNewClaimServiceLine({
+          serviceType: normalizeServiceType(claim.service_type),
+          cpt
+        }));
+    setNewClaimLines(lines.length > 0 ? lines : [createBlankClaimServiceLine()]);
+    setIsCreateOpen(true);
+  };
+
   // Create claim manually with one or more CPT service lines
   const handleCreateClaimManually = async (e: React.FormEvent) => {
     e.preventDefault();
 
+    const claimBeingEdited = editingClaim;
     const providerObj = providers.find(p => p.provider_id === newProviderId);
     const payerObj = payers.find(p => p.payer_id === newPayerId);
     const normalizedLines = getNormalizedNewClaimLines();
@@ -607,7 +647,8 @@ export default function App() {
         provider_id: newProviderId,
         provider_npi: providerObj?.npi
       },
-      claims
+      claims,
+      claimBeingEdited?.claim_id
     );
     if (duplicatePatientProviderErrors.length > 0) {
       notify(isEnglish ? "This MRN (Patient ID) is already registered for the same Provider." : "Este MRN (Patient ID) ya está registrado para el mismo Provider.", "warning");
@@ -635,7 +676,8 @@ export default function App() {
         service_lines_json: JSON.stringify(normalizedLines.map(line => ({ cpt: line.cpt, units: 1 })))
       },
       feeSchedules,
-      claims
+      claims,
+      claimBeingEdited?.claim_id
     );
     if (existingRepeatErrors.length > 0) {
       notify(existingRepeatErrors[0], "warning");
@@ -652,30 +694,63 @@ export default function App() {
       return;
     }
 
-    const serviceLines = lineCharges.map(line => ({
-      cpt: line.cpt,
-      serviceType: line.serviceType,
-      charged: line.charge,
-      allowed: line.charge,
-      adj: 0,
-      patResp: 0,
-      paid: 0,
-      secondaryPaid: 0,
-      secondaryPayerId: "",
-      hasSecondaryPayment: false,
-      balance: line.charge,
-      codes: [],
-      status: "Not Billed",
-      notes: [],
-      nextAction: "No action",
-      eftNumber: "",
-      paymentDate: ""
-    }));
+    let existingServiceLines: any[] = [];
+    if (claimBeingEdited?.service_lines_json) {
+      try {
+        const parsed = JSON.parse(claimBeingEdited.service_lines_json);
+        if (Array.isArray(parsed)) existingServiceLines = parsed;
+      } catch (err) {
+        console.warn("Failed to parse existing claim service lines", err);
+      }
+    }
+    const usedExistingLineIndexes = new Set<number>();
+    const findReusableExistingLine = (line: NewClaimServiceLine) => {
+      const exactIndex = existingServiceLines.findIndex((existing, index) =>
+        !usedExistingLineIndexes.has(index)
+        && toText(existing?.cpt) === line.cpt
+        && normalizeServiceType(existing?.serviceType || existing?.service_type) === normalizeServiceType(line.serviceType)
+      );
+      const fallbackIndex = exactIndex >= 0 ? exactIndex : existingServiceLines.findIndex((existing, index) =>
+        !usedExistingLineIndexes.has(index) && toText(existing?.cpt) === line.cpt
+      );
+      if (fallbackIndex >= 0) usedExistingLineIndexes.add(fallbackIndex);
+      return fallbackIndex >= 0 ? existingServiceLines[fallbackIndex] : null;
+    };
+
+    const serviceLines = lineCharges.map(line => {
+      const existingLine = findReusableExistingLine(line);
+      const paid = Number(existingLine?.paid || 0);
+      const secondaryPaid = Number(existingLine?.secondaryPaid || 0);
+      const adj = Number(existingLine?.adj || 0);
+      const patResp = Number(existingLine?.patResp || 0);
+      const allowed = Number(Math.max(0, line.charge - adj).toFixed(2));
+      return {
+        ...(existingLine || {}),
+        cpt: line.cpt,
+        serviceType: line.serviceType,
+        charged: line.charge,
+        allowed,
+        adj,
+        patResp,
+        paid,
+        secondaryPaid,
+        secondaryPayerId: existingLine?.secondaryPayerId || "",
+        hasSecondaryPayment: existingLine?.hasSecondaryPayment || secondaryPaid > 0,
+        balance: Number(Math.max(0, allowed - paid - secondaryPaid - patResp).toFixed(2)),
+        codes: Array.isArray(existingLine?.codes) ? existingLine.codes : [],
+        status: existingLine?.status || "Not Billed",
+        notes: Array.isArray(existingLine?.notes) ? existingLine.notes : [],
+        nextAction: existingLine?.nextAction || "No action",
+        eftNumber: existingLine?.eftNumber || "",
+        paymentDate: existingLine?.paymentDate || ""
+      };
+    });
     const totalCharge = Number(lineCharges.reduce((sum, line) => sum + line.charge, 0).toFixed(2));
     const serviceTypes = Array.from(new Set(lineCharges.map(line => line.serviceType)));
 
     const rawClaim: Partial<Claim> = {
-      claim_id: "AUTO_GENERATE",
+      ...(claimBeingEdited || {}),
+      claim_id: claimBeingEdited?.claim_id || "AUTO_GENERATE",
       patient_id: newPatientId.trim(),
       patient_display_name_masked: newPatientName.trim(),
       practice_id: providerObj?.practice_id || "",
@@ -692,25 +767,25 @@ export default function App() {
       date_of_service_to: newDos,
       month_of_service: newDos ? newDos.slice(0, 7) : "",
       billed_by: newBilledBy,
-      payment_received_by: "Unknown",
-      claim_status: ClaimStatus.Draft,
-      claim_classification: ClaimClassification.CleanClaim,
+      payment_received_by: claimBeingEdited?.payment_received_by || "Unknown",
+      claim_status: claimBeingEdited?.claim_status || ClaimStatus.Draft,
+      claim_classification: claimBeingEdited?.claim_classification || ClaimClassification.CleanClaim,
       billed_charge: totalCharge,
-      allowed_amount: totalCharge,
-      paid_amount: 0,
-      insurance_adjustment: 0,
-      denied_amount: 0,
-      write_off_amount: 0,
-      uncollectible_amount: 0,
-      itera_direct_collection: 0,
-      provider_direct_collection: 0,
-      payment_to_physician: 0,
+      allowed_amount: Number(serviceLines.reduce((sum, line) => sum + Number(line.allowed || 0), 0).toFixed(2)),
+      paid_amount: Number(serviceLines.reduce((sum, line) => sum + Number(line.paid || 0) + Number(line.secondaryPaid || 0), 0).toFixed(2)),
+      insurance_adjustment: Number(serviceLines.reduce((sum, line) => sum + Number(line.adj || 0), 0).toFixed(2)),
+      denied_amount: claimBeingEdited?.denied_amount || 0,
+      write_off_amount: claimBeingEdited?.write_off_amount || 0,
+      uncollectible_amount: claimBeingEdited?.uncollectible_amount || 0,
+      itera_direct_collection: claimBeingEdited?.itera_direct_collection || 0,
+      provider_direct_collection: claimBeingEdited?.provider_direct_collection || 0,
+      payment_to_physician: claimBeingEdited?.payment_to_physician || 0,
       service_lines_json: JSON.stringify(serviceLines)
     };
 
     try {
-      const res = await apiFetch("/api/claims", {
-        method: "POST",
+      const res = await apiFetch(claimBeingEdited ? `/api/claims/${claimBeingEdited.claim_id}` : "/api/claims", {
+        method: claimBeingEdited ? "PUT" : "POST",
         headers: {
           "Content-Type": "application/json",
           "x-user-email": currentUser.email
@@ -720,11 +795,17 @@ export default function App() {
 
       if (!res.ok) {
         const errData = await res.json();
-        throw new Error(errData.error || errData.details?.join("; ") || "Failed to create claim");
+        throw new Error(errData.error || errData.details?.join("; ") || (claimBeingEdited ? "Failed to update claim" : "Failed to create claim"));
       }
 
-      notify(isEnglish ? "Claim created and recalculated successfully." : "Claim creado y recalculado exitosamente.", "success");
+      notify(
+        claimBeingEdited
+          ? (isEnglish ? "Claim updated successfully." : "Claim actualizado exitosamente.")
+          : (isEnglish ? "Claim created and recalculated successfully." : "Claim creado y recalculado exitosamente."),
+        "success"
+      );
       setIsCreateOpen(false);
+      setEditingClaim(null);
       setNewPatientName("");
       setNewPatientId("");
       setNewDos("");
@@ -1696,6 +1777,7 @@ export default function App() {
                 }}
                 onSelectAllClaims={(ids) => setSelectedClaimIds(ids)}
                 onViewDetails={(claim) => setSelectedClaim(claim)}
+                onEditClaim={currentUser.role === UserRole.Admin ? handleOpenEditClaim : undefined}
                 onUpdateClaim={async (updates, targetClaimId) => {
                   await handleUpdateClaim(updates, targetClaimId);
                 }}
@@ -3148,21 +3230,33 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden">
             <div className="bg-dark-blue p-5 text-white flex items-center justify-between">
-              <h4 className="font-bold font-display text-sm">{isEnglish ? "Create New Digital Care Claim" : "Crear Nuevo Claim de Digital Care"}</h4>
-              <button onClick={() => setIsCreateOpen(false)} className="p-1 hover:bg-white/10 rounded-full text-white">
+              <h4 className="font-bold font-display text-sm">
+                {editingClaim
+                  ? (isEnglish ? "Edit Digital Care Claim" : "Editar Claim de Digital Care")
+                  : (isEnglish ? "Create New Digital Care Claim" : "Crear Nuevo Claim de Digital Care")}
+              </h4>
+              <button onClick={handleCloseClaimEditor} className="p-1 hover:bg-white/10 rounded-full text-white">
                 <X className="w-4.5 h-4.5" />
               </button>
             </div>
             <form onSubmit={handleCreateClaimManually} className="max-h-[82vh] overflow-y-auto p-6 space-y-4 text-xs font-sans">
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-[1.2fr_0.8fr]">
                 <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                  <label className="block text-primary-blue mb-1 font-bold uppercase tracking-wider text-[9px]">{isEnglish ? "Claim ID - Preview" : "Claim ID - Vista previa"}</label>
+                  <label className="block text-primary-blue mb-1 font-bold uppercase tracking-wider text-[9px]">{editingClaim ? "Claim ID" : (isEnglish ? "Claim ID - Preview" : "Claim ID - Vista previa")}</label>
                   <div className="font-mono font-bold text-dark-blue text-[11px] break-all">
-                    CLM-{newPatientId ? newPatientId.trim().toUpperCase().replace(/^MRN[-_\s]*/i, "").replace(/[^A-Z0-9]+/g, "") || "MRN" : "MRN"}
-                    -{newDos ? newDos.replace(/-/g, "") : (isEnglish ? "YYYYMMDD" : "AAAAMMDD")}
-                    -<span className="text-slate-400">###</span>
+                    {editingClaim
+                      ? editingClaim.claim_id
+                      : <>
+                          CLM-{newPatientId ? newPatientId.trim().toUpperCase().replace(/^MRN[-_\s]*/i, "").replace(/[^A-Z0-9]+/g, "") || "MRN" : "MRN"}
+                          -{newDos ? newDos.replace(/-/g, "") : (isEnglish ? "YYYYMMDD" : "AAAAMMDD")}
+                          -<span className="text-slate-400">###</span>
+                        </>}
                   </div>
-                  <p className="mt-1 text-[9px] text-slate-500">{isEnglish ? "The sequence number is assigned when saved." : "El consecutivo se asigna al guardar."}</p>
+                  <p className="mt-1 text-[9px] text-slate-500">
+                    {editingClaim
+                      ? (isEnglish ? "Claim ID is not changed during edit." : "El Claim ID no cambia durante la edición.")
+                      : (isEnglish ? "The sequence number is assigned when saved." : "El consecutivo se asigna al guardar.")}
+                  </p>
                 </div>
                 <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
                   <label className="block text-emerald-700 mb-1 font-bold uppercase tracking-wider text-[9px]">Total Billed Charge</label>
@@ -3342,18 +3436,20 @@ export default function App() {
               </div>
 
               <div className="pt-4 flex items-center justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateOpen(false)}
-                  className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl font-semibold text-slate-600 transition-colors"
-                >
+                  <button
+                    type="button"
+                    onClick={handleCloseClaimEditor}
+                    className="px-4 py-2 border border-slate-200 hover:bg-slate-100 rounded-xl font-semibold text-slate-600 transition-colors"
+                  >
                   {isEnglish ? "Cancel" : "Cancelar"}
                 </button>
                 <button
                   type="submit"
                   className="bg-primary-blue hover:bg-secondary-blue text-white px-5 py-2 rounded-xl font-bold transition-all shadow-md"
                 >
-                  {isEnglish ? "Save and Reconcile" : "Guardar y Conciliar"}
+                  {editingClaim
+                    ? (isEnglish ? "Update Claim" : "Actualizar Claim")
+                    : (isEnglish ? "Save and Reconcile" : "Guardar y Conciliar")}
                 </button>
               </div>
             </form>

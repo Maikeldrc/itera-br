@@ -11,6 +11,7 @@ import {
   Unlock,
   AlertOctagon,
   Eye,
+  Pencil,
   CheckCircle2,
   MoreHorizontal,
   Coins,
@@ -52,6 +53,7 @@ interface ClaimsTableProps {
   onSelectClaim: (claimId: string, isSelected: boolean) => void;
   onSelectAllClaims: (claimIds: string[]) => void;
   onViewDetails: (claim: Claim) => void;
+  onEditClaim?: (claim: Claim) => void;
   onUpdateClaim?: (updates: Partial<Claim>, targetClaimId?: string) => Promise<void>;
   onSaveServiceLineNotes?: (serviceLinesJson: string, targetClaimId?: string) => Promise<void>;
   onDeleteClaim?: (claim: Claim, reason: string) => Promise<void>;
@@ -280,6 +282,7 @@ export function ClaimsTable({
   onSelectClaim,
   onSelectAllClaims,
   onViewDetails,
+  onEditClaim,
   onUpdateClaim,
   onSaveServiceLineNotes,
   onDeleteClaim,
@@ -1172,6 +1175,18 @@ export function ClaimsTable({
                                 <Eye className="w-3.5 h-3.5" />
                                 {localStorage.getItem("itera-language") !== "es" ? "Details" : "Ver Detalles"}
                               </button>
+                              {isAdmin && onEditClaim && (
+                                <button
+                                  onClick={() => {
+                                    setActiveActionMenu(null);
+                                    onEditClaim(claim);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded px-3 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-50 cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                  {isEnglish ? "Edit Claim" : "Editar claim"}
+                                </button>
+                              )}
                               <button
                                 disabled={isLocked}
                                 onClick={() => {
@@ -1429,6 +1444,18 @@ export function ClaimsTable({
                                 <Eye className="w-3.5 h-3.5" />
                                 {localStorage.getItem("itera-language") !== "es" ? "Details" : "Ver Detalles"}
                               </button>
+                              {isAdmin && onEditClaim && (
+                                <button
+                                  onClick={() => {
+                                    setActiveActionMenu(null);
+                                    onEditClaim(claim);
+                                  }}
+                                  className="flex w-full items-center gap-2 rounded px-3 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-50 cursor-pointer"
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                  {isEnglish ? "Edit Claim" : "Editar claim"}
+                                </button>
+                              )}
                               <button
                                 disabled={isLocked}
                                 onClick={() => {
