@@ -269,6 +269,50 @@ function normalizePaymentImportRow(row: Record<string, unknown>, index: number) 
   };
 }
 
+type PaymentImportNormalizedRow = ReturnType<typeof normalizePaymentImportRow>;
+
+function fillDownPaymentImportRows(rows: PaymentImportNormalizedRow[]) {
+  const carryFields: Array<keyof PaymentImportNormalizedRow> = [
+    "facilityName",
+    "renderingProviderName",
+    "patientName",
+    "patientAcctNo",
+    "payerName",
+    "claimNo",
+    "serviceDate",
+    "claimDate"
+  ];
+  const lastSeen: Partial<PaymentImportNormalizedRow> = {};
+  const patientAcctByName = new Map<string, string>();
+
+  return rows.map(row => {
+    const filled = { ...row };
+    const patientNameKey = normalizeMatchText(filled.patientName);
+    if (patientNameKey && filled.patientAcctNo) {
+      patientAcctByName.set(patientNameKey, filled.patientAcctNo);
+    }
+    if (!filled.patientAcctNo && patientNameKey && patientAcctByName.has(patientNameKey)) {
+      filled.patientAcctNo = patientAcctByName.get(patientNameKey) || "";
+    }
+
+    const isContinuationRow = !textValue(row.patientName) && !textValue(row.patientAcctNo);
+    if (isContinuationRow) {
+      for (const field of carryFields) {
+        if (!textValue(filled[field]) && textValue(lastSeen[field])) {
+          (filled as any)[field] = lastSeen[field];
+        }
+      }
+    }
+
+    for (const field of carryFields) {
+      if (textValue(filled[field])) {
+        (lastSeen as any)[field] = filled[field];
+      }
+    }
+    return filled;
+  });
+}
+
 function countBy<T>(items: T[], selector: (item: T) => string) {
   return items.reduce<Record<string, number>>((acc, item) => {
     const key = selector(item);
@@ -1529,7 +1573,9 @@ async function startServer() {
           .filter(([paymentId]) => Boolean(paymentId))
       );
 
-      const normalizedRows = importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index));
+      const normalizedRows = fillDownPaymentImportRows(
+        importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index))
+      );
       const analyzedRows = normalizedRows.map(row => {
         const errors: string[] = [];
         const warnings: string[] = [];
@@ -1607,7 +1653,9 @@ async function startServer() {
           ? existingPaymentById.get(row.externalPaymentId.toLowerCase()) || null
           : null;
 
-        if (errors.length === 0 && candidates.length === 0) errors.push("No matching claim/CPT found.");
+        if (errors.length === 0 && candidates.length === 0) {
+          errors.push(`No matching claim/CPT found for Patient Acct No ${row.patientAcctNo || "blank"}, CPT ${cptCode || "blank"} and DOS ${row.serviceDate || "blank"}.`);
+        }
         if (errors.length === 0 && candidates.length > 1) errors.push("Multiple matching claims found; requires human review.");
         if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
         if (errors.length === 0 && claim && lineIndex < 0) errors.push("Matched claim does not contain the CPT code.");
@@ -1636,7 +1684,7 @@ async function startServer() {
         return {
           ...row,
           claimId: claim?.claim_id || "",
-          patientId: claim?.patient_id || "",
+          patientId: claim?.patient_id || row.patientAcctNo || "",
           patientName: row.patientName || claim?.patient_display_name_masked || "",
           providerName: claim?.provider_name || row.renderingProviderName || "",
           payerName: claim?.payer_name || row.payerName || "",
