@@ -171,8 +171,8 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-5">
-          <label className="md:col-span-2">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[2fr_repeat(4,minmax(0,1fr))]">
+          <label>
             <span className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
               <Search className="h-3.5 w-3.5" /> {isEnglish ? "Search" : "Buscar"}
             </span>
