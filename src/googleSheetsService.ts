@@ -1707,8 +1707,8 @@ function normalizeAuditComparableValue(field: keyof Claim, value: unknown) {
       status: String(line?.status ?? ""),
       notes: Array.isArray(line?.notes)
         ? line.notes.map((note: any) => ({
-            id: String(note?.id ?? ""),
-            text: String(note?.text ?? "")
+            id: getServiceLineNoteId(note),
+            text: getServiceLineNoteText(note)
           }))
         : [],
       nextAction: String(line?.nextAction ?? ""),
@@ -1718,6 +1718,21 @@ function normalizeAuditComparableValue(field: keyof Claim, value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+function getServiceLineNoteText(note: unknown) {
+  if (typeof note === "string") return note;
+  if (note && typeof note === "object" && "text" in note) {
+    return String((note as { text?: unknown }).text || "");
+  }
+  return "";
+}
+
+function getServiceLineNoteId(note: unknown) {
+  if (note && typeof note === "object" && "id" in note) {
+    return String((note as { id?: unknown }).id || "");
+  }
+  return "";
 }
 
 function auditValuesDiffer(field: keyof Claim, prev: unknown, curr: unknown) {
@@ -1782,18 +1797,20 @@ export function getClaimDifferences(prev: Claim, curr: Claim): { field: string, 
               if (pNotes.length < cNotes.length) {
                 // Note was added
                 const addedNote = cNotes[cNotes.length - 1];
-                detail = `CPT ${cLine.cpt} Note added: "${addedNote.text}"`;
+                detail = `CPT ${cLine.cpt} Note added: "${getServiceLineNoteText(addedNote)}"`;
                 break;
               } else if (pNotes.length > cNotes.length) {
                 // Note was deleted
-                const deletedNote = pNotes.find((pn: any) => !cNotes.some((cn: any) => cn.id === pn.id));
-                detail = `CPT ${cLine.cpt} Note deleted: "${deletedNote?.text || ""}"`;
+                const deletedNote = pNotes.find((pn: any) => !cNotes.some((cn: any) => getServiceLineNoteId(cn) === getServiceLineNoteId(pn)));
+                detail = `CPT ${cLine.cpt} Note deleted: "${getServiceLineNoteText(deletedNote)}"`;
                 break;
               } else {
                 // Note might have been edited
                 for (let j = 0; j < pNotes.length; j++) {
-                  if (pNotes[j].text !== cNotes[j].text) {
-                    detail = `CPT ${cLine.cpt} Note edited from "${pNotes[j].text}" to "${cNotes[j].text}"`;
+                  const previousNoteText = getServiceLineNoteText(pNotes[j]);
+                  const currentNoteText = getServiceLineNoteText(cNotes[j]);
+                  if (previousNoteText !== currentNoteText) {
+                    detail = `CPT ${cLine.cpt} Note edited from "${previousNoteText}" to "${currentNoteText}"`;
                     break;
                   }
                 }
