@@ -448,6 +448,17 @@ function claimPeriod(claim: Partial<Claim>) {
   return textValue(claim.month_of_service || claim.date_of_service_from || claim.date_of_service_to).slice(0, 7);
 }
 
+function buildReconciliationConfig(settings: Array<{ setting_key: string; setting_value: string }>) {
+  const get = (key: string, fallback: string) => settings.find(s => s.setting_key === key)?.setting_value || fallback;
+  return {
+    providerSharePercent: Number(get("PROVIDER_SHARE_PERCENT", "70")),
+    iteraSharePercent: Number(get("ITERA_SHARE_PERCENT", "30")),
+    contractPaymentModel: get("CONTRACT_PAYMENT_MODEL", "PERCENTAGE") === "FEE" ? "FEE" as const : "PERCENTAGE" as const,
+    iteraFeeWhenProviderBills: Number(get("ITERA_FEE_WHEN_PROVIDER_BILLS", "0")),
+    physicianFeeWhenIteraBills: Number(get("PHYSICIAN_FEE_WHEN_ITERA_BILLS", "0"))
+  };
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT || 3000);
@@ -1012,13 +1023,7 @@ async function startServer() {
 
       // Ensure calculations are run
       const settings = await sheetsService.getSettings();
-      const pPercent = Number(settings.find(s => s.setting_key === "PROVIDER_SHARE_PERCENT")?.setting_value || 70);
-      const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
-      
-      const calculated = calculateClaimFinancials(rawClaim, {
-        providerSharePercent: pPercent,
-        iteraSharePercent: iPercent
-      });
+      const calculated = calculateClaimFinancials(rawClaim, buildReconciliationConfig(settings));
 
       if (sheetsService.isPeriodClosed(claimPeriod(calculated))) {
         return res.status(423).json({ error: `Period ${claimPeriod(calculated)} is closed. Reopen the period before creating claims.` });
@@ -1077,13 +1082,7 @@ async function startServer() {
       const merged = { ...existing, ...rawClaimUpdates };
       
       const settings = await sheetsService.getSettings();
-      const pPercent = Number(settings.find(s => s.setting_key === "PROVIDER_SHARE_PERCENT")?.setting_value || 70);
-      const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
-
-      const calculated = calculateClaimFinancials(merged, {
-        providerSharePercent: pPercent,
-        iteraSharePercent: iPercent
-      });
+      const calculated = calculateClaimFinancials(merged, buildReconciliationConfig(settings));
 
       if (!canUserAccessProvider(req.appUser || {}, calculated.provider_id, calculated.provider_npi)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
@@ -1167,8 +1166,7 @@ async function startServer() {
 
       // To handle bulk financial updates properly, we fetch, merge, recompute financials, then save each
       const settings = await sheetsService.getSettings();
-      const pPercent = Number(settings.find(s => s.setting_key === "PROVIDER_SHARE_PERCENT")?.setting_value || 70);
-      const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
+      const reconciliationConfig = buildReconciliationConfig(settings);
 
       let successCount = 0;
       for (const id of claimIds) {
@@ -1181,10 +1179,7 @@ async function startServer() {
             return res.status(423).json({ error: `Period ${claimPeriod(claim)} is closed. Reopen the period before updating claim ${id}.` });
           }
           const merged = { ...claim, ...updates };
-          const recomputed = calculateClaimFinancials(merged, {
-            providerSharePercent: pPercent,
-            iteraSharePercent: iPercent
-          });
+          const recomputed = calculateClaimFinancials(merged, reconciliationConfig);
           if (!canUserAccessProvider(req.appUser || {}, recomputed.provider_id, recomputed.provider_npi)) {
             return res.status(403).json({ error: `This update would move claim ${id} outside the user's provider access.` });
           }
@@ -1268,13 +1263,7 @@ async function startServer() {
         
         // Recalculate everything else
         const settings = await sheetsService.getSettings();
-        const pPercent = Number(settings.find(s => s.setting_key === "PROVIDER_SHARE_PERCENT")?.setting_value || 70);
-        const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
-
-        const calculated = calculateClaimFinancials(claim, {
-          providerSharePercent: pPercent,
-          iteraSharePercent: iPercent
-        });
+        const calculated = calculateClaimFinancials(claim, buildReconciliationConfig(settings));
 
         // Save
         await sheetsService.updateClaim(claim.claim_id, calculated, operatorEmail);
@@ -1546,7 +1535,27 @@ async function startServer() {
     try {
       const { key, value } = req.body;
       const updated = await sheetsService.updateSettings(key, value);
-      res.json(updated);
+      let recalculatedClaims = 0;
+      if ([
+        "PROVIDER_SHARE_PERCENT",
+        "ITERA_SHARE_PERCENT",
+        "CONTRACT_PAYMENT_MODEL",
+        "ITERA_FEE_WHEN_PROVIDER_BILLS",
+        "PHYSICIAN_FEE_WHEN_ITERA_BILLS"
+      ].includes(textValue(key))) {
+        const settings = await sheetsService.getSettings();
+        const config = buildReconciliationConfig(settings);
+        const claims = await sheetsService.getClaims(true);
+        const recalculated = claims
+          .filter(claim => !claim.deleted_flag && !sheetsService.isPeriodClosed(claimPeriod(claim)))
+          .map(claim => calculateClaimFinancials(claim, config));
+        recalculatedClaims = await sheetsService.replaceClaimsFinancials(
+          recalculated,
+          getOperatorEmail(req as AppRequest),
+          `Contract setting ${key} changed. Open-period claim financials recalculated.`
+        );
+      }
+      res.json({ ...updated, recalculatedClaims });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to update setting" });
     }
@@ -1617,8 +1626,7 @@ async function startServer() {
       }
 
       const settings = await sheetsService.getSettings();
-      const pPercent = Number(settings.find(s => s.setting_key === "PROVIDER_SHARE_PERCENT")?.setting_value || 70);
-      const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
+      const reconciliationConfig = buildReconciliationConfig(settings);
       const providers = await sheetsService.getProviders();
       const payers = await sheetsService.getPayers();
       const feeSchedules = await sheetsService.getFeeSchedules();
@@ -1775,10 +1783,7 @@ async function startServer() {
             service_lines_json: JSON.stringify(serviceLines)
           };
 
-          const calculated = calculateClaimFinancials(claimObj, {
-            providerSharePercent: pPercent,
-            iteraSharePercent: iPercent
-          });
+          const calculated = calculateClaimFinancials(claimObj, reconciliationConfig);
           const validationErrors = validateClaim(calculated);
           validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
           validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
@@ -1845,10 +1850,7 @@ async function startServer() {
         };
 
         // Recalculate
-        const calculated = calculateClaimFinancials(claimObj, {
-          providerSharePercent: pPercent,
-          iteraSharePercent: iPercent
-        });
+        const calculated = calculateClaimFinancials(claimObj, reconciliationConfig);
 
         // Validate
         const validationErrors = validateClaim(calculated);
@@ -1921,15 +1923,14 @@ async function startServer() {
     try {
       const operatorEmail = getOperatorEmail(req);
       const { rows, fileBase64, apply, fileName } = req.body;
-      const importRows = fileBase64 ? parseXlsxRows(fileBase64) : rows;
+      const importRows = fileBase64 ? parseUploadedTableRows(fileBase64, textValue(fileName)) : rows;
 
       if (!importRows || !Array.isArray(importRows)) {
         return res.status(400).json({ error: "Rows or XLSX file content are required for payment reconciliation import." });
       }
 
       const settings = await sheetsService.getSettings();
-      const pPercent = Number(settings.find(s => s.setting_key === "PROVIDER_SHARE_PERCENT")?.setting_value || 70);
-      const iPercent = Number(settings.find(s => s.setting_key === "ITERA_SHARE_PERCENT")?.setting_value || 30);
+      const reconciliationConfig = buildReconciliationConfig(settings);
       const claims = (await sheetsService.getClaims()).filter(claim => !claim.deleted_flag);
       const payments = await sheetsService.getPayments();
       const payers = await sheetsService.getPayers();
@@ -2193,10 +2194,7 @@ async function startServer() {
             payment_date: latestPaymentDate || new Date().toISOString().slice(0, 10),
             check_or_eft_number: latestCheckNo,
             last_note: `Payment Import applied ${claimRows.length} payment row(s). ${claim.last_note || ""}`.trim()
-          }, {
-            providerSharePercent: pPercent,
-            iteraSharePercent: iPercent
-          });
+          }, reconciliationConfig);
 
           const validationErrors = validateClaim(updated);
           if (validationErrors.length > 0) {

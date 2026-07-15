@@ -109,6 +109,64 @@ export function runReconciliationEngineTests() {
     }
   });
 
+  test("Fee model: Provider bills and owes ITERA fixed fee", () => {
+    const claim = calculateClaimFinancials({
+      billed_by: "Provider",
+      payment_received_by: "Provider",
+      billed_charge: 100,
+      insurance_adjustment: 0,
+      denied_amount: 0,
+      itera_direct_collection: 0,
+      provider_direct_collection: 100,
+      payment_to_physician: 0,
+    }, {
+      providerSharePercent: 70,
+      iteraSharePercent: 30,
+      contractPaymentModel: "FEE",
+      iteraFeeWhenProviderBills: 25,
+      physicianFeeWhenIteraBills: 40
+    });
+
+    if (claim.net_itera_revenue !== 25) {
+      throw new Error(`Net ITERA fee expected 25, got ${claim.net_itera_revenue}`);
+    }
+    if (claim.net_provider_revenue !== 75) {
+      throw new Error(`Net Provider revenue expected 75, got ${claim.net_provider_revenue}`);
+    }
+    if (claim.account_payable_to_physician !== -25) {
+      throw new Error(`Provider should owe ITERA 25, got ${claim.account_payable_to_physician}`);
+    }
+  });
+
+  test("Fee model: ITERA bills and owes physician fixed fee", () => {
+    const claim = calculateClaimFinancials({
+      billed_by: "ITERA",
+      payment_received_by: "ITERA",
+      billed_charge: 100,
+      insurance_adjustment: 0,
+      denied_amount: 0,
+      itera_direct_collection: 100,
+      provider_direct_collection: 0,
+      payment_to_physician: 0,
+    }, {
+      providerSharePercent: 70,
+      iteraSharePercent: 30,
+      contractPaymentModel: "FEE",
+      iteraFeeWhenProviderBills: 25,
+      physicianFeeWhenIteraBills: 40
+    });
+
+    if (claim.net_provider_revenue !== 40) {
+      throw new Error(`Physician fee expected 40, got ${claim.net_provider_revenue}`);
+    }
+    if (claim.net_itera_revenue !== 60) {
+      throw new Error(`Net ITERA revenue expected 60, got ${claim.net_itera_revenue}`);
+    }
+    if (claim.account_payable_to_physician !== 40) {
+      throw new Error(`ITERA should owe physician 40, got ${claim.account_payable_to_physician}`);
+    }
+  });
+
   // Test Case 4: Validation Rule
   test("Validation: Claim ID required", () => {
     const errors = validateClaim({

@@ -300,9 +300,25 @@ export class GoogleSheetsService {
           await this.overwriteTab(tab.name, tab.headers, rows);
         }
       }
+      await this.ensureDefaultSettings();
     } catch (err) {
       console.error("Error bootstrapping Google Sheet tabs:", err);
       throw err;
+    }
+  }
+
+  private async ensureDefaultSettings() {
+    const defaults = [
+      { setting_key: "CONTRACT_PAYMENT_MODEL", setting_value: "PERCENTAGE", description: "Contract payment model. PERCENTAGE uses revenue shares, FEE uses fixed fees by billing owner." },
+      { setting_key: "ITERA_FEE_WHEN_PROVIDER_BILLS", setting_value: "0", description: "Fixed fee charged by ITERA to the physician when billing is handled by the practice/provider." },
+      { setting_key: "PHYSICIAN_FEE_WHEN_ITERA_BILLS", setting_value: "0", description: "Fixed fee charged by the physician to ITERA when billing is handled by ITERA." }
+    ];
+    const existingKeys = new Set(this.settings.map(setting => setting.setting_key));
+    const missing = defaults.filter(setting => !existingKeys.has(setting.setting_key));
+    if (missing.length === 0) return;
+    this.settings = [...this.settings, ...missing];
+    if (this.isConfigured) {
+      await this.overwriteTab("Settings", SETTINGS_HEADERS, this.settings.map(s => mapObjectToRow("Settings", s)));
     }
   }
 
@@ -341,6 +357,7 @@ export class GoogleSheetsService {
         if (tab === "Notifications") this.notifications = mappedObjects as NotificationRecord[];
         if (tab === "Bank_Deposits") this.bankDeposits = mappedObjects as BankDeposit[];
         if (tab === "Monthly_Closures") this.monthlyClosures = mappedObjects as MonthlyCloseRecord[];
+        if (tab === "Settings") await this.ensureDefaultSettings();
       } catch (err) {
         console.error(`Failed to load tab ${tab} from Google Sheets:`, err);
       }
@@ -567,6 +584,44 @@ export class GoogleSheetsService {
     if (this.isConfigured && updatedCount > 0) {
       const rows = this.claims.map(c => mapObjectToRow("Claims", c));
       await this.overwriteTab("Claims", CLAIMS_HEADERS, rows);
+    }
+
+    return updatedCount;
+  }
+
+  public async replaceClaimsFinancials(updatedClaims: Claim[], operatorEmail: string, reason: string): Promise<number> {
+    const updatedById = new Map(updatedClaims.map(claim => [claim.claim_id, claim]));
+    let updatedCount = 0;
+    this.claims = this.claims.map(claim => {
+      const updated = updatedById.get(claim.claim_id);
+      if (!updated) return claim;
+      updatedCount++;
+      return {
+        ...claim,
+        ...updated,
+        created_at: claim.created_at,
+        updated_at: new Date().toISOString(),
+        updated_by: operatorEmail
+      };
+    });
+
+    if (updatedCount > 0) {
+      const auditRecord: AuditLog = {
+        audit_id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        claim_id: "SYSTEM",
+        action_type: "Bulk Update",
+        field_name: "financial_recalculation",
+        previous_value: "Previous contract model",
+        new_value: `${updatedCount} claim(s) recalculated`,
+        reason,
+        changed_by: operatorEmail,
+        changed_at: new Date().toISOString()
+      };
+      this.auditLogs.unshift(auditRecord);
+      if (this.isConfigured) {
+        await this.overwriteTab("Claims", CLAIMS_HEADERS, this.claims.map(c => mapObjectToRow("Claims", c)));
+        await this.appendRow("Audit_Log", mapObjectToRow("Audit_Log", auditRecord));
+      }
     }
 
     return updatedCount;

@@ -13,11 +13,17 @@ import { validateServiceLinesJson } from "./serviceLineValidation";
 export interface ReconciliationConfig {
   providerSharePercent: number; // e.g. 70 for 70%
   iteraSharePercent: number;    // e.g. 30 for 30%
+  contractPaymentModel?: "PERCENTAGE" | "FEE";
+  iteraFeeWhenProviderBills?: number;
+  physicianFeeWhenIteraBills?: number;
 }
 
 export const DEFAULT_CONFIG: ReconciliationConfig = {
   providerSharePercent: 70,
   iteraSharePercent: 30,
+  contractPaymentModel: "PERCENTAGE",
+  iteraFeeWhenProviderBills: 0,
+  physicianFeeWhenIteraBills: 0,
 };
 
 /**
@@ -62,13 +68,25 @@ export function calculateClaimFinancials(
     provider_ar = ar_balance;
   }
 
-  // 5. Provider and ITERA revenue allocations (Shares)
-  const provider_ratio = config.providerSharePercent / 100;
-  const itera_ratio = config.iteraSharePercent / 100;
-
-  // Net revenues are based on actual collections
-  const net_provider_revenue = total_collections * provider_ratio;
-  const net_itera_revenue = total_collections * itera_ratio;
+  // 5. Provider and ITERA revenue allocations.
+  // Percentage mode preserves the legacy share model.
+  // Fee mode uses a fixed fee by billing owner, capped by actual collections.
+  let net_provider_revenue = 0;
+  let net_itera_revenue = 0;
+  if (config.contractPaymentModel === "FEE") {
+    if (claim.billed_by === "Provider") {
+      net_itera_revenue = Math.min(Math.max(0, Number(config.iteraFeeWhenProviderBills || 0)), total_collections);
+      net_provider_revenue = Math.max(0, total_collections - net_itera_revenue);
+    } else {
+      net_provider_revenue = Math.min(Math.max(0, Number(config.physicianFeeWhenIteraBills || 0)), total_collections);
+      net_itera_revenue = Math.max(0, total_collections - net_provider_revenue);
+    }
+  } else {
+    const provider_ratio = config.providerSharePercent / 100;
+    const itera_ratio = config.iteraSharePercent / 100;
+    net_provider_revenue = total_collections * provider_ratio;
+    net_itera_revenue = total_collections * itera_ratio;
+  }
 
   // 6. Account Payable (A/P) to Physician (Provider)
   // Unified formula: we owe the provider their 70% share of total collections,

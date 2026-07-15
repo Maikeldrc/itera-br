@@ -1098,7 +1098,14 @@ export default function App() {
       body: JSON.stringify({ key, value })
     });
     if (res.ok) {
-      notify(isEnglish ? "Contract setting updated." : "Ajuste contractual actualizado.", "success");
+      const data = await res.json().catch(() => ({}));
+      const recalculated = Number(data.recalculatedClaims || 0);
+      notify(
+        recalculated > 0
+          ? (isEnglish ? `Contract setting updated. ${recalculated} open claim(s) recalculated.` : `Ajuste contractual actualizado. ${recalculated} claim(s) abiertos recalculados.`)
+          : (isEnglish ? "Contract setting updated." : "Ajuste contractual actualizado."),
+        "success"
+      );
       await fetchAllData();
     } else {
       notify(isEnglish ? "Unable to update setting." : "Error al actualizar ajuste.", "error");
@@ -4004,7 +4011,26 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <div className="space-y-6 max-w-xl text-xs pt-2">
+                  <div className="space-y-6 max-w-3xl text-xs pt-2">
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                      <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">
+                        {isEnglish ? "Contract payment model" : "Modelo de pago contractual"}
+                      </label>
+                      <select
+                        defaultValue={settings.find(s => s.setting_key === "CONTRACT_PAYMENT_MODEL")?.setting_value || "PERCENTAGE"}
+                        onChange={(e) => handleUpdateSetting("CONTRACT_PAYMENT_MODEL", e.target.value)}
+                        className="p-2.5 border border-slate-200 bg-white rounded-lg text-slate-700 font-semibold w-full focus:outline-none focus:ring-1 focus:ring-primary-blue"
+                      >
+                        <option value="PERCENTAGE">{isEnglish ? "Percentage Share Model" : "Modelo por porcentaje"}</option>
+                        <option value="FEE">{isEnglish ? "Fixed Fee Model" : "Modelo por fee fijo"}</option>
+                      </select>
+                      <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+                        {isEnglish
+                          ? "Choose whether revenue is split by percentage or by fixed fees depending on who performs the billing."
+                          : "Escoge si la distribución se calcula por porcentaje o por fees fijos según quién realiza el billing."}
+                      </p>
+                    </div>
+
                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">{isEnglish ? "Physician share percentage (%)" : "PORCENTAJE PARA EL MÉDICO (%)"}</label>
@@ -4037,6 +4063,46 @@ export default function App() {
                         </div>
                         <p className="text-[10px] text-slate-400 mt-1 leading-normal">
                           {isEnglish ? "Platform share retained by ITERA HEALTH. Default is 30%." : "Cobro de plataforma retenido por ITERA HEALTH. Por defecto es 30%."}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">
+                          {isEnglish ? "ITERA fee when practice bills ($)" : "Fee de ITERA cuando factura la práctica ($)"}
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          defaultValue={settings.find(s => s.setting_key === "ITERA_FEE_WHEN_PROVIDER_BILLS")?.setting_value || 0}
+                          onBlur={(e) => handleUpdateSetting("ITERA_FEE_WHEN_PROVIDER_BILLS", e.target.value)}
+                          className="p-2 border border-slate-200 bg-white rounded font-mono font-bold w-full"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+                          {isEnglish
+                            ? "Fixed amount ITERA earns from the physician when billing and collection are handled by the practice. The amount is capped by actual collections."
+                            : "Monto fijo que ITERA cobra al médico cuando el billing/cobro se hace en la práctica. Se limita a lo efectivamente cobrado."}
+                        </p>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-600 mb-1.5 font-bold uppercase tracking-wider text-[10px]">
+                          {isEnglish ? "Physician fee when ITERA bills ($)" : "Fee del médico cuando factura ITERA ($)"}
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          defaultValue={settings.find(s => s.setting_key === "PHYSICIAN_FEE_WHEN_ITERA_BILLS")?.setting_value || 0}
+                          onBlur={(e) => handleUpdateSetting("PHYSICIAN_FEE_WHEN_ITERA_BILLS", e.target.value)}
+                          className="p-2 border border-slate-200 bg-white rounded font-mono font-bold w-full"
+                        />
+                        <p className="text-[10px] text-slate-400 mt-1 leading-normal">
+                          {isEnglish
+                            ? "Fixed amount owed to the physician when ITERA handles billing and collection. The amount is capped by actual collections."
+                            : "Monto fijo que se debe al médico cuando ITERA realiza el billing/cobro. Se limita a lo efectivamente cobrado."}
                         </p>
                       </div>
                     </div>

@@ -33,6 +33,9 @@ export const SEED_USERS: User[] = [
 export const SEED_SETTINGS: Setting[] = [
   { setting_key: "PROVIDER_SHARE_PERCENT", setting_value: "70", description: "Default percentage share paid to the provider (physician)." },
   { setting_key: "ITERA_SHARE_PERCENT", setting_value: "30", description: "Default percentage share kept by ITERA Health for billing and platform management." },
+  { setting_key: "CONTRACT_PAYMENT_MODEL", setting_value: "PERCENTAGE", description: "Contract payment model. PERCENTAGE uses revenue shares, FEE uses fixed fees by billing owner." },
+  { setting_key: "ITERA_FEE_WHEN_PROVIDER_BILLS", setting_value: "0", description: "Fixed fee charged by ITERA to the physician when billing is handled by the practice/provider." },
+  { setting_key: "PHYSICIAN_FEE_WHEN_ITERA_BILLS", setting_value: "0", description: "Fixed fee charged by the physician to ITERA when billing is handled by ITERA." },
   { setting_key: "PAYMENT_BASIS", setting_value: "COLLECTIONS", description: "Reconciliation basis. COLLECTIONS pays on received cash, BILLED pays on net collectible charges." },
   { setting_key: "GOOGLE_SHEET_INTEGRATION_ACTIVE", setting_value: "false", description: "Whether Google Sheets real-time synchronization is enabled." },
 ];
