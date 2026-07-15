@@ -7,6 +7,7 @@ import React, { useState } from "react";
 import { Filter, RotateCcw, Search, ChevronDown, ChevronUp } from "lucide-react";
 import { ClaimStatus, ClaimClassification, Provider, Payer } from "../types";
 import { useLanguage } from "./LanguageProvider";
+import { PayerCombobox } from "./PayerCombobox";
 
 export interface FilterState {
   search: string;
@@ -164,18 +165,14 @@ export function ClaimFilters({
           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
             {isEnglish ? "Insurance (Payer)" : "Aseguradora (Payer)"}
           </label>
-          <select
+          <PayerCombobox
+            payers={payers}
             value={filters.payerId}
-            onChange={(e) => onChange({ payerId: e.target.value })}
-            className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-          >
-            <option value="">{isEnglish ? "All Insurances" : "Todas las Aseguradoras"}</option>
-            {payers.map((p) => (
-              <option key={p.payer_id} value={p.payer_id}>
-                {p.payer_name}
-              </option>
-            ))}
-          </select>
+            onChange={(payerId) => onChange({ payerId })}
+            emptyLabel={isEnglish ? "All Insurances" : "Todas las Aseguradoras"}
+            placeholder={isEnglish ? "Type insurance..." : "Escriba insurance..."}
+            inputClassName="py-1.5 text-xs"
+          />
         </div>
 
         {/* 6. Month of Service (Moved to row 1) */}

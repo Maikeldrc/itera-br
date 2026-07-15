@@ -38,6 +38,7 @@ import { StatusBadge } from "./StatusBadge";
 import { ClassificationBadge } from "./ClassificationBadge";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
+import { PayerCombobox } from "./PayerCombobox";
 import { PENDING_ERA_ACTION, validateServiceLineDetails } from "../serviceLineValidation";
 import { validateCptRepeatLimitsByLine } from "../cptRepeatLimits";
 
@@ -2018,14 +2019,15 @@ export function ClaimDetailPanel({
                           {isEnglish ? "Cancel" : "Cancelar"}
                         </button>
                       </div>
-                      <select
+                      <PayerCombobox
+                        payers={payers}
                         value={newPayerIdState}
-                        onChange={(e) => setNewPayerIdState(e.target.value)}
-                        className="w-full p-1.5 border border-slate-200 bg-white rounded font-medium text-slate-700 text-xs cursor-pointer"
-                      >
-                        <option value="">{isEnglish ? "-- Select New --" : "-- Seleccionar Nuevo --"}</option>
-                        {payers.map(p => <option key={p.payer_id} value={p.payer_id}>{p.payer_name}</option>)}
-                      </select>
+                        onChange={setNewPayerIdState}
+                        allowEmpty
+                        emptyLabel={isEnglish ? "-- Select New --" : "-- Seleccionar Nuevo --"}
+                        placeholder={isEnglish ? "Type insurance name..." : "Escriba el nombre del insurance..."}
+                        inputClassName="py-1.5 text-xs"
+                      />
                       <textarea
                         placeholder={isEnglish ? "Coverage change reason..." : "Motivo del cambio de cobertura..."}
                         value={insuranceChangeReason}
@@ -3072,16 +3074,15 @@ export function ClaimDetailPanel({
                 <div className="grid gap-3 sm:grid-cols-[1fr_5.5rem]">
                   <div>
                     <label className="itera-label mb-1 block">{isEnglish ? "Secondary payer" : "Payer secundario"}</label>
-                    <select
+                    <PayerCombobox
+                      payers={payers}
                       value={serviceLines[secondaryEditorIndex].secondaryPayerId}
-                      onChange={(e) => handleUpdateServiceLine(secondaryEditorIndex, "secondaryPayerId", e.target.value)}
-                      className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                    >
-                      <option value="">{isEnglish ? "Select payer..." : "Seleccionar payer..."}</option>
-                      {payers.filter(payer => payer.payer_id !== claim.payer_id).map(payer => (
-                        <option key={payer.payer_id} value={payer.payer_id}>{payer.payer_name}</option>
-                      ))}
-                    </select>
+                      onChange={(payerId) => handleUpdateServiceLine(secondaryEditorIndex, "secondaryPayerId", payerId)}
+                      excludePayerId={claim.payer_id}
+                      emptyLabel={isEnglish ? "Select payer..." : "Seleccionar payer..."}
+                      placeholder={isEnglish ? "Type secondary payer..." : "Escriba payer secundario..."}
+                      inputClassName="py-2 text-xs"
+                    />
                   </div>
 
                   <div>

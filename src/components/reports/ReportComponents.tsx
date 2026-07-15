@@ -1,6 +1,7 @@
 import React from "react";
 import { Download, RotateCcw, Save, Search } from "lucide-react";
 import { ClaimStatus, Payer, Provider } from "../../types";
+import { PayerCombobox } from "../PayerCombobox";
 import {
   AgingBucket,
   ReportFiltersState,
@@ -212,10 +213,14 @@ export function ReportFilters({
           <option value="">All statuses</option>
           {Object.values(ClaimStatus).map(item => <option key={item} value={item}>{item}</option>)}
         </select>
-        <select value={filters.payerId} onChange={e => update("payerId", e.target.value)} className={field}>
-          <option value="">All payers</option>
-          {payers.map(item => <option key={item.payer_id} value={item.payer_id}>{item.payer_name}</option>)}
-        </select>
+        <PayerCombobox
+          payers={payers}
+          value={filters.payerId}
+          onChange={payerId => update("payerId", payerId)}
+          emptyLabel="All payers"
+          placeholder="Type payer..."
+          inputClassName="py-1.5 text-[10px]"
+        />
         <label>
           <span className={labelClass}>Submission From</span>
           <input type="date" value={filters.submissionStartDate} onChange={e => update("submissionStartDate", e.target.value)} className={labeledField} title="Submission date from" aria-label="Submission date from" />
