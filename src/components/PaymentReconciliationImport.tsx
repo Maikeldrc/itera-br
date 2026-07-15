@@ -191,6 +191,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
   const [mappingExpanded, setMappingExpanded] = useState(true);
   const [templateName, setTemplateName] = useState("");
   const [systemName, setSystemName] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [isSchemaLoading, setIsSchemaLoading] = useState(false);
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -206,6 +207,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
     setMappingExpanded(true);
     setTemplateName("");
     setSystemName("");
+    setSelectedTemplateId("");
     setResult(null);
     setProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -218,11 +220,13 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
     missingPayment: !(schema.paymentFields || []).some(field => mapping[field]),
     valid: (schema.requiredFields || []).every(field => Boolean(mapping[field])) && (schema.paymentFields || []).some(field => Boolean(mapping[field]))
   } : { missingRequired: [], missingPayment: true, valid: false };
+  const selectedTemplate = schema?.templates?.find(template => template.templateId === selectedTemplateId) || null;
 
   const analyzeSchema = async (nextPayload: ImportPayload) => {
     setIsSchemaLoading(true);
     setSchema(null);
     setMapping({});
+    setSelectedTemplateId("");
     try {
       const response = await apiFetch("/api/payment-reconciliation-import/analyze-schema", {
         method: "POST",
@@ -236,6 +240,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       const exactTemplate = data.templates?.find((template: PaymentImportSchema["templates"][number]) => template.templateId === data.selectedTemplateId);
       setTemplateName(exactTemplate?.templateName || "");
       setSystemName(exactTemplate?.systemName || "");
+      setSelectedTemplateId(exactTemplate?.templateId || "");
       setMappingExpanded(!data.requirements?.valid);
       if (!data.requirements?.valid) {
         notify(
@@ -257,6 +262,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
     setResult(null);
     setSchema(null);
     setMapping({});
+    setSelectedTemplateId("");
     const reader = new FileReader();
     const lowerName = file.name.toLowerCase();
     const isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
@@ -290,6 +296,25 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not save mapping template.");
+      const savedTemplate = data.template ? {
+        templateId: data.template.template_id,
+        templateName: data.template.template_name,
+        providerName: data.template.provider_name,
+        systemName: data.template.system_name,
+        headersSignature: data.template.headers_signature,
+        mapping,
+        exactHeaderMatch: data.template.headers_signature === schema.headersSignature
+      } : null;
+      if (savedTemplate) {
+        setSchema(current => current ? {
+          ...current,
+          templates: [savedTemplate, ...(current.templates || []).filter(item => item.templateId !== savedTemplate.templateId)],
+          selectedTemplateId: savedTemplate.templateId
+        } : current);
+        setSelectedTemplateId(savedTemplate.templateId);
+        setTemplateName(savedTemplate.templateName);
+        setSystemName(savedTemplate.systemName);
+      }
       notify(isEnglish ? "Payment import mapping template saved." : "Plantilla de mapeo guardada.", "success");
     } catch (err: any) {
       notify(`${isEnglish ? "Template save error" : "Error guardando plantilla"}: ${err.message}`, "error");
@@ -593,6 +618,30 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
               </div>
             )}
 
+            {schema && (
+              <div className={`border-b px-4 py-3 text-xs ${selectedTemplate ? "border-emerald-100 bg-emerald-50 text-emerald-800" : "border-slate-100 bg-slate-50 text-slate-600"}`}>
+                {selectedTemplate ? (
+                  <span>
+                    <CheckCircle2 className="mr-2 inline h-4 w-4 align-text-bottom" />
+                    {isEnglish ? "Using saved template: " : "Usando plantilla guardada: "}
+                    <strong>{selectedTemplate.templateName}</strong>
+                    {selectedTemplate.systemName ? ` (${selectedTemplate.systemName})` : ""}
+                    {selectedTemplate.exactHeaderMatch ? (isEnglish ? " - exact column match." : " - match exacto de columnas.") : ""}
+                  </span>
+                ) : (
+                  <span>
+                    <FileSpreadsheet className="mr-2 inline h-4 w-4 align-text-bottom" />
+                    {isEnglish
+                      ? "No saved template matched these headers. The auto-detected mapping is being used until you save or select a template."
+                      : "Ninguna plantilla guardada coincide con estos encabezados. Se usará el mapeo auto-detectado hasta que guarde o seleccione una plantilla."}
+                  </span>
+                )}
+                <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {isEnglish ? "Stored in Google Sheets: Import_Mapping_Templates" : "Guardado en Google Sheets: Import_Mapping_Templates"}
+                </span>
+              </div>
+            )}
+
             {schema && mappingExpanded && (
               <div className="space-y-4 p-4">
                 {schema.templates?.length > 0 && (
@@ -600,13 +649,17 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
                     <label className="text-[10px] font-bold uppercase tracking-wide text-dark-blue">{isEnglish ? "Saved templates" : "Plantillas guardadas"}</label>
                     <select
                       className="mt-2 w-full rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                      value=""
+                      value={selectedTemplateId}
                       onChange={event => {
                         const template = schema.templates.find(item => item.templateId === event.target.value);
-                        if (!template) return;
+                        if (!template) {
+                          setSelectedTemplateId("");
+                          return;
+                        }
                         setMapping(template.mapping || {});
                         setTemplateName(template.templateName || "");
                         setSystemName(template.systemName || "");
+                        setSelectedTemplateId(template.templateId);
                       }}
                     >
                       <option value="">{isEnglish ? "Select a template..." : "Seleccione una plantilla..."}</option>
@@ -637,7 +690,10 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
                             <select
                               className={`mt-1 w-full rounded-lg border px-3 py-2 text-xs font-semibold text-slate-700 ${required && !mapping[field] ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}
                               value={mapping[field] || ""}
-                              onChange={event => setMapping(current => ({ ...current, [field]: event.target.value }))}
+                              onChange={event => {
+                                setSelectedTemplateId("");
+                                setMapping(current => ({ ...current, [field]: event.target.value }));
+                              }}
                             >
                               <option value="">{isEnglish ? "Not mapped" : "Sin mapear"}</option>
                               {schema.headers.map(header => (
