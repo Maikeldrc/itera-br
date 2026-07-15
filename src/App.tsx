@@ -84,6 +84,28 @@ type NewClaimServiceLine = {
   cpt: string;
 };
 
+type BackupRecord = {
+  backup_id: string;
+  backup_file_id: string;
+  backup_file_name: string;
+  backup_drive_url: string;
+  created_by: string;
+  created_at: string;
+  source_spreadsheet_id: string;
+  status: string;
+  notes: string;
+};
+
+type BackupConfig = {
+  enabled: boolean;
+  frequencyHours: number;
+  backupDriveFolderId: string;
+  lastBackupAt: string;
+  nextBackupAt: string;
+  googleDriveConfigured: boolean;
+  sourceSpreadsheetId: string;
+};
+
 const DIGITAL_CARE_SERVICE_TYPES = ["RPM", "CCM", "APCM", "TCM", "BHI"];
 
 const createNewClaimServiceLine = (overrides: Partial<NewClaimServiceLine> = {}): NewClaimServiceLine => ({
@@ -256,7 +278,16 @@ export default function App() {
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
 
   // Fee Schedule management UI states
-  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "data-cleanup">("language");
+  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "backups" | "data-cleanup">("language");
+  const [backupConfig, setBackupConfig] = useState<BackupConfig | null>(null);
+  const [backups, setBackups] = useState<BackupRecord[]>([]);
+  const [backupFrequencyHours, setBackupFrequencyHours] = useState(24);
+  const [backupEnabled, setBackupEnabled] = useState(true);
+  const [backupFolderId, setBackupFolderId] = useState("");
+  const [isLoadingBackups, setIsLoadingBackups] = useState(false);
+  const [isSavingBackupSettings, setIsSavingBackupSettings] = useState(false);
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [restoringBackupId, setRestoringBackupId] = useState("");
   const [editingFs, setEditingFs] = useState<FeeSchedule | null>(null);
   const [isFsModalOpen, setIsFsModalOpen] = useState(false);
   const [fsSearchTerm, setFsSearchTerm] = useState("");
@@ -1059,6 +1090,108 @@ export default function App() {
       notify(isEnglish ? "Unable to update setting." : "Error al actualizar ajuste.", "error");
     }
   };
+
+  const loadBackups = async () => {
+    if (currentUser.role !== UserRole.Admin) return;
+    setIsLoadingBackups(true);
+    try {
+      const res = await apiFetch("/api/admin/backups");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load backups.");
+      setBackupConfig(data.config);
+      setBackups(Array.isArray(data.backups) ? data.backups : []);
+      setBackupEnabled(data.config?.enabled !== false);
+      setBackupFrequencyHours(Number(data.config?.frequencyHours || 24));
+      setBackupFolderId(String(data.config?.backupDriveFolderId || ""));
+      if (data.scheduledCreated) {
+        notify(isEnglish ? "Scheduled backup created automatically." : "Salva programada creada automáticamente.", "success");
+      }
+    } catch (err: any) {
+      notify(`${isEnglish ? "Unable to load backups" : "No se pudieron cargar las salvas"}: ${err.message}`, "error");
+    } finally {
+      setIsLoadingBackups(false);
+    }
+  };
+
+  const handleSaveBackupSettings = async () => {
+    setIsSavingBackupSettings(true);
+    try {
+      const res = await apiFetch("/api/admin/backups/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          enabled: backupEnabled,
+          frequencyHours: backupFrequencyHours,
+          backupDriveFolderId: backupFolderId
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save backup settings.");
+      setBackupConfig(data.config);
+      notify(isEnglish ? "Backup schedule updated." : "Programación de salvas actualizada.", "success");
+      await loadBackups();
+    } catch (err: any) {
+      notify(`${isEnglish ? "Backup settings error" : "Error en configuración de salvas"}: ${err.message}`, "error");
+    } finally {
+      setIsSavingBackupSettings(false);
+    }
+  };
+
+  const handleCreateBackupNow = async () => {
+    setIsCreatingBackup(true);
+    try {
+      const res = await apiFetch("/api/admin/backups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: "Manual backup from System Settings." })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create backup.");
+      notify(isEnglish ? "Backup created in Google Drive." : "Salva creada en Google Drive.", "success");
+      await loadBackups();
+    } catch (err: any) {
+      notify(`${isEnglish ? "Backup error" : "Error creando salva"}: ${err.message}`, "error");
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  };
+
+  const handleRestoreBackup = async (backup: BackupRecord) => {
+    const firstConfirm = window.confirm(
+      isEnglish
+        ? `Restore backup "${backup.backup_file_name}"? This will replace current Claims, Payments, Notes, Audit Log, users, payers, providers, settings and fee schedules with the selected backup. A safety backup will be created first.`
+        : `¿Restaurar la salva "${backup.backup_file_name}"? Esto reemplazará Claims, Payments, Notes, Audit Log, usuarios, payers, providers, settings y fee schedules con la salva seleccionada. Primero se creará una salva de seguridad.`
+    );
+    if (!firstConfirm) return;
+    const typed = window.prompt(isEnglish ? "Type RESTORE to confirm." : "Escriba RESTORE para confirmar.");
+    if (typed !== "RESTORE") {
+      notify(isEnglish ? "Restore cancelled." : "Restauración cancelada.", "warning");
+      return;
+    }
+    setRestoringBackupId(backup.backup_file_id);
+    try {
+      const res = await apiFetch(`/api/admin/backups/${encodeURIComponent(backup.backup_file_id)}/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: "RESTORE" })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to restore backup.");
+      notify(isEnglish ? "Backup restored. Data refreshed." : "Salva restaurada. Datos actualizados.", "success");
+      await fetchAllData({ showInitialLoading: false });
+      await loadBackups();
+    } catch (err: any) {
+      notify(`${isEnglish ? "Restore error" : "Error restaurando salva"}: ${err.message}`, "error");
+    } finally {
+      setRestoringBackupId("");
+    }
+  };
+
+  useEffect(() => {
+    if (currentView === "settings" && settingsTab === "backups" && currentUser.role === UserRole.Admin) {
+      loadBackups();
+    }
+  }, [currentView, settingsTab, currentUser.role]);
 
   const handleOpenAddFeeSchedule = () => {
     setEditingFs(null);
@@ -2340,6 +2473,19 @@ export default function App() {
                 </button>
                 {currentUser.role === UserRole.Admin && (
                   <button
+                    onClick={() => setSettingsTab("backups")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+                      settingsTab === "backups"
+                        ? "border-primary-blue text-primary-blue bg-blue-50/40 rounded-t-lg"
+                        : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg"
+                    }`}
+                  >
+                    <History className="w-4 h-4" />
+                    <span>{isEnglish ? "Backups" : "Salvas"}</span>
+                  </button>
+                )}
+                {currentUser.role === UserRole.Admin && (
+                  <button
                     onClick={() => setSettingsTab("data-cleanup")}
                     className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
                       settingsTab === "data-cleanup"
@@ -2404,6 +2550,186 @@ export default function App() {
                     <p className="mt-4 text-[10px] leading-relaxed text-slate-400">
                       {isEnglish ? "The preference is saved in this browser and applied automatically on future visits." : "La preferencia se guarda en este navegador y se aplica automáticamente en futuras visitas."}
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === "backups" && currentUser.role === UserRole.Admin && (
+                <div className="space-y-5">
+                  <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs">
+                    <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="max-w-3xl">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2 bg-blue-50 rounded-lg text-primary-blue">
+                            <History className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-slate-900 text-sm">{isEnglish ? "Google Drive Backups" : "Salvas en Google Drive"}</h4>
+                            <p className="text-[10px] text-slate-500 mt-0.5">
+                              {isEnglish
+                                ? "Create full spreadsheet backups, schedule automatic copies and restore from a selected backup."
+                                : "Crea salvas completas del spreadsheet, programa copias automáticas y restaura desde una salva seleccionada."}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-5 grid gap-3 md:grid-cols-3">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Drive status" : "Estado Drive"}</p>
+                            <p className={`mt-1 text-xs font-bold ${backupConfig?.googleDriveConfigured ? "text-emerald-700" : "text-rose-700"}`}>
+                              {backupConfig?.googleDriveConfigured ? (isEnglish ? "Configured" : "Configurado") : (isEnglish ? "Not configured" : "No configurado")}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Last backup" : "Última salva"}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-800">
+                              {backupConfig?.lastBackupAt ? new Date(backupConfig.lastBackupAt).toLocaleString() : "-"}
+                            </p>
+                          </div>
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Next scheduled" : "Próxima programada"}</p>
+                            <p className="mt-1 text-xs font-bold text-slate-800">
+                              {backupConfig?.enabled && backupConfig?.nextBackupAt ? new Date(backupConfig.nextBackupAt).toLocaleString() : (isEnglish ? "Disabled" : "Desactivada")}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col gap-2 sm:flex-row lg:flex-col">
+                        <button
+                          type="button"
+                          onClick={() => void loadBackups()}
+                          disabled={isLoadingBackups}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                        >
+                          <RefreshCw className={`w-4 h-4 ${isLoadingBackups ? "animate-spin" : ""}`} />
+                          {isEnglish ? "Refresh" : "Actualizar"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleCreateBackupNow}
+                          disabled={isCreatingBackup || !backupConfig?.googleDriveConfigured}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-blue px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-dark-blue disabled:opacity-60"
+                        >
+                          <FileDown className="w-4 h-4" />
+                          {isCreatingBackup ? (isEnglish ? "Creating..." : "Creando...") : (isEnglish ? "Backup now" : "Crear salva ahora")}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 grid gap-4 lg:grid-cols-[160px_1fr_170px] lg:items-end">
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Enabled" : "Activa"}</span>
+                        <button
+                          type="button"
+                          onClick={() => setBackupEnabled(!backupEnabled)}
+                          className={`flex h-10 w-full items-center justify-between rounded-lg border px-3 text-xs font-bold ${backupEnabled ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}
+                        >
+                          <span>{backupEnabled ? (isEnglish ? "On" : "Sí") : (isEnglish ? "Off" : "No")}</span>
+                          <span className={`h-4 w-4 rounded-full ${backupEnabled ? "bg-emerald-500" : "bg-slate-300"}`} />
+                        </button>
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Google Drive folder ID" : "Folder ID de Google Drive"}</span>
+                        <input
+                          value={backupFolderId}
+                          onChange={event => setBackupFolderId(event.target.value)}
+                          placeholder={isEnglish ? "Leave blank to use the spreadsheet folder" : "Dejar vacío para usar el folder del spreadsheet"}
+                          className="h-10 w-full rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Every hours" : "Cada horas"}</span>
+                        <input
+                          type="number"
+                          min={1}
+                          value={backupFrequencyHours}
+                          onChange={event => setBackupFrequencyHours(Number(event.target.value || 24))}
+                          className="h-10 w-full rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleSaveBackupSettings}
+                        disabled={isSavingBackupSettings}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg bg-dark-blue px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-60"
+                      >
+                        <Calendar className="w-4 h-4" />
+                        {isSavingBackupSettings ? (isEnglish ? "Saving..." : "Guardando...") : (isEnglish ? "Save schedule" : "Guardar programación")}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Available Backups" : "Salvas disponibles"}</h4>
+                        <p className="mt-0.5 text-[10px] text-slate-500">
+                          {isEnglish ? "Restore creates a safety backup first, then replaces the current workbook data." : "Restaurar crea primero una salva de seguridad y luego reemplaza los datos actuales."}
+                        </p>
+                      </div>
+                      <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] font-bold text-slate-500">{backups.length}</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[980px] text-left text-xs">
+                        <thead className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-500">
+                          <tr>
+                            <th className="px-4 py-3">{isEnglish ? "Created" : "Creada"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Backup file" : "Archivo"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Status" : "Estado"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Notes" : "Notas"}</th>
+                            <th className="px-4 py-3 text-right">{isEnglish ? "Action" : "Acción"}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {backups.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="px-4 py-8 text-center text-xs font-semibold text-slate-400">
+                                {isLoadingBackups ? (isEnglish ? "Loading backups..." : "Cargando salvas...") : (isEnglish ? "No backups found." : "No hay salvas disponibles.")}
+                              </td>
+                            </tr>
+                          )}
+                          {backups.map(backup => (
+                            <tr key={backup.backup_file_id} className="hover:bg-slate-50">
+                              <td className="px-4 py-3 font-mono text-slate-500">{backup.created_at ? new Date(backup.created_at).toLocaleString() : "-"}</td>
+                              <td className="px-4 py-3">
+                                <p className="font-bold text-slate-800">{backup.backup_file_name}</p>
+                                <p className="mt-0.5 font-mono text-[10px] text-slate-400">{backup.backup_file_id}</p>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{backup.status || "Available"}</span>
+                              </td>
+                              <td className="max-w-sm px-4 py-3 text-slate-500">{backup.notes || "-"}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex justify-end gap-2">
+                                  {backup.backup_drive_url && (
+                                    <a
+                                      href={backup.backup_drive_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-50"
+                                    >
+                                      Drive
+                                    </a>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleRestoreBackup(backup)}
+                                    disabled={restoringBackupId === backup.backup_file_id}
+                                    className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-60"
+                                  >
+                                    {restoringBackupId === backup.backup_file_id ? (isEnglish ? "Restoring..." : "Restaurando...") : (isEnglish ? "Restore" : "Restaurar")}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}

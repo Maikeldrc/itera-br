@@ -234,6 +234,18 @@ export interface Setting {
   description: string;
 }
 
+export interface BackupRecord {
+  backup_id: string;
+  backup_file_id: string;
+  backup_file_name: string;
+  backup_drive_url: string;
+  created_by: string;
+  created_at: string;
+  source_spreadsheet_id: string;
+  status: string;
+  notes: string;
+}
+
 export interface FeeSchedule {
   id: string;
   cpt_code: string;

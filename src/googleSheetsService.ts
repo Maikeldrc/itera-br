@@ -5,7 +5,7 @@
 
 import { google } from "googleapis";
 import { Readable } from "stream";
-import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule } from "./types";
+import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule, BackupRecord } from "./types";
 import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS, SEED_PAYERS, SEED_USERS, SEED_SETTINGS, SEED_FEE_SCHEDULES, SEED_ELIGIBILITY_COVERAGE, SEED_REPORT_FEE_SCHEDULES } from "./seedData";
 import { normalizeUserAccess } from "./accessControl";
 
@@ -50,6 +50,7 @@ export class GoogleSheetsService {
   public feeSchedules: FeeSchedule[] = [];
   public eligibilityCoverage: EligibilityCoverage[] = [];
   public reportFeeSchedules: ReportFeeSchedule[] = [];
+  private scheduledBackupInFlight = false;
 
   constructor() {
     this.clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
@@ -107,6 +108,10 @@ export class GoogleSheetsService {
       usingSeedData: this.useSeedData,
       supportingDocumentsFolderConfigured: !!process.env.SUPPORTING_DOCUMENTS_FOLDER_ID
     };
+  }
+
+  private getSettingValue(key: string, fallback = "") {
+    return String(this.settings.find(setting => setting.setting_key === key)?.setting_value ?? fallback);
   }
 
   private shouldUseSeedData(): boolean {
@@ -256,7 +261,8 @@ export class GoogleSheetsService {
         { name: "Settings", headers: SETTINGS_HEADERS, seed: this.settings },
         { name: "FeeSchedules", headers: FEESCHEDULES_HEADERS, seed: this.feeSchedules },
         { name: "Fee_Schedule", headers: REPORT_FEESCHEDULE_HEADERS, seed: this.reportFeeSchedules },
-        { name: "Eligibility_Coverage", headers: ELIGIBILITY_COVERAGE_HEADERS, seed: this.eligibilityCoverage }
+        { name: "Eligibility_Coverage", headers: ELIGIBILITY_COVERAGE_HEADERS, seed: this.eligibilityCoverage },
+        { name: "Backups_Index", headers: BACKUPS_INDEX_HEADERS, seed: [] }
       ];
 
       for (const tab of requiredTabs) {
@@ -909,7 +915,17 @@ export class GoogleSheetsService {
       }
       return this.settings[index];
     }
-    throw new Error(`Setting ${key} not found.`);
+    const created: Setting = {
+      setting_key: key,
+      setting_value: value,
+      description: `Created by System Settings on ${new Date().toISOString()}.`
+    };
+    this.settings.push(created);
+    if (this.isConfigured) {
+      const rows = this.settings.map(s => mapObjectToRow("Settings", s));
+      await this.overwriteTab("Settings", SETTINGS_HEADERS, rows);
+    }
+    return created;
   }
 
   public async addAuditLog(auditRecord: AuditLog): Promise<void> {
@@ -964,6 +980,220 @@ export class GoogleSheetsService {
       webViewLink: response.data.webViewLink || "",
       webContentLink: response.data.webContentLink || ""
     };
+  }
+
+  private async ensureBackupsIndexTab(): Promise<void> {
+    if (!this.isConfigured || !this.sheets) return;
+    const workbook = await this.sheets.spreadsheets.get({
+      spreadsheetId: this.sheetId,
+      fields: "sheets.properties.title"
+    });
+    const titles = (workbook.data.sheets || []).map((sheet: any) => sheet.properties?.title).filter(Boolean);
+    if (!titles.includes("Backups_Index")) {
+      await this.sheets.spreadsheets.batchUpdate({
+        spreadsheetId: this.sheetId,
+        requestBody: {
+          requests: [{ addSheet: { properties: { title: "Backups_Index" } } }]
+        }
+      });
+    }
+    const current = await this.sheets.spreadsheets.values.get({
+      spreadsheetId: this.sheetId,
+      range: "Backups_Index!A1:I1"
+    });
+    const headerRow = current.data.values?.[0] || [];
+    if (headerRow.length === 0) {
+      await this.sheets.spreadsheets.values.update({
+        spreadsheetId: this.sheetId,
+        range: "Backups_Index!A1",
+        valueInputOption: "RAW",
+        requestBody: { values: [BACKUPS_INDEX_HEADERS] }
+      });
+    }
+  }
+
+  private async appendBackupIndex(record: BackupRecord): Promise<void> {
+    await this.ensureBackupsIndexTab();
+    await this.appendRow("Backups_Index", mapObjectToRow("Backups_Index", record));
+  }
+
+  private getBackupFolderId() {
+    return this.getSettingValue("BACKUP_DRIVE_FOLDER_ID", process.env.BACKUP_DRIVE_FOLDER_ID || "").trim();
+  }
+
+  private async getSourceSpreadsheetParentIds(): Promise<string[]> {
+    if (!this.drive || !this.sheetId) return [];
+    const response = await this.drive.files.get({
+      fileId: this.sheetId,
+      fields: "parents",
+      supportsAllDrives: true
+    });
+    return Array.isArray(response.data.parents) ? response.data.parents.slice(0, 1) : [];
+  }
+
+  public getBackupConfiguration() {
+    const enabled = this.getSettingValue("BACKUP_ENABLED", "true") !== "false";
+    const frequencyHours = Number(this.getSettingValue("BACKUP_FREQUENCY_HOURS", "24"));
+    const lastBackupAt = this.getSettingValue("LAST_BACKUP_AT", "");
+    const nextBackupAt = lastBackupAt && Number.isFinite(frequencyHours) && frequencyHours > 0
+      ? new Date(new Date(lastBackupAt).getTime() + frequencyHours * 60 * 60 * 1000).toISOString()
+      : "";
+    return {
+      enabled,
+      frequencyHours: Number.isFinite(frequencyHours) && frequencyHours > 0 ? frequencyHours : 24,
+      backupDriveFolderId: this.getBackupFolderId(),
+      lastBackupAt,
+      nextBackupAt,
+      googleDriveConfigured: Boolean(this.isConfigured && this.drive),
+      sourceSpreadsheetId: this.sheetId || ""
+    };
+  }
+
+  public async updateBackupConfiguration({
+    enabled,
+    frequencyHours,
+    backupDriveFolderId
+  }: {
+    enabled: boolean;
+    frequencyHours: number;
+    backupDriveFolderId: string;
+  }) {
+    await this.updateSettings("BACKUP_ENABLED", enabled ? "true" : "false");
+    await this.updateSettings("BACKUP_FREQUENCY_HOURS", String(Math.max(1, Math.floor(Number(frequencyHours) || 24))));
+    await this.updateSettings("BACKUP_DRIVE_FOLDER_ID", backupDriveFolderId.trim());
+    return this.getBackupConfiguration();
+  }
+
+  public async createSpreadsheetBackup(createdBy: string, notes = "Manual backup from System Settings."): Promise<BackupRecord> {
+    if (!this.isConfigured || !this.drive || !this.sheetId) {
+      throw new Error("Google Drive backup is not configured.");
+    }
+
+    const now = new Date();
+    const timestamp = now.toISOString().replace(/[:.]/g, "-");
+    const backupId = `BKP-${timestamp}`;
+    const backupName = `itera-claim-reconciliation-backup-${timestamp}`;
+    const configuredFolderId = this.getBackupFolderId();
+    const parentIds = configuredFolderId ? [configuredFolderId] : await this.getSourceSpreadsheetParentIds();
+    const response = await this.drive.files.copy({
+      fileId: this.sheetId,
+      requestBody: {
+        name: backupName,
+        parents: parentIds.length > 0 ? parentIds : undefined,
+        description: `ITERA Claim Reconciliation backup ${backupId}. Created by ${createdBy}. ${notes}`,
+        appProperties: {
+          iteraBackup: "true",
+          sourceSpreadsheetId: this.sheetId,
+          backupId
+        }
+      },
+      fields: "id,name,webViewLink,createdTime",
+      supportsAllDrives: true
+    });
+
+    const record: BackupRecord = {
+      backup_id: backupId,
+      backup_file_id: response.data.id || "",
+      backup_file_name: response.data.name || backupName,
+      backup_drive_url: response.data.webViewLink || "",
+      created_by: createdBy,
+      created_at: response.data.createdTime || now.toISOString(),
+      source_spreadsheet_id: this.sheetId,
+      status: "Created",
+      notes
+    };
+
+    await this.appendBackupIndex(record);
+    await this.updateSettings("LAST_BACKUP_AT", record.created_at);
+    return record;
+  }
+
+  public async listSpreadsheetBackups(): Promise<BackupRecord[]> {
+    if (!this.isConfigured || !this.drive || !this.sheetId) return [];
+    const folderId = this.getBackupFolderId();
+    const queryParts = [
+      "trashed = false",
+      "(appProperties has { key='iteraBackup' and value='true' } or name contains 'itera-claim-reconciliation-backup-')"
+    ];
+    if (folderId) queryParts.push(`'${folderId.replace(/'/g, "\\'")}' in parents`);
+
+    const response = await this.drive.files.list({
+      q: queryParts.join(" and "),
+      fields: "files(id,name,webViewLink,createdTime,appProperties)",
+      orderBy: "createdTime desc",
+      pageSize: 50,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true
+    });
+
+    return (response.data.files || []).map((file: any): BackupRecord => ({
+      backup_id: file.appProperties?.backupId || `BKP-${String(file.createdTime || "").replace(/[:.]/g, "-")}`,
+      backup_file_id: file.id || "",
+      backup_file_name: file.name || "",
+      backup_drive_url: file.webViewLink || "",
+      created_by: "Drive",
+      created_at: file.createdTime || "",
+      source_spreadsheet_id: file.appProperties?.sourceSpreadsheetId || this.sheetId || "",
+      status: "Available",
+      notes: "Google Drive spreadsheet backup."
+    }));
+  }
+
+  public async maybeCreateScheduledBackup(createdBy = "system@itera.health"): Promise<BackupRecord | null> {
+    const config = this.getBackupConfiguration();
+    if (!config.enabled || !config.googleDriveConfigured || this.scheduledBackupInFlight) return null;
+    const last = config.lastBackupAt ? new Date(config.lastBackupAt).getTime() : 0;
+    const dueAt = last + config.frequencyHours * 60 * 60 * 1000;
+    if (last > 0 && Date.now() < dueAt) return null;
+
+    this.scheduledBackupInFlight = true;
+    try {
+      return await this.createSpreadsheetBackup(createdBy, `Scheduled backup every ${config.frequencyHours} hour(s).`);
+    } finally {
+      this.scheduledBackupInFlight = false;
+    }
+  }
+
+  public async restoreSpreadsheetBackup(backupFileId: string, restoredBy: string): Promise<{ restoredTabs: string[]; preRestoreBackup: BackupRecord }> {
+    if (!this.isConfigured || !this.sheets || !this.sheetId) {
+      throw new Error("Google Sheets restore is not configured.");
+    }
+    if (!backupFileId.trim()) {
+      throw new Error("backupFileId is required.");
+    }
+
+    const preRestoreBackup = await this.createSpreadsheetBackup(restoredBy, `Automatic safety backup before restoring from ${backupFileId}.`);
+    const restoredTabs: string[] = [];
+
+    for (const tabName of BACKUP_RESTORE_TABS) {
+      const response = await this.sheets.spreadsheets.values.get({
+        spreadsheetId: backupFileId,
+        range: `${tabName}!A:ZZ`
+      }).catch(() => null);
+      const values = response?.data?.values || [];
+      const backupHeaders = values[0] || getHeadersForTab(tabName);
+      const dataRows = values.slice(1).filter((row: unknown[]) => hasNonEmptySheetRow(row));
+      const mappedRows = dataRows
+        .map((row: string[]) => mapRowToObject(tabName, backupHeaders, row))
+        .map((record: any) => mapObjectToRow(tabName, record));
+      await this.overwriteTabStrict(tabName, getHeadersForTab(tabName), mappedRows);
+      restoredTabs.push(tabName);
+    }
+
+    await this.syncWithGoogleSheets();
+    await this.addAuditLog({
+      audit_id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      claim_id: "SYSTEM",
+      action_type: "Update",
+      field_name: "spreadsheet_restore",
+      previous_value: this.sheetId || "",
+      new_value: backupFileId,
+      reason: `Spreadsheet restored from backup by ${restoredBy}. Pre-restore backup: ${preRestoreBackup.backup_file_id}.`,
+      changed_by: restoredBy,
+      changed_at: new Date().toISOString()
+    });
+
+    return { restoredTabs, preRestoreBackup };
   }
 
   public async clearOperationalData(): Promise<{ clearedSheets: string[]; counts: Record<string, number> }> {
@@ -1242,6 +1472,25 @@ const ELIGIBILITY_COVERAGE_HEADERS = [
   "total_eligible_patients", "notes", "created_at", "updated_at"
 ];
 
+const BACKUPS_INDEX_HEADERS = [
+  "backup_id", "backup_file_id", "backup_file_name", "backup_drive_url",
+  "created_by", "created_at", "source_spreadsheet_id", "status", "notes"
+];
+
+const BACKUP_RESTORE_TABS = [
+  "Claims",
+  "Payments",
+  "Notes",
+  "Audit_Log",
+  "Providers",
+  "Payers",
+  "Users",
+  "Settings",
+  "FeeSchedules",
+  "Fee_Schedule",
+  "Eligibility_Coverage"
+];
+
 function getHeadersForTab(tabName: string): string[] {
   if (tabName === "Claims") return CLAIMS_HEADERS;
   if (tabName === "Payments") return PAYMENTS_HEADERS;
@@ -1254,6 +1503,7 @@ function getHeadersForTab(tabName: string): string[] {
   if (tabName === "FeeSchedules") return FEESCHEDULES_HEADERS;
   if (tabName === "Fee_Schedule") return REPORT_FEESCHEDULE_HEADERS;
   if (tabName === "Eligibility_Coverage") return ELIGIBILITY_COVERAGE_HEADERS;
+  if (tabName === "Backups_Index") return BACKUPS_INDEX_HEADERS;
   return [];
 }
 

@@ -484,6 +484,9 @@ async function startServer() {
         req.appUser = users.find(user => user.email.toLowerCase() === requestedEmail && user.active)
           || users.find(user => user.email === "egomez@itera.health" && user.active)
           || users.find(user => user.active);
+        if (req.appUser?.role === UserRole.Admin) {
+          void sheetsService.maybeCreateScheduledBackup("system@itera.health").catch(err => console.warn("Scheduled backup check failed:", err?.message || err));
+        }
         return next();
       }
 
@@ -499,6 +502,9 @@ async function startServer() {
       if (!user || !user.active) return res.status(403).json({ error: "User is not authorized for this application." });
       req.appUser = user;
       req.firebaseUid = decoded.uid;
+      if (req.appUser.role === UserRole.Admin) {
+        void sheetsService.maybeCreateScheduledBackup("system@itera.health").catch(err => console.warn("Scheduled backup check failed:", err?.message || err));
+      }
       next();
     } catch {
       res.status(401).json({ error: "Invalid or expired authentication token." });
@@ -580,6 +586,54 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to clear operational data." });
+    }
+  });
+
+  app.get("/api/admin/backups", requireRoles(...API_ROLE_GROUPS.adminOnly), async (_req: AppRequest, res) => {
+    try {
+      const scheduled = await sheetsService.maybeCreateScheduledBackup("system@itera.health");
+      res.json({
+        success: true,
+        config: sheetsService.getBackupConfiguration(),
+        scheduledCreated: scheduled,
+        backups: await sheetsService.listSpreadsheetBackups()
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to load backups." });
+    }
+  });
+
+  app.put("/api/admin/backups/settings", requireRoles(...API_ROLE_GROUPS.adminOnly), async (req: AppRequest, res) => {
+    try {
+      const config = await sheetsService.updateBackupConfiguration({
+        enabled: req.body?.enabled !== false,
+        frequencyHours: Number(req.body?.frequencyHours || 24),
+        backupDriveFolderId: textValue(req.body?.backupDriveFolderId)
+      });
+      res.json({ success: true, config });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to update backup settings." });
+    }
+  });
+
+  app.post("/api/admin/backups", requireRoles(...API_ROLE_GROUPS.adminOnly), async (req: AppRequest, res) => {
+    try {
+      const backup = await sheetsService.createSpreadsheetBackup(getOperatorEmail(req), textValue(req.body?.notes) || "Manual backup from System Settings.");
+      res.status(201).json({ success: true, backup, config: sheetsService.getBackupConfiguration() });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to create backup." });
+    }
+  });
+
+  app.post("/api/admin/backups/:fileId/restore", requireRoles(...API_ROLE_GROUPS.adminOnly), async (req: AppRequest, res) => {
+    try {
+      if (textValue(req.body?.confirm) !== "RESTORE") {
+        return res.status(400).json({ success: false, error: "RESTORE confirmation is required." });
+      }
+      const result = await sheetsService.restoreSpreadsheetBackup(req.params.fileId, getOperatorEmail(req));
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to restore backup." });
     }
   });
 
