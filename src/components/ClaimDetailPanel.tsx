@@ -56,6 +56,7 @@ const COMMON_CPT_DESCRIPTIONS: Record<string, string> = {
 
 const textValue = (value: unknown) => String(value ?? "").trim();
 const splitCptCodes = (value: unknown) => textValue(value).split(/[\s,]+/).map(item => item.trim()).filter(Boolean);
+const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
 
 const ERA_CODE_OPTIONS = [
   { code: "CO-4", label: "Procedure code inconsistent with modifier", group: "CARC" },
@@ -723,6 +724,9 @@ export function ClaimDetailPanel({
   const [editingServiceLineNoteDraft, setEditingServiceLineNoteDraft] = useState("");
   const [isSavingServiceLineNote, setIsSavingServiceLineNote] = useState(false);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
+  const [isSavingClaim, setIsSavingClaim] = useState(false);
+  const [saveProgress, setSaveProgress] = useState(0);
+  const [saveProgressLabel, setSaveProgressLabel] = useState("");
 
   // ERA Quick Entry and Insurance change states
   const [isQuickEntryMode, setIsQuickEntryMode] = useState(true);
@@ -1057,11 +1061,16 @@ export function ClaimDetailPanel({
   const isReadOnly = !canEditClaims || locked;
 
   const handleSaveClaim = async () => {
-    if (isReadOnly) return;
+    if (isReadOnly || isSavingClaim) return;
+    setIsSavingClaim(true);
+    setSaveProgress(8);
+    setSaveProgressLabel(isEnglish ? "Validating service lines..." : "Validando service lines...");
     try {
       const validationErrors = serviceLineValidationAllErrors;
 
       if (validationErrors.length > 0) {
+        setSaveProgress(100);
+        setSaveProgressLabel(isEnglish ? "Validation failed." : "Validación fallida.");
         setShowValidationErrors(true);
         notify(
           isEnglish
@@ -1069,9 +1078,12 @@ export function ClaimDetailPanel({
             : "Corrige los errores marcados debajo de cada service line antes de guardar.",
           "warning"
         );
+        await wait(500);
         return;
       }
 
+      setSaveProgress(28);
+      setSaveProgressLabel(isEnglish ? "Preparing reconciliation update..." : "Preparando actualización de conciliación...");
       const updates: Partial<Claim> = {
         claim_status: status,
         claim_classification: classification,
@@ -1104,12 +1116,27 @@ export function ClaimDetailPanel({
         service_lines_json: JSON.stringify(serviceLines)
       };
 
+      setSaveProgress(52);
+      setSaveProgressLabel(isEnglish ? "Saving and recalculating financials..." : "Guardando y recalculando financieros...");
       await onUpdate(updates);
+      setSaveProgress(88);
+      setSaveProgressLabel(isEnglish ? "Refreshing claim data..." : "Actualizando datos del claim...");
       setShowValidationErrors(false);
+      await wait(250);
+      setSaveProgress(100);
+      setSaveProgressLabel(isEnglish ? "Reconciliation completed." : "Conciliación completada.");
+      await wait(350);
       notify(isEnglish ? "Claim saved and reconciled successfully." : "Claim guardado y conciliado correctamente.", "success");
       onClose();
     } catch (err: any) {
+      setSaveProgress(100);
+      setSaveProgressLabel(isEnglish ? "Save failed." : "Error al guardar.");
       notify(`${isEnglish ? "Claim save error" : "Error al guardar claim"}: ${err.message}`, "error");
+      await wait(600);
+    } finally {
+      setIsSavingClaim(false);
+      setSaveProgress(0);
+      setSaveProgressLabel("");
     }
   };
 
@@ -3167,10 +3194,28 @@ export function ClaimDetailPanel({
         )}
 
         {/* Detail Panel Footer */}
-        <div className="bg-slate-100 p-4 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
+        <div className="bg-slate-100 p-4 border-t border-slate-200 flex flex-col gap-3 shrink-0 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-h-[2.5rem] flex-1">
+            {isSavingClaim && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+                <div className="mb-1.5 flex items-center justify-between gap-3">
+                  <p className="text-[10px] font-bold text-dark-blue">{saveProgressLabel}</p>
+                  <span className="font-mono text-[10px] font-bold text-primary-blue">{Math.round(saveProgress)}%</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-white">
+                  <div
+                    className="h-full rounded-full bg-primary-blue transition-all duration-300"
+                    style={{ width: `${Math.max(0, Math.min(100, saveProgress))}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center justify-end gap-3">
           <button
             onClick={onClose}
-            className="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-600 transition-colors"
+            disabled={isSavingClaim}
+            className="px-4 py-2 border border-slate-200 bg-white hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-600 transition-colors disabled:cursor-wait disabled:opacity-50"
           >
             {isEnglish ? "Close Panel" : "Cerrar Panel"}
           </button>
@@ -3178,12 +3223,16 @@ export function ClaimDetailPanel({
           {canEditClaims && (
             <button
               onClick={handleSaveClaim}
-              className="bg-primary-blue hover:bg-secondary-blue px-6 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition-all shadow-md shadow-blue-500/10"
+              disabled={isSavingClaim}
+              className="bg-primary-blue hover:bg-secondary-blue px-6 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1.5 transition-all shadow-md shadow-blue-500/10 disabled:cursor-wait disabled:opacity-70"
             >
-              <Send className="w-3.5 h-3.5" />
-              {isEnglish ? "Save and Recalculate Reconciliation" : "Guardar y Recalcular Conciliación"}
+              {isSavingClaim ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              {isSavingClaim
+                ? (isEnglish ? "Saving..." : "Guardando...")
+                : (isEnglish ? "Save and Recalculate Reconciliation" : "Guardar y Recalcular Conciliación")}
             </button>
           )}
+          </div>
         </div>
       </div>
     </div>
