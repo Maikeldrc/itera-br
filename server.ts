@@ -150,6 +150,48 @@ function parseXlsxRows(fileBase64: string): Record<string, string>[] {
     });
 }
 
+function parseCsvRows(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let current = "";
+  let row: string[] = [];
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const next = text[i + 1];
+    if (char === "\"" && inQuotes && next === "\"") {
+      current += "\"";
+      i++;
+    } else if (char === "\"") {
+      inQuotes = !inQuotes;
+    } else if (char === "," && !inQuotes) {
+      row.push(current);
+      current = "";
+    } else if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") i++;
+      row.push(current);
+      if (row.some(cell => cell.trim() !== "")) rows.push(row);
+      row = [];
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  row.push(current);
+  if (row.some(cell => cell.trim() !== "")) rows.push(row);
+
+  const headers = (rows.shift() || []).map(header => header.trim());
+  return rows.map(cells => Object.fromEntries(headers.map((header, index) => [header, String(cells[index] || "").trim()])));
+}
+
+function parseUploadedTableRows(fileBase64: string, fileName = ""): Record<string, string>[] {
+  const base64 = fileBase64.includes(",") ? fileBase64.split(",").pop() || "" : fileBase64;
+  if (fileName.toLowerCase().endsWith(".csv")) {
+    return parseCsvRows(Buffer.from(base64, "base64").toString("utf8"));
+  }
+  return parseXlsxRows(fileBase64);
+}
+
 function excelSerialToIsoDate(value: string) {
   if (!value) return "";
   if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10);
@@ -400,6 +442,10 @@ function parseAllowedOrigins() {
 
 function getOperatorEmail(req: AppRequest) {
   return req.appUser?.email || (req.headers["x-user-email"] as string) || "egomez@itera.health";
+}
+
+function claimPeriod(claim: Partial<Claim>) {
+  return textValue(claim.month_of_service || claim.date_of_service_from || claim.date_of_service_to).slice(0, 7);
 }
 
 async function startServer() {
@@ -720,6 +766,112 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/bank-deposits/import", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const fileName = textValue(req.body?.fileName);
+      const importRows = req.body?.fileBase64
+        ? parseUploadedTableRows(String(req.body.fileBase64), fileName)
+        : req.body?.rows;
+      if (!Array.isArray(importRows)) {
+        return res.status(400).json({ success: false, error: "Rows or fileBase64 are required." });
+      }
+
+      const normalized = fillDownPaymentImportRows(
+        importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index))
+      );
+      const payments = await sheetsService.getPayments();
+      const groups = new Map<string, typeof normalized>();
+      normalized.forEach(row => {
+        const depositDate = row.paymentDate || new Date().toISOString().slice(0, 10);
+        const key = [
+          depositDate,
+          normalizeMatchText(row.checkNo || "NO_CHECK"),
+          normalizeMatchText(row.payerName || "NO_PAYER")
+        ].join("|");
+        const current = groups.get(key) || [];
+        current.push(row);
+        groups.set(key, current);
+      });
+
+      const created = [];
+      const resultRows = [];
+      for (const [key, groupRows] of groups.entries()) {
+        const [depositDate] = key.split("|");
+        const checkNo = groupRows.find(row => row.checkNo)?.checkNo || "";
+        const payerName = groupRows.find(row => row.payerName)?.payerName || "";
+        const depositAmount = Number(groupRows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2));
+        const matchedPayments = payments.filter(payment => {
+          const sameCheck = checkNo && normalizeMatchText(payment.check_or_eft_number) === normalizeMatchText(checkNo);
+          const samePayer = payerName && entityNamesMatch(payment.payer_name, payerName);
+          return Boolean(sameCheck && (!payerName || samePayer));
+        });
+        const matchedPaymentTotal = Number(matchedPayments.reduce((sum, payment) => sum + Number(payment.amount || 0), 0).toFixed(2));
+        const deposit = await sheetsService.createBankDeposit({
+          deposit_date: depositDate,
+          check_or_eft_number: checkNo,
+          payer_name: payerName,
+          deposit_amount: depositAmount,
+          matched_payment_total: matchedPaymentTotal,
+          notes: `Imported from ${fileName || "deposit report"}. Source rows: ${groupRows.map(row => row.rowNumber).join(", ")}.`
+        });
+        created.push(deposit);
+        resultRows.push({
+          deposit,
+          sourceRows: groupRows.map(row => row.rowNumber),
+          matchedPaymentIds: matchedPayments.map(payment => payment.payment_id)
+        });
+      }
+
+      const summary = {
+        totalRowsRead: importRows.length,
+        depositGroups: created.length,
+        matchedDeposits: created.filter(item => item.status === "Matched").length,
+        mismatchDeposits: created.filter(item => item.status !== "Matched").length,
+        totalDepositAmount: Number(created.reduce((sum, item) => sum + Number(item.deposit_amount || 0), 0).toFixed(2)),
+        totalMatchedPayments: Number(created.reduce((sum, item) => sum + Number(item.matched_payment_total || 0), 0).toFixed(2))
+      };
+      const importHistory = await sheetsService.createImportHistory({
+        import_type: "Bank Deposits",
+        file_name: fileName,
+        requested_by: operatorEmail,
+        total_rows: summary.totalRowsRead,
+        imported_rows: summary.depositGroups,
+        rejected_rows: 0,
+        review_rows: summary.mismatchDeposits,
+        total_amount: summary.totalDepositAmount,
+        summary_json: JSON.stringify(summary),
+        status: summary.mismatchDeposits > 0 ? "Imported with mismatches" : "Imported"
+      });
+      await sheetsService.createJob({
+        job_type: "Bank deposit import",
+        status: "completed",
+        requested_by: operatorEmail,
+        progress: 100,
+        summary_json: JSON.stringify(summary)
+      });
+      await sheetsService.addUserActivityLog({
+        user_email: operatorEmail,
+        action: "Import bank deposits",
+        entity_type: "Import",
+        entity_id: importHistory.import_id,
+        metadata_json: JSON.stringify(summary)
+      });
+      for (const mismatch of created.filter(item => item.status !== "Matched").slice(0, 50)) {
+        await sheetsService.createReviewTask({
+          source: "Bank Deposit Import",
+          reason: `Deposit ${mismatch.check_or_eft_number || mismatch.deposit_id} has difference ${mismatch.difference}.`,
+          priority: "Medium",
+          status: "Open"
+        });
+      }
+
+      res.status(201).json({ success: true, summary, deposits: resultRows });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to import bank deposits." });
+    }
+  });
+
   app.put("/api/review-tasks/:id", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const updated = await sheetsService.updateReviewTask(req.params.id, {
@@ -761,6 +913,9 @@ async function startServer() {
       if (!claim) return res.status(404).json({ error: "Claim not found." });
       if (!canAccessClaim(req, claim)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+      if (sheetsService.isPeriodClosed(claimPeriod(claim))) {
+        return res.status(423).json({ error: `Period ${claimPeriod(claim)} is closed. Reopen the period before uploading supporting documents.` });
       }
 
       const buffer = decodeUploadBase64(fileBase64);
@@ -865,6 +1020,10 @@ async function startServer() {
         iteraSharePercent: iPercent
       });
 
+      if (sheetsService.isPeriodClosed(claimPeriod(calculated))) {
+        return res.status(423).json({ error: `Period ${claimPeriod(calculated)} is closed. Reopen the period before creating claims.` });
+      }
+
       if (!canUserAccessProvider(req.appUser || {}, calculated.provider_id, calculated.provider_npi)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
       }
@@ -905,6 +1064,9 @@ async function startServer() {
       }
       if (!canAccessClaim(req, existing)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+      if (sheetsService.isPeriodClosed(claimPeriod(existing))) {
+        return res.status(423).json({ error: `Period ${claimPeriod(existing)} is closed. Reopen the period before updating this claim.` });
       }
 
       // Capture payer state BEFORE merge so we can detect changes explicitly
@@ -982,6 +1144,9 @@ async function startServer() {
       if (!canAccessClaim(req, existing)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
       }
+      if (sheetsService.isPeriodClosed(claimPeriod(existing))) {
+        return res.status(423).json({ error: `Period ${claimPeriod(existing)} is closed. Reopen the period before deleting this claim.` });
+      }
       const deleted = await sheetsService.softDeleteClaim(req.params.id, operatorEmail, reason);
       res.json({ success: true, claim: deleted });
     } catch (err: any) {
@@ -1011,6 +1176,9 @@ async function startServer() {
         if (claim && !claim.deleted_flag) {
           if (!canAccessClaim(req, claim)) {
             return res.status(403).json({ error: `This user does not have access to claim ${id}.` });
+          }
+          if (sheetsService.isPeriodClosed(claimPeriod(claim))) {
+            return res.status(423).json({ error: `Period ${claimPeriod(claim)} is closed. Reopen the period before updating claim ${id}.` });
           }
           const merged = { ...claim, ...updates };
           const recomputed = calculateClaimFinancials(merged, {
@@ -1074,6 +1242,9 @@ async function startServer() {
       if (!paymentClaim) return res.status(404).json({ error: "Claim not found." });
       if (!canAccessClaim(req, paymentClaim)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+      if (sheetsService.isPeriodClosed(claimPeriod(paymentClaim))) {
+        return res.status(423).json({ error: `Period ${claimPeriod(paymentClaim)} is closed. Reopen the period before logging payments.` });
       }
 
       // Add payment
@@ -1139,6 +1310,9 @@ async function startServer() {
       if (!noteClaim) return res.status(404).json({ error: "Claim not found." });
       if (!canAccessClaim(req, noteClaim)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+      if (sheetsService.isPeriodClosed(claimPeriod(noteClaim))) {
+        return res.status(423).json({ error: `Period ${claimPeriod(noteClaim)} is closed. Reopen the period before adding notes.` });
       }
 
       const note = await sheetsService.createNote(noteData, authorEmail);
@@ -1302,6 +1476,9 @@ async function startServer() {
       if (!claim) return res.status(404).json({ error: "Claim not found." });
       if (!canAccessClaim(req, claim)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
+      }
+      if (sheetsService.isPeriodClosed(claimPeriod(claim))) {
+        return res.status(423).json({ error: `Period ${claimPeriod(claim)} is closed. Reopen the period before changing claim insurance.` });
       }
 
       const payers = await sheetsService.getPayers();
@@ -1678,6 +1855,9 @@ async function startServer() {
         validationErrors.push(...(!canUserAccessProvider(req.appUser || {}, calculated.provider_id, calculated.provider_npi)
           ? ["Current user does not have access to this provider."]
           : []));
+        if (sheetsService.isPeriodClosed(claimPeriod(calculated))) {
+          validationErrors.push(`Period ${claimPeriod(calculated)} is closed. Reopen the period before importing this claim.`);
+        }
         validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
         validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
           calculated,
@@ -1844,6 +2024,9 @@ async function startServer() {
         }
         if (errors.length === 0 && candidates.length > 1) errors.push("Multiple matching claims found; requires human review.");
         if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
+        if (errors.length === 0 && claim && sheetsService.isPeriodClosed(claimPeriod(claim))) {
+          errors.push(`Period ${claimPeriod(claim)} is closed. Reopen the period before importing payment activity.`);
+        }
         if (errors.length === 0 && claim && lineIndex < 0) errors.push("Matched claim does not contain the CPT code.");
         if (errors.length === 0 && claim && existingPayment && existingPayment.claim_id !== claim.claim_id) {
           errors.push(`Payment ID ${row.externalPaymentId} already exists in Payments for claim ${existingPayment.claim_id || "unknown"}.`);

@@ -302,6 +302,37 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <h3 className="text-sm font-bold text-slate-800">{isEnglish ? "Matching Criteria" : "Criterios de Matching"}</h3>
+        <div className="mt-3 grid gap-3 md:grid-cols-3">
+          {[
+            [
+              isEnglish ? "Primary match" : "Match primario",
+              isEnglish
+                ? "Internal Claim No + CPT. If the external claim number does not match, the importer falls back to Patient Acct No + CPT + DOS/month."
+                : "Claim No interno + CPT. Si el claim externo no coincide, usa Patient Acct No + CPT + DOS/mes."
+            ],
+            [
+              isEnglish ? "Tie breakers" : "Desempate",
+              isEnglish
+                ? "When more than one claim matches, payer and rendering provider are used to narrow the candidate list."
+                : "Si hay más de un claim, se usa payer y rendering provider para reducir candidatos."
+            ],
+            [
+              isEnglish ? "Human review" : "Revisión humana",
+              isEnglish
+                ? "Rows with existing payment activity, payer mismatches, closed periods or ambiguous matches are not overwritten."
+                : "Filas con pagos existentes, payer diferente, período cerrado o matches ambiguos no se sobreescriben."
+            ]
+          ].map(([title, body]) => (
+            <div key={title} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{title}</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-600">{body}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
         <div
           onDragOver={event => event.preventDefault()}
           onDrop={event => {

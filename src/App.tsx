@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   LayoutDashboard,
   Coins,
@@ -287,6 +287,10 @@ export default function App() {
   const [isLoadingOperations, setIsLoadingOperations] = useState(false);
   const [closingMonth, setClosingMonth] = useState(false);
   const [closeMonthPeriod, setCloseMonthPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const [isImportingBankDeposits, setIsImportingBankDeposits] = useState(false);
+  const [bankDepositImportSummary, setBankDepositImportSummary] = useState<any | null>(null);
+  const [savingReviewTaskId, setSavingReviewTaskId] = useState("");
+  const bankDepositInputRef = useRef<HTMLInputElement | null>(null);
   const [backupFrequencyHours, setBackupFrequencyHours] = useState(24);
   const [backupEnabled, setBackupEnabled] = useState(true);
   const [backupFolderId, setBackupFolderId] = useState("");
@@ -1155,6 +1159,63 @@ export default function App() {
       notify(`${isEnglish ? "Monthly close error" : "Error de cierre mensual"}: ${err.message}`, "error");
     } finally {
       setClosingMonth(false);
+    }
+  };
+
+  const handleImportBankDeposits = async (file: File | null | undefined) => {
+    if (!file) return;
+    setIsImportingBankDeposits(true);
+    setBankDepositImportSummary(null);
+    try {
+      const fileBase64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = event => resolve(String(event.target?.result || ""));
+        reader.onerror = () => reject(new Error("Unable to read selected file."));
+        reader.readAsDataURL(file);
+      });
+      const res = await apiFetch("/api/admin/bank-deposits/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName: file.name, fileBase64 })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to import bank deposits.");
+      setBankDepositImportSummary(data.summary);
+      notify(
+        isEnglish
+          ? `Imported ${data.summary.depositGroups} deposit group(s). ${data.summary.mismatchDeposits} require review.`
+          : `Importados ${data.summary.depositGroups} grupo(s) de depósito. ${data.summary.mismatchDeposits} requieren revisión.`,
+        data.summary.mismatchDeposits > 0 ? "warning" : "success"
+      );
+      await loadOperationsCenter();
+    } catch (err: any) {
+      notify(`${isEnglish ? "Bank deposit import error" : "Error importando depósitos"}: ${err.message}`, "error");
+    } finally {
+      setIsImportingBankDeposits(false);
+      if (bankDepositInputRef.current) bankDepositInputRef.current.value = "";
+    }
+  };
+
+  const handleUpdateReviewTask = async (task: any, updates: Record<string, string>) => {
+    if (!task?.task_id) return;
+    setSavingReviewTaskId(task.task_id);
+    try {
+      const res = await apiFetch(`/api/review-tasks/${encodeURIComponent(task.task_id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...task, ...updates })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update review task.");
+      setOperationsData((current: any) => ({
+        ...current,
+        reviewTasks: (current?.reviewTasks || []).map((item: any) => item.task_id === task.task_id ? data.task : item)
+      }));
+      notify(isEnglish ? "Review task updated." : "Tarea de revisión actualizada.", "success");
+    } catch (err: any) {
+      notify(`${isEnglish ? "Task update error" : "Error actualizando tarea"}: ${err.message}`, "error");
+    } finally {
+      setSavingReviewTaskId("");
     }
   };
 
@@ -2753,12 +2814,154 @@ export default function App() {
                     </div>
                   </div>
 
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Bank Deposit Reconciliation Import" : "Importación de Depósitos Bancarios"}</h4>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {isEnglish
+                            ? "Upload a CSV/XLSX payment deposit report to group deposits by date, check/EFT and payer, then compare against recorded Payments."
+                            : "Sube un CSV/XLSX de depósitos para agrupar por fecha, check/EFT y payer, y compararlo contra Payments registrados."}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input
+                          ref={bankDepositInputRef}
+                          type="file"
+                          accept=".csv,.xlsx"
+                          className="hidden"
+                          onChange={event => void handleImportBankDeposits(event.target.files?.[0])}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => bankDepositInputRef.current?.click()}
+                          disabled={isImportingBankDeposits}
+                          className="inline-flex items-center justify-center gap-2 rounded-lg bg-primary-blue px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-dark-blue disabled:opacity-60"
+                        >
+                          <Upload className="h-4 w-4" />
+                          {isImportingBankDeposits ? (isEnglish ? "Importing..." : "Importando...") : (isEnglish ? "Import deposits" : "Importar depósitos")}
+                        </button>
+                      </div>
+                    </div>
+                    {isImportingBankDeposits && (
+                      <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 p-3">
+                        <div className="mb-2 flex items-center justify-between text-xs font-bold text-dark-blue">
+                          <span>{isEnglish ? "Processing deposit file..." : "Procesando archivo de depósitos..."}</span>
+                          <span>{isEnglish ? "In progress" : "En proceso"}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-white">
+                          <div className="h-full w-2/3 animate-pulse rounded-full bg-primary-blue" />
+                        </div>
+                      </div>
+                    )}
+                    {bankDepositImportSummary && (
+                      <div className="mt-4 grid gap-3 md:grid-cols-5">
+                        {[
+                          [isEnglish ? "Rows" : "Filas", bankDepositImportSummary.totalRowsRead],
+                          [isEnglish ? "Deposit groups" : "Grupos", bankDepositImportSummary.depositGroups],
+                          [isEnglish ? "Matched" : "Cuadrados", bankDepositImportSummary.matchedDeposits],
+                          [isEnglish ? "Review" : "Revisión", bankDepositImportSummary.mismatchDeposits],
+                          [isEnglish ? "Deposit $" : "$ depósitos", `$${Number(bankDepositImportSummary.totalDepositAmount || 0).toFixed(2)}`]
+                        ].map(([label, value]) => (
+                          <div key={String(label)} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                            <p className="mt-1 text-sm font-bold text-slate-900">{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Review Task Management" : "Gestión de Tareas de Revisión"}</h4>
+                        <p className="mt-0.5 text-[10px] text-slate-500">
+                          {isEnglish ? "Assign ownership, due dates and resolution status for operational exceptions." : "Asigna responsable, vencimiento y estado para excepciones operativas."}
+                        </p>
+                      </div>
+                      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">{operationsData?.reviewTasks?.length || 0}</span>
+                    </div>
+                    <div className="max-h-96 overflow-auto">
+                      <table className="w-full min-w-[1040px] text-left text-xs">
+                        <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2">Source</th>
+                            <th className="px-3 py-2">Claim / CPT</th>
+                            <th className="px-3 py-2">Reason</th>
+                            <th className="px-3 py-2">Assigned To</th>
+                            <th className="px-3 py-2">Priority</th>
+                            <th className="px-3 py-2">Due Date</th>
+                            <th className="px-3 py-2">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(operationsData?.reviewTasks || []).slice(0, 30).map((task: any) => (
+                            <tr key={task.task_id} className="hover:bg-slate-50">
+                              <td className="px-3 py-2 font-semibold text-slate-700">{task.source || "-"}</td>
+                              <td className="px-3 py-2">
+                                <p className="font-mono font-bold text-dark-blue">{task.claim_id || "-"}</p>
+                                <p className="font-mono text-[10px] text-slate-400">{task.cpt_code || "-"}</p>
+                              </td>
+                              <td className="max-w-sm px-3 py-2">
+                                <p className="truncate text-slate-500" title={task.reason}>{task.reason || "-"}</p>
+                              </td>
+                              <td className="px-3 py-2">
+                                <select
+                                  value={task.assigned_to || ""}
+                                  disabled={savingReviewTaskId === task.task_id}
+                                  onChange={event => void handleUpdateReviewTask(task, { assigned_to: event.target.value })}
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-primary-blue"
+                                >
+                                  <option value="">{isEnglish ? "Unassigned" : "Sin asignar"}</option>
+                                  {users.filter(user => user.active).map(user => <option key={user.user_id} value={user.user_id}>{user.name || user.email}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-3 py-2">
+                                <select
+                                  value={task.priority || "Medium"}
+                                  disabled={savingReviewTaskId === task.task_id}
+                                  onChange={event => void handleUpdateReviewTask(task, { priority: event.target.value })}
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-primary-blue"
+                                >
+                                  {["Low", "Medium", "High"].map(value => <option key={value} value={value}>{value}</option>)}
+                                </select>
+                              </td>
+                              <td className="px-3 py-2">
+                                <input
+                                  type="date"
+                                  value={task.due_date || ""}
+                                  disabled={savingReviewTaskId === task.task_id}
+                                  onChange={event => void handleUpdateReviewTask(task, { due_date: event.target.value })}
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-primary-blue"
+                                />
+                              </td>
+                              <td className="px-3 py-2">
+                                <select
+                                  value={task.status || "Open"}
+                                  disabled={savingReviewTaskId === task.task_id}
+                                  onChange={event => void handleUpdateReviewTask(task, { status: event.target.value })}
+                                  className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 outline-none focus:border-primary-blue"
+                                >
+                                  {["Open", "In Progress", "Resolved", "Dismissed"].map(value => <option key={value} value={value}>{value}</option>)}
+                                </select>
+                              </td>
+                            </tr>
+                          ))}
+                          {(!operationsData?.reviewTasks || operationsData.reviewTasks.length === 0) && (
+                            <tr><td colSpan={7} className="px-3 py-8 text-center text-xs font-semibold text-slate-400">{isEnglish ? "No review tasks." : "No hay tareas de revisión."}</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
                   <div className="grid gap-5 xl:grid-cols-2">
                     {[
                       { title: isEnglish ? "Import History" : "Historial de Importación", rows: operationsData?.importHistory || [], columns: ["import_type", "file_name", "imported_rows", "rejected_rows", "status"] },
-                      { title: isEnglish ? "Review Tasks" : "Tareas de Revisión", rows: operationsData?.reviewTasks || [], columns: ["source", "claim_id", "cpt_code", "priority", "status"] },
                       { title: isEnglish ? "Jobs" : "Procesos", rows: operationsData?.jobs || [], columns: ["job_type", "status", "progress", "requested_by", "requested_at"] },
-                      { title: isEnglish ? "Bank Deposits" : "Depósitos Bancarios", rows: operationsData?.bankDeposits || [], columns: ["deposit_date", "payer_name", "deposit_amount", "matched_payment_total", "status"] }
+                      { title: isEnglish ? "Bank Deposits" : "Depósitos Bancarios", rows: operationsData?.bankDeposits || [], columns: ["deposit_date", "payer_name", "deposit_amount", "matched_payment_total", "status"] },
+                      { title: isEnglish ? "Notifications" : "Notificaciones", rows: operationsData?.notifications || [], columns: ["severity", "title", "message", "created_at", "target_role"] }
                     ].map(section => (
                       <div key={section.title} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
                         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
@@ -2774,7 +2977,7 @@ export default function App() {
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                               {section.rows.slice(0, 12).map((row: any, index: number) => (
-                                <tr key={row.import_id || row.task_id || row.job_id || row.deposit_id || index} className="hover:bg-slate-50">
+                                <tr key={row.import_id || row.task_id || row.job_id || row.deposit_id || row.notification_id || index} className="hover:bg-slate-50">
                                   {section.columns.map(column => (
                                     <td key={column} className="max-w-[180px] truncate px-3 py-2 text-slate-600" title={String(row[column] ?? "")}>
                                       {column.includes("amount") || column.includes("total") ? `$${Number(row[column] || 0).toFixed(2)}` : String(row[column] ?? "-")}

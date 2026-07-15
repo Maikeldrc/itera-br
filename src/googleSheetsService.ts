@@ -1545,6 +1545,12 @@ export class GoogleSheetsService {
     return [...this.monthlyClosures].sort((a, b) => String(b.period).localeCompare(String(a.period)));
   }
 
+  public isPeriodClosed(value: string): boolean {
+    const period = String(value || "").slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(period)) return false;
+    return this.monthlyClosures.some(item => item.period === period && item.status === "Closed");
+  }
+
   public async clearOperationalData(): Promise<{ clearedSheets: string[]; counts: Record<string, number> }> {
     const counts = {
       Claims: this.claims.length,
