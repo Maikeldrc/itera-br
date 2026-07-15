@@ -303,24 +303,19 @@ export function ClaimsTable({
   const noteCountByClaim = notes.reduce<Record<string, number>>((acc, note) => {
     const claimId = textValue(note.claim_id);
     const noteText = textValue(note.note_text);
-    if (!claimId || !noteText) return acc;
+    const createdBy = textValue(note.created_by).toLowerCase();
+    const isSystemGenerated = !createdBy ||
+      createdBy.includes("system") ||
+      createdBy.includes("import") ||
+      createdBy.includes("automation") ||
+      createdBy.includes("scheduler") ||
+      createdBy.includes("log");
+    if (!claimId || !noteText || isSystemGenerated) return acc;
     acc[claimId] = (acc[claimId] || 0) + 1;
     return acc;
   }, {});
   const getClaimNoteCount = (claim: Claim) => {
-    const persistedCount = noteCountByClaim[claim.claim_id] || 0;
-    let serviceLineNoteCount = 0;
-    try {
-      const serviceLines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
-      if (Array.isArray(serviceLines)) {
-        serviceLineNoteCount = serviceLines.reduce((count, line) => {
-          const lineNotes = Array.isArray(line?.notes) ? line.notes : [];
-          return count + lineNotes.filter((note: unknown) => textValue(note)).length;
-        }, 0);
-      }
-    } catch {}
-    const fallbackCount = textValue(claim.last_note) ? 1 : 0;
-    return persistedCount + serviceLineNoteCount + fallbackCount;
+    return noteCountByClaim[claim.claim_id] || 0;
   };
 
   // State to track which row has its actions menu open
@@ -1079,7 +1074,7 @@ export function ClaimsTable({
                           {noteCount > 0 && (
                             <span
                               className="inline-flex shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-700"
-                              title={claim.last_note ? `Notes registered. Latest: ${claim.last_note}` : "Notes registered for this claim"}
+                              title={`${noteCount} user note${noteCount === 1 ? "" : "s"} registered for this claim`}
                             >
                               <MessageSquareText className="h-3 w-3" />
                               {noteCount > 1 ? noteCount : ""}
