@@ -1009,6 +1009,19 @@ export class GoogleSheetsService {
         valueInputOption: "RAW",
         requestBody: { values: [BACKUPS_INDEX_HEADERS] }
       });
+    } else {
+      const mergedHeaders = headerRow.slice();
+      BACKUPS_INDEX_HEADERS.forEach(header => {
+        if (!mergedHeaders.includes(header)) mergedHeaders.push(header);
+      });
+      if (mergedHeaders.length !== headerRow.length) {
+        await this.sheets.spreadsheets.values.update({
+          spreadsheetId: this.sheetId,
+          range: "Backups_Index!A1",
+          valueInputOption: "RAW",
+          requestBody: { values: [mergedHeaders] }
+        });
+      }
     }
   }
 
@@ -1084,7 +1097,9 @@ export class GoogleSheetsService {
         appProperties: {
           iteraBackup: "true",
           sourceSpreadsheetId: this.sheetId,
-          backupId
+          backupId,
+          lastRestoredAt: "",
+          lastRestoredBy: ""
         }
       },
       fields: "id,name,webViewLink,createdTime",
@@ -1134,8 +1149,10 @@ export class GoogleSheetsService {
       created_by: "Drive",
       created_at: file.createdTime || "",
       source_spreadsheet_id: file.appProperties?.sourceSpreadsheetId || this.sheetId || "",
-      status: "Available",
-      notes: "Google Drive spreadsheet backup."
+      status: file.appProperties?.lastRestoredAt ? "Restored" : "Available",
+      notes: "Google Drive spreadsheet backup.",
+      last_restored_at: file.appProperties?.lastRestoredAt || "",
+      last_restored_by: file.appProperties?.lastRestoredBy || ""
     }));
   }
 
@@ -1162,6 +1179,7 @@ export class GoogleSheetsService {
       throw new Error("backupFileId is required.");
     }
 
+    const restoredAt = new Date().toISOString();
     const preRestoreBackup = await this.createSpreadsheetBackup(restoredBy, `Automatic safety backup before restoring from ${backupFileId}.`);
     const restoredTabs: string[] = [];
 
@@ -1192,6 +1210,24 @@ export class GoogleSheetsService {
       changed_by: restoredBy,
       changed_at: new Date().toISOString()
     });
+
+    if (this.drive) {
+      await this.drive.files.update({
+        fileId: backupFileId,
+        requestBody: {
+          appProperties: {
+            iteraBackup: "true",
+            sourceSpreadsheetId: this.sheetId || "",
+            lastRestoredAt: restoredAt,
+            lastRestoredBy: restoredBy
+          }
+        },
+        fields: "id,appProperties",
+        supportsAllDrives: true
+      }).catch((err: any) => {
+        console.warn("Unable to update backup restore metadata:", err?.message || err);
+      });
+    }
 
     return { restoredTabs, preRestoreBackup };
   }
@@ -1474,7 +1510,7 @@ const ELIGIBILITY_COVERAGE_HEADERS = [
 
 const BACKUPS_INDEX_HEADERS = [
   "backup_id", "backup_file_id", "backup_file_name", "backup_drive_url",
-  "created_by", "created_at", "source_spreadsheet_id", "status", "notes"
+  "created_by", "created_at", "source_spreadsheet_id", "status", "notes", "last_restored_at", "last_restored_by"
 ];
 
 const BACKUP_RESTORE_TABS = [

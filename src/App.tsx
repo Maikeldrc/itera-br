@@ -94,6 +94,8 @@ type BackupRecord = {
   source_spreadsheet_id: string;
   status: string;
   notes: string;
+  last_restored_at?: string;
+  last_restored_by?: string;
 };
 
 type BackupConfig = {
@@ -290,6 +292,8 @@ export default function App() {
   const [restoringBackupId, setRestoringBackupId] = useState("");
   const [backupToRestore, setBackupToRestore] = useState<BackupRecord | null>(null);
   const [restoreConfirmationText, setRestoreConfirmationText] = useState("");
+  const [restoreProgress, setRestoreProgress] = useState(0);
+  const [restoreProgressLabel, setRestoreProgressLabel] = useState("");
   const [editingFs, setEditingFs] = useState<FeeSchedule | null>(null);
   const [isFsModalOpen, setIsFsModalOpen] = useState(false);
   const [fsSearchTerm, setFsSearchTerm] = useState("");
@@ -1161,12 +1165,16 @@ export default function App() {
   const handleOpenRestoreBackup = (backup: BackupRecord) => {
     setBackupToRestore(backup);
     setRestoreConfirmationText("");
+    setRestoreProgress(0);
+    setRestoreProgressLabel("");
   };
 
   const handleCloseRestoreBackup = () => {
     if (restoringBackupId) return;
     setBackupToRestore(null);
     setRestoreConfirmationText("");
+    setRestoreProgress(0);
+    setRestoreProgressLabel("");
   };
 
   const handleRestoreBackup = async () => {
@@ -1177,23 +1185,37 @@ export default function App() {
     }
     const backup = backupToRestore;
     setRestoringBackupId(backup.backup_file_id);
+    setRestoreProgress(10);
+    setRestoreProgressLabel(isEnglish ? "Submitting restore request..." : "Enviando solicitud de restauración...");
     try {
       const res = await apiFetch(`/api/admin/backups/${encodeURIComponent(backup.backup_file_id)}/restore`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirm: "RESTORE" })
       });
+      setRestoreProgress(55);
+      setRestoreProgressLabel(isEnglish ? "Restoring workbook tabs..." : "Restaurando hojas del workbook...");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to restore backup.");
+      setRestoreProgress(78);
+      setRestoreProgressLabel(isEnglish ? "Refreshing application data..." : "Actualizando datos de la aplicación...");
       notify(isEnglish ? "Backup restored. Data refreshed." : "Salva restaurada. Datos actualizados.", "success");
       await fetchAllData({ showInitialLoading: false });
+      setRestoreProgress(92);
+      setRestoreProgressLabel(isEnglish ? "Updating backup history..." : "Actualizando historial de salvas...");
       await loadBackups();
+      setRestoreProgress(100);
+      setRestoreProgressLabel(isEnglish ? "Restore completed." : "Restauración completada.");
       setBackupToRestore(null);
       setRestoreConfirmationText("");
     } catch (err: any) {
       notify(`${isEnglish ? "Restore error" : "Error restaurando salva"}: ${err.message}`, "error");
     } finally {
       setRestoringBackupId("");
+      window.setTimeout(() => {
+        setRestoreProgress(0);
+        setRestoreProgressLabel("");
+      }, 600);
     }
   };
 
@@ -2684,12 +2706,13 @@ export default function App() {
                       <span className="rounded-md bg-slate-100 px-2 py-1 font-mono text-[10px] font-bold text-slate-500">{backups.length}</span>
                     </div>
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[980px] text-left text-xs">
+                      <table className="w-full min-w-[1080px] text-left text-xs">
                         <thead className="bg-slate-50 text-[10px] uppercase tracking-widest text-slate-500">
                           <tr>
                             <th className="px-4 py-3">{isEnglish ? "Created" : "Creada"}</th>
                             <th className="px-4 py-3">{isEnglish ? "Backup file" : "Archivo"}</th>
                             <th className="px-4 py-3">{isEnglish ? "Status" : "Estado"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Last restored" : "Última restauración"}</th>
                             <th className="px-4 py-3">{isEnglish ? "Notes" : "Notas"}</th>
                             <th className="px-4 py-3 text-right">{isEnglish ? "Action" : "Acción"}</th>
                           </tr>
@@ -2697,7 +2720,7 @@ export default function App() {
                         <tbody className="divide-y divide-slate-100">
                           {backups.length === 0 && (
                             <tr>
-                              <td colSpan={5} className="px-4 py-8 text-center text-xs font-semibold text-slate-400">
+                              <td colSpan={6} className="px-4 py-8 text-center text-xs font-semibold text-slate-400">
                                 {isLoadingBackups ? (isEnglish ? "Loading backups..." : "Cargando salvas...") : (isEnglish ? "No backups found." : "No hay salvas disponibles.")}
                               </td>
                             </tr>
@@ -2710,7 +2733,23 @@ export default function App() {
                                 <p className="mt-0.5 font-mono text-[10px] text-slate-400">{backup.backup_file_id}</p>
                               </td>
                               <td className="px-4 py-3">
-                                <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{backup.status || "Available"}</span>
+                                {backup.last_restored_at ? (
+                                  <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">
+                                    {isEnglish ? "Restored" : "Restaurada"}
+                                  </span>
+                                ) : (
+                                  <span className="rounded-md border border-emerald-100 bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{backup.status || "Available"}</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {backup.last_restored_at ? (
+                                  <div>
+                                    <p className="font-mono text-slate-700">{new Date(backup.last_restored_at).toLocaleString()}</p>
+                                    <p className="mt-0.5 text-[10px] font-semibold text-slate-400">{backup.last_restored_by || "-"}</p>
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400">-</span>
+                                )}
                               </td>
                               <td className="max-w-sm px-4 py-3 text-slate-500">{backup.notes || "-"}</td>
                               <td className="px-4 py-3">
@@ -3941,6 +3980,26 @@ export default function App() {
                   placeholder="RESTORE"
                 />
               </label>
+
+              {Boolean(restoringBackupId) && (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-primary-blue">
+                      {isEnglish ? "Restore progress" : "Progreso de restauración"}
+                    </p>
+                    <span className="font-mono text-[11px] font-bold text-primary-blue">{restoreProgress}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-white ring-1 ring-blue-100">
+                    <div
+                      className="h-full rounded-full bg-primary-blue transition-all duration-500 ease-out"
+                      style={{ width: `${restoreProgress}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[10px] font-semibold text-slate-600">
+                    {restoreProgressLabel || (isEnglish ? "Restoring backup..." : "Restaurando salva...")}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4">

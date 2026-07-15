@@ -244,6 +244,8 @@ export interface BackupRecord {
   source_spreadsheet_id: string;
   status: string;
   notes: string;
+  last_restored_at?: string;
+  last_restored_by?: string;
 }
 
 export interface FeeSchedule {
