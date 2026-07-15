@@ -229,6 +229,37 @@ interface ServiceLineNote {
   updatedBy?: string;
 }
 
+function normalizeServiceLineNote(rawNote: unknown, cptCode: string, index: number, claim: Claim): ServiceLineNote {
+  if (typeof rawNote === "string") {
+    return {
+      id: `legacy-${cptCode}-${index}`,
+      text: rawNote,
+      createdAt: claim.updated_at || new Date().toISOString(),
+      createdBy: claim.updated_by || "Unregistered user",
+      createdByEmail: claim.updated_by || ""
+    };
+  }
+
+  const note = rawNote && typeof rawNote === "object" ? rawNote as Partial<ServiceLineNote> : {};
+  return {
+    id: note.id || `legacy-${cptCode}-${index}`,
+    text: typeof note.text === "string" ? note.text : "",
+    createdAt: note.createdAt || claim.updated_at || new Date().toISOString(),
+    createdBy: note.createdBy || note.updatedBy || claim.updated_by || "Unregistered user",
+    createdByEmail: note.createdByEmail || claim.updated_by || "",
+    updatedAt: note.updatedAt,
+    updatedBy: note.updatedBy
+  };
+}
+
+function serviceLineNoteText(note: unknown) {
+  if (typeof note === "string") return note;
+  if (note && typeof note === "object" && "text" in note) {
+    return String((note as { text?: unknown }).text || "");
+  }
+  return "";
+}
+
 const SERVICE_LINE_STATUSES: ServiceLineStatus[] = [
   "Not Billed",
   "Submitted",
@@ -815,15 +846,7 @@ export function ClaimDetailPanel({
           codes: existing.codes || [],
           status: existing.status || (existing.paid > 0 ? "Paid" : "Pending"),
           notes: Array.isArray(existing.notes)
-            ? existing.notes.map((note, index) => ({
-                id: note.id || `legacy-${cptCode}-${index}`,
-                text: note.text || "",
-                createdAt: note.createdAt || c.updated_at || new Date().toISOString(),
-                createdBy: note.createdBy || note.updatedBy || (isEnglish ? "Unregistered user" : "Usuario no registrado"),
-                createdByEmail: note.createdByEmail || "",
-                updatedAt: note.updatedAt,
-                updatedBy: note.updatedBy
-              }))
+            ? existing.notes.map((note, index) => normalizeServiceLineNote(note, cptCode, index, c))
             : existing.note
               ? [{
                   id: `legacy-${cptCode}`,
@@ -1228,11 +1251,11 @@ export function ClaimDetailPanel({
           type: "Adjustment",
           detail: `Adjustment ${formatFinancialValue(Number(line.adj || 0))}; allowed ${formatFinancialValue(Number(line.allowed || 0))}`
         } : null,
-        ...(Array.isArray(line.notes) ? line.notes.map((note: string) => ({
+        ...(Array.isArray(line.notes) ? line.notes.map((note, noteIndex) => ({
           at: claim.updated_at || claim.created_at || "",
           cpt,
           type: "Line Note",
-          detail: note
+          detail: serviceLineNoteText(note) || `Service line note ${noteIndex + 1}`
         })) : [])
       ].filter(Boolean);
       return events as Array<{ at: string; cpt: string; type: string; detail: string }>;
