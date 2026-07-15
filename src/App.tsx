@@ -288,6 +288,8 @@ export default function App() {
   const [isSavingBackupSettings, setIsSavingBackupSettings] = useState(false);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [restoringBackupId, setRestoringBackupId] = useState("");
+  const [backupToRestore, setBackupToRestore] = useState<BackupRecord | null>(null);
+  const [restoreConfirmationText, setRestoreConfirmationText] = useState("");
   const [editingFs, setEditingFs] = useState<FeeSchedule | null>(null);
   const [isFsModalOpen, setIsFsModalOpen] = useState(false);
   const [fsSearchTerm, setFsSearchTerm] = useState("");
@@ -1156,18 +1158,24 @@ export default function App() {
     }
   };
 
-  const handleRestoreBackup = async (backup: BackupRecord) => {
-    const firstConfirm = window.confirm(
-      isEnglish
-        ? `Restore backup "${backup.backup_file_name}"? This will replace current Claims, Payments, Notes, Audit Log, users, payers, providers, settings and fee schedules with the selected backup. A safety backup will be created first.`
-        : `¿Restaurar la salva "${backup.backup_file_name}"? Esto reemplazará Claims, Payments, Notes, Audit Log, usuarios, payers, providers, settings y fee schedules con la salva seleccionada. Primero se creará una salva de seguridad.`
-    );
-    if (!firstConfirm) return;
-    const typed = window.prompt(isEnglish ? "Type RESTORE to confirm." : "Escriba RESTORE para confirmar.");
-    if (typed !== "RESTORE") {
-      notify(isEnglish ? "Restore cancelled." : "Restauración cancelada.", "warning");
+  const handleOpenRestoreBackup = (backup: BackupRecord) => {
+    setBackupToRestore(backup);
+    setRestoreConfirmationText("");
+  };
+
+  const handleCloseRestoreBackup = () => {
+    if (restoringBackupId) return;
+    setBackupToRestore(null);
+    setRestoreConfirmationText("");
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!backupToRestore) return;
+    if (restoreConfirmationText !== "RESTORE") {
+      notify(isEnglish ? "Type RESTORE to confirm the restore." : "Escriba RESTORE para confirmar la restauración.", "warning");
       return;
     }
+    const backup = backupToRestore;
     setRestoringBackupId(backup.backup_file_id);
     try {
       const res = await apiFetch(`/api/admin/backups/${encodeURIComponent(backup.backup_file_id)}/restore`, {
@@ -1180,6 +1188,8 @@ export default function App() {
       notify(isEnglish ? "Backup restored. Data refreshed." : "Salva restaurada. Datos actualizados.", "success");
       await fetchAllData({ showInitialLoading: false });
       await loadBackups();
+      setBackupToRestore(null);
+      setRestoreConfirmationText("");
     } catch (err: any) {
       notify(`${isEnglish ? "Restore error" : "Error restaurando salva"}: ${err.message}`, "error");
     } finally {
@@ -2717,7 +2727,7 @@ export default function App() {
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => void handleRestoreBackup(backup)}
+                                    onClick={() => handleOpenRestoreBackup(backup)}
                                     disabled={restoringBackupId === backup.backup_file_id}
                                     className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-bold text-amber-700 hover:bg-amber-100 disabled:opacity-60"
                                   >
@@ -3866,6 +3876,94 @@ export default function App() {
         onClose={() => setIsImportOpen(false)}
         onImport={handleImportCSV}
       />
+
+      {/* MODAL: RESTORE BACKUP CONFIRMATION */}
+      {backupToRestore && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-amber-100 bg-amber-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-white p-2 text-amber-600 shadow-sm">
+                  <AlertTriangle className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    {isEnglish ? "Restore Backup" : "Restaurar Salva"}
+                  </h4>
+                  <p className="mt-0.5 text-[10px] font-semibold text-amber-700">
+                    {isEnglish ? "Administrative recovery action" : "Acción administrativa de recuperación"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseRestoreBackup}
+                disabled={Boolean(restoringBackupId)}
+                className="rounded-full p-1 text-slate-500 hover:bg-white disabled:opacity-50"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5 text-xs text-slate-700">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {isEnglish ? "Selected backup" : "Salva seleccionada"}
+                </p>
+                <p className="mt-1 break-words font-bold text-slate-900">{backupToRestore.backup_file_name}</p>
+                <p className="mt-1 font-mono text-[10px] text-slate-500">{backupToRestore.backup_file_id}</p>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {backupToRestore.created_at ? new Date(backupToRestore.created_at).toLocaleString() : "-"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                <p className="font-bold">
+                  {isEnglish ? "This restore will replace current workbook data." : "Esta restauración reemplazará los datos actuales del workbook."}
+                </p>
+                <p className="mt-1 leading-relaxed">
+                  {isEnglish
+                    ? "Claims, Payments, Notes, Audit Log, users, payers, providers, settings and fee schedules will be restored from the selected backup. A safety backup will be created first."
+                    : "Claims, Payments, Notes, Audit Log, usuarios, payers, providers, settings y fee schedules se restaurarán desde la salva seleccionada. Primero se creará una salva de seguridad."}
+                </p>
+              </div>
+
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {isEnglish ? "Type RESTORE to confirm" : "Escriba RESTORE para confirmar"}
+                </span>
+                <input
+                  value={restoreConfirmationText}
+                  onChange={event => setRestoreConfirmationText(event.target.value)}
+                  disabled={Boolean(restoringBackupId)}
+                  autoFocus
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs font-bold text-slate-800 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-100 disabled:bg-slate-100"
+                  placeholder="RESTORE"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={handleCloseRestoreBackup}
+                disabled={Boolean(restoringBackupId)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                {isEnglish ? "Cancel" : "Cancelar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleRestoreBackup()}
+                disabled={restoreConfirmationText !== "RESTORE" || Boolean(restoringBackupId)}
+                className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {restoringBackupId ? (isEnglish ? "Restoring..." : "Restaurando...") : (isEnglish ? "Restore Backup" : "Restaurar Salva")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL: ADD / EDIT FEE SCHEDULE */}
       {isFsModalOpen && (
