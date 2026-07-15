@@ -2827,15 +2827,15 @@ export default function App() {
                         <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Bank Deposit Reconciliation Import" : "Importación de Depósitos Bancarios"}</h4>
                         <p className="mt-1 text-xs text-slate-500">
                           {isEnglish
-                            ? "Upload a CSV/XLSX payment deposit report to group deposits by date, check/EFT and payer, then compare against recorded Payments."
-                            : "Sube un CSV/XLSX de depósitos para agrupar por fecha, check/EFT y payer, y compararlo contra Payments registrados."}
+                            ? "Upload a CSV/XLS/XLSX payment deposit report to group deposits by date, check/EFT and payer, then compare against recorded Payments."
+                            : "Sube un CSV/XLS/XLSX de depósitos para agrupar por fecha, check/EFT y payer, y compararlo contra Payments registrados."}
                         </p>
                       </div>
                       <div className="flex items-center gap-2">
                         <input
                           ref={bankDepositInputRef}
                           type="file"
-                          accept=".csv,.xlsx"
+                          accept=".csv,.xls,.xlsx"
                           className="hidden"
                           onChange={event => void handleImportBankDeposits(event.target.files?.[0])}
                         />

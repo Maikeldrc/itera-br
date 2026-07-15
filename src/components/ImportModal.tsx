@@ -165,19 +165,20 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     setImportResult(null);
     setImportProgress(null);
     const reader = new FileReader();
-    const isXlsx = selectedFile.name.toLowerCase().endsWith(".xlsx");
+    const lowerName = selectedFile.name.toLowerCase();
+    const isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
     reader.onload = (event) => {
-      if (isXlsx) {
+      if (isExcel) {
         const fileBase64 = event.target?.result as string;
         setFilePayload({ fileName: selectedFile.name, fileBase64 });
-        setParsedRows([{ file_name: selectedFile.name, import_type: "Billing Worklist XLSX" }]);
+        setParsedRows([{ file_name: selectedFile.name, import_type: "Billing Worklist Excel" }]);
         setValidationResults([{ row: 1, claim_id: selectedFile.name, status: "valid", errors: [] }]);
       } else {
         const text = event.target?.result as string;
         parseCSV(text);
       }
     };
-    if (isXlsx) {
+    if (isExcel) {
       reader.readAsDataURL(selectedFile);
     } else {
       reader.readAsText(selectedFile);
@@ -432,14 +433,15 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     e.target.value = "";
     if (!selectedFile || !importResult) return;
 
-    const isXlsx = selectedFile.name.toLowerCase().endsWith(".xlsx");
-    if (isXlsx) {
+    const lowerName = selectedFile.name.toLowerCase();
+    const isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
+    if (isExcel) {
       const reader = new FileReader();
       reader.onload = async event => {
         const fileBase64 = event.target?.result as string;
         setFile(selectedFile);
         setFilePayload({ fileName: selectedFile.name, fileBase64 });
-        setParsedRows([{ file_name: selectedFile.name, import_type: "Corrected Billing Worklist XLSX" }]);
+        setParsedRows([{ file_name: selectedFile.name, import_type: "Corrected Billing Worklist Excel" }]);
         setValidationResults([{ row: 1, claim_id: selectedFile.name, status: "valid", errors: [] }]);
         await runImport({ fileName: selectedFile.name, fileBase64, retryRows: Array.from(rejectedSourceRows) });
       };
@@ -485,7 +487,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         <div className="bg-dark-blue p-5 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
             <FileSpreadsheet className="w-5 h-5 text-primary-blue" />
-            <h3 className="font-semibold text-lg font-display">{isEnglish ? "Import Claims from CSV / XLSX" : "Importar Claims desde CSV / XLSX"}</h3>
+            <h3 className="font-semibold text-lg font-display">{isEnglish ? "Import Claims from CSV / XLS / XLSX" : "Importar Claims desde CSV / XLS / XLSX"}</h3>
           </div>
           <button
             onClick={handleClose}
@@ -501,14 +503,14 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.xlsx"
+            accept=".csv,.xls,.xlsx"
             className="hidden"
             onChange={handleFileChange}
           />
           <input
             ref={correctedFileInputRef}
             type="file"
-            accept=".csv,.xlsx"
+            accept=".csv,.xls,.xlsx"
             className="hidden"
             onChange={handleCorrectedFileChange}
           />
@@ -542,7 +544,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             >
               <Upload className="w-10 h-10 text-slate-400 group-hover:text-primary-blue transition-colors" />
               <div className="text-center">
-                <p className="text-sm font-semibold text-slate-700">{isEnglish ? "Drag and drop your CSV or XLSX file here" : "Arrastre y suelte su archivo CSV o XLSX aquí"}</p>
+                <p className="text-sm font-semibold text-slate-700">{isEnglish ? "Drag and drop your CSV, XLS or XLSX file here" : "Arrastre y suelte su archivo CSV, XLS o XLSX aquí"}</p>
                 <p className="text-xs text-slate-500 mt-1">{isEnglish ? "or click to select a local file" : "o haga clic para seleccionar un archivo local"}</p>
               </div>
             </div>
@@ -556,7 +558,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 <div>
                   <p className="text-sm font-semibold text-slate-800">{file.name}</p>
                   <p className="text-xs text-slate-500 font-mono">
-                    {(file.size / 1024).toFixed(1)} KB - {filePayload ? (isEnglish ? "XLSX ready to process" : "XLSX listo para procesar") : `${parsedRows.length} ${isEnglish ? "records loaded" : "registros cargados"}`}
+                    {(file.size / 1024).toFixed(1)} KB - {filePayload ? (isEnglish ? "Excel ready to process" : "Excel listo para procesar") : `${parsedRows.length} ${isEnglish ? "records loaded" : "registros cargados"}`}
                   </p>
                 </div>
               </div>
@@ -798,7 +800,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           )}
           {filePayload && (
             <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
-              <h4 className="font-semibold text-dark-blue mb-1">{isEnglish ? "Billing Worklist XLSX ready" : "Billing Worklist XLSX listo"}</h4>
+              <h4 className="font-semibold text-dark-blue mb-1">{isEnglish ? "Billing Worklist Excel ready" : "Billing Worklist Excel listo"}</h4>
               <p className="text-xs leading-relaxed">
                 {isEnglish
                   ? "The file will be processed on the server. Each row will import as a Draft claim using Provider NPI, Primary Insurance Code and Code1..Code6. Charges are calculated from System Settings / FCSO Fee Schedules."
@@ -824,7 +826,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           >
             {isProcessing
               ? (isEnglish ? "Processing..." : "Procesando...")
-              : (filePayload ? (isEnglish ? "Import XLSX" : "Importar XLSX") : `${isEnglish ? "Import" : "Importar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
+              : (filePayload ? (isEnglish ? "Import Excel" : "Importar Excel") : `${isEnglish ? "Import" : "Importar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>
         </div>
       </div>

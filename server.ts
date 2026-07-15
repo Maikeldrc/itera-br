@@ -6,6 +6,7 @@
 import express from "express";
 import path from "path";
 import zlib from "zlib";
+import * as XLSX from "xlsx";
 import { createServer as createViteServer } from "vite";
 import { initializeApp, getApps } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -150,6 +151,25 @@ function parseXlsxRows(fileBase64: string): Record<string, string>[] {
     });
 }
 
+function parseWorkbookRows(fileBase64: string): Record<string, string>[] {
+  const base64 = fileBase64.includes(",") ? fileBase64.split(",").pop() || "" : fileBase64;
+  const workbook = XLSX.read(Buffer.from(base64, "base64"), { type: "buffer", cellDates: false });
+  const firstSheetName = workbook.SheetNames[0];
+  if (!firstSheetName) throw new Error("Invalid Excel file: no worksheet found.");
+  const sheet = workbook.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: "" });
+  const nonEmptyRows = rows.filter(row => row.some(value => String(value ?? "").trim() !== ""));
+  const headers = (nonEmptyRows[0] || []).map(header => String(header ?? "").trim());
+  return nonEmptyRows.slice(1).map(row => {
+    const record: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      if (!header) return;
+      record[header] = String(row[index] ?? "").trim();
+    });
+    return record;
+  });
+}
+
 function parseCsvRows(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   let current = "";
@@ -189,7 +209,7 @@ function parseUploadedTableRows(fileBase64: string, fileName = ""): Record<strin
   if (fileName.toLowerCase().endsWith(".csv")) {
     return parseCsvRows(Buffer.from(base64, "base64").toString("utf8"));
   }
-  return parseXlsxRows(fileBase64);
+  return parseWorkbookRows(fileBase64);
 }
 
 function excelSerialToIsoDate(value: string) {

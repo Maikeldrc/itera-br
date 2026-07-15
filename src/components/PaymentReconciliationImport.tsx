@@ -258,18 +258,19 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
     setSchema(null);
     setMapping({});
     const reader = new FileReader();
-    const isXlsx = file.name.toLowerCase().endsWith(".xlsx");
+    const lowerName = file.name.toLowerCase();
+    const isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
     reader.onload = event => {
       const value = String(event.target?.result || "");
-      const nextPayload = isXlsx ? { fileName: file.name, fileBase64: value } : { rows: parseCsv(value), fileName: file.name };
-      if (isXlsx) {
+      const nextPayload = isExcel ? { fileName: file.name, fileBase64: value } : { rows: parseCsv(value), fileName: file.name };
+      if (isExcel) {
         setPayload(nextPayload);
       } else {
         setPayload(nextPayload);
       }
       void analyzeSchema(nextPayload);
     };
-    if (isXlsx) reader.readAsDataURL(file);
+    if (isExcel) reader.readAsDataURL(file);
     else reader.readAsText(file);
   };
 
@@ -532,12 +533,12 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
           className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center"
         >
           <Upload className="h-8 w-8 text-slate-400" />
-          <p className="mt-3 text-sm font-bold text-slate-700">{fileName || (isEnglish ? "Drop CSV/XLSX payment report here" : "Arrastre aquí el reporte CSV/XLSX de pagos")}</p>
+          <p className="mt-3 text-sm font-bold text-slate-700">{fileName || (isEnglish ? "Drop CSV/XLS/XLSX payment report here" : "Arrastre aquí el reporte CSV/XLS/XLSX de pagos")}</p>
           <p className="mt-1 text-xs text-slate-500">{isEnglish ? "or select a local file" : "o seleccione un archivo local"}</p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.xlsx"
+            accept=".csv,.xls,.xlsx"
             className="hidden"
             onChange={event => {
               const file = event.target.files?.[0];
