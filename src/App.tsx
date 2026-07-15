@@ -310,6 +310,8 @@ export default function App() {
   const [restoringBackupId, setRestoringBackupId] = useState("");
   const [backupToRestore, setBackupToRestore] = useState<BackupRecord | null>(null);
   const [restoreConfirmationText, setRestoreConfirmationText] = useState("");
+  const [showClearOperationalDataConfirm, setShowClearOperationalDataConfirm] = useState(false);
+  const [clearOperationalDataText, setClearOperationalDataText] = useState("");
   const [restoreProgress, setRestoreProgress] = useState(0);
   const [restoreProgressLabel, setRestoreProgressLabel] = useState("");
   const [editingFs, setEditingFs] = useState<FeeSchedule | null>(null);
@@ -492,15 +494,15 @@ export default function App() {
   };
 
   const handleClearOperationalData = async () => {
-    const confirmed = await confirmAction({
-      title: isEnglish ? "Clear operational test data" : "Limpiar datos operativos de prueba",
-      message: isEnglish
-        ? "This will empty Claims, Payments, Notes and Audit_Log only. Providers, Payers, Users, Settings, fee schedules and other catalogs will not be touched."
-        : "Esto vaciará solo Claims, Payments, Notes y Audit_Log. No tocará Providers, Payers, Users, Settings, tarifas ni otros catálogos.",
-      confirmLabel: isEnglish ? "Clear data" : "Limpiar datos",
-      tone: "danger"
-    });
-    if (!confirmed) return;
+    if (clearOperationalDataText !== "CLEAR OPERATIONAL DATA") {
+      notify(
+        isEnglish
+          ? "Type CLEAR OPERATIONAL DATA to confirm this cleanup."
+          : "Escriba CLEAR OPERATIONAL DATA para confirmar esta limpieza.",
+        "warning"
+      );
+      return;
+    }
 
     setIsClearingOperationalData(true);
     try {
@@ -509,7 +511,8 @@ export default function App() {
         headers: {
           "Content-Type": "application/json",
           "x-user-email": currentUser.email
-        }
+        },
+        body: JSON.stringify({ confirmationPhrase: clearOperationalDataText })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
@@ -522,6 +525,8 @@ export default function App() {
       setAuditLogs([]);
       setSelectedClaim(null);
       setSelectedClaimIds([]);
+      setShowClearOperationalDataConfirm(false);
+      setClearOperationalDataText("");
       notify(
         isEnglish
           ? "Operational sheets cleared: Claims, Payments, Notes and Audit_Log."
@@ -3599,7 +3604,10 @@ export default function App() {
 
                     <button
                       type="button"
-                      onClick={handleClearOperationalData}
+                      onClick={() => {
+                        setClearOperationalDataText("");
+                        setShowClearOperationalDataConfirm(true);
+                      }}
                       disabled={isClearingOperationalData}
                       className="inline-flex items-center justify-center gap-2 rounded-lg bg-rose-600 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition-colors hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
@@ -4901,6 +4909,91 @@ export default function App() {
                 className="rounded-lg bg-amber-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {restoringBackupId ? (isEnglish ? "Restoring..." : "Restaurando...") : (isEnglish ? "Restore Backup" : "Restaurar Salva")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showClearOperationalDataConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-rose-100 bg-rose-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-white p-2 text-rose-600 shadow-sm">
+                  <Trash2 className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    {isEnglish ? "Confirm Operational Data Cleanup" : "Confirmar limpieza de datos operativos"}
+                  </h4>
+                  <p className="mt-0.5 text-[10px] font-semibold text-rose-700">
+                    {isEnglish ? "Irreversible admin action" : "Acción administrativa irreversible"}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (isClearingOperationalData) return;
+                  setShowClearOperationalDataConfirm(false);
+                  setClearOperationalDataText("");
+                }}
+                disabled={isClearingOperationalData}
+                className="rounded-full p-1 text-slate-500 hover:bg-white disabled:opacity-50"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5 text-xs text-slate-700">
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-rose-900">
+                <p className="font-bold">
+                  {isEnglish ? "This will permanently empty operational sheets." : "Esto vaciará permanentemente las hojas operativas."}
+                </p>
+                <p className="mt-1 leading-relaxed">
+                  {isEnglish
+                    ? "Only Claims, Payments, Notes and Audit_Log will be cleared. Providers, Payers, Users, Settings, FeeSchedules, Fee_Schedule, Eligibility_Coverage and other catalogs will not be touched."
+                    : "Solo se limpiarán Claims, Payments, Notes y Audit_Log. No se tocarán Providers, Payers, Users, Settings, FeeSchedules, Fee_Schedule, Eligibility_Coverage ni otros catálogos."}
+                </p>
+              </div>
+
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {isEnglish ? "Type CLEAR OPERATIONAL DATA to confirm" : "Escriba CLEAR OPERATIONAL DATA para confirmar"}
+                </span>
+                <input
+                  value={clearOperationalDataText}
+                  onChange={event => setClearOperationalDataText(event.target.value)}
+                  disabled={isClearingOperationalData}
+                  autoFocus
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 font-mono text-xs font-bold text-slate-800 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-100 disabled:bg-slate-100"
+                  placeholder="CLEAR OPERATIONAL DATA"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearOperationalDataConfirm(false);
+                  setClearOperationalDataText("");
+                }}
+                disabled={isClearingOperationalData}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                {isEnglish ? "Cancel" : "Cancelar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleClearOperationalData()}
+                disabled={clearOperationalDataText !== "CLEAR OPERATIONAL DATA" || isClearingOperationalData}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isClearingOperationalData
+                  ? (isEnglish ? "Clearing..." : "Limpiando...")
+                  : (isEnglish ? "Clear Operational Data" : "Limpiar Datos Operativos")}
               </button>
             </div>
           </div>

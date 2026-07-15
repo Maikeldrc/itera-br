@@ -361,6 +361,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const displayedSummary = importResult?.summary || null;
+  const importCompletedSuccessfully = Boolean(importResult?.success && Number(importResult.importedCount || 0) > 0 && Number(importResult.errorCount || 0) === 0);
   const rejectedSourceRows = new Set<number>(
     (importResult?.errors || [])
       .map(err => Number(err.row))
@@ -821,12 +822,15 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           </button>
           <button
             onClick={handleImportClick}
-            disabled={(!filePayload && parsedRows.length === 0) || isProcessing}
+            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || importCompletedSuccessfully}
             className="bg-primary-blue hover:bg-secondary-blue disabled:bg-slate-300 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md"
+            title={importCompletedSuccessfully ? (isEnglish ? "This file has already been imported. Close this window to start a new import." : "Este archivo ya fue importado. Cierre esta ventana para iniciar una nueva importación.") : undefined}
           >
             {isProcessing
               ? (isEnglish ? "Processing..." : "Procesando...")
-              : (filePayload ? (isEnglish ? "Import Excel" : "Importar Excel") : `${isEnglish ? "Import" : "Importar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
+              : importCompletedSuccessfully
+                ? (isEnglish ? "Import Completed" : "Importación completada")
+                : (filePayload ? (isEnglish ? "Import Excel" : "Importar Excel") : `${isEnglish ? "Import" : "Importar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>
         </div>
       </div>

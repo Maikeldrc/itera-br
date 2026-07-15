@@ -785,6 +785,9 @@ async function startServer() {
 
   app.post("/api/admin/clear-operational-data", requireRoles(...API_ROLE_GROUPS.adminOnly), async (_req: AppRequest, res) => {
     try {
+      if (textValue(_req.body?.confirmationPhrase) !== "CLEAR OPERATIONAL DATA") {
+        return res.status(400).json({ success: false, error: "Confirmation phrase is required." });
+      }
       const result = await sheetsService.clearOperationalData();
       await sheetsService.addUserActivityLog({
         user_email: getOperatorEmail(_req),
