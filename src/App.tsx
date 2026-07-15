@@ -285,6 +285,8 @@ export default function App() {
   const [newBilledBy, setNewBilledBy] = useState<"" | "ITERA" | "Provider">("");
   const [newProviderId, setNewProviderId] = useState("");
   const [newPayerId, setNewPayerId] = useState("");
+  const [newPayerSearch, setNewPayerSearch] = useState("");
+  const [isPayerPickerOpen, setIsPayerPickerOpen] = useState(false);
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
 
   // Fee Schedule management UI states
@@ -354,6 +356,15 @@ export default function App() {
 
   const visibleClaims = filterClaimsForUser(claims, currentUser);
   const visibleProviders = filterProvidersForUser(providers, currentUser);
+  const payerSearchNeedle = newPayerSearch.trim().toLowerCase();
+  const payerPickerOptions = payers
+    .filter(payer => payer.active !== false)
+    .filter(payer => {
+      if (!payerSearchNeedle) return true;
+      return `${payer.payer_name} ${payer.payer_id} ${payer.pverify_payer_code || ""}`.toLowerCase().includes(payerSearchNeedle);
+    })
+    .slice(0, 30);
+  const selectedNewPayer = payers.find(payer => payer.payer_id === newPayerId);
 
   useEffect(() => {
     setApiTokenProvider(auth.getIdToken);
@@ -642,6 +653,8 @@ export default function App() {
     setNewBilledBy("");
     setNewProviderId("");
     setNewPayerId("");
+    setNewPayerSearch("");
+    setIsPayerPickerOpen(false);
     setNewClaimLines([createBlankClaimServiceLine()]);
     setIsCreateOpen(true);
   };
@@ -651,6 +664,7 @@ export default function App() {
     setIsCreateOpen(false);
     setEditingClaim(null);
     setClaimSaveProgress(0);
+    setIsPayerPickerOpen(false);
   };
 
   const handleOpenEditClaim = (claim: Claim) => {
@@ -661,6 +675,8 @@ export default function App() {
     setNewBilledBy((claim.billed_by === "ITERA" || claim.billed_by === "Provider") ? claim.billed_by : "");
     setNewProviderId(toText(claim.provider_id));
     setNewPayerId(toText(claim.payer_id));
+    setNewPayerSearch(toText(claim.payer_name) || payers.find(p => p.payer_id === toText(claim.payer_id))?.payer_name || "");
+    setIsPayerPickerOpen(false);
 
     let parsedLines: any[] = [];
     if (claim.service_lines_json) {
@@ -716,6 +732,10 @@ export default function App() {
       charge: getManualClaimLineCharge(line)
     }));
 
+    if (newPayerSearch.trim() && !payerObj) {
+      await stopWithMessage(isEnglish ? "Select a valid insurance payer from the filtered list." : "Seleccione una aseguradora válida desde la lista filtrada.", "warning");
+      return;
+    }
     if (!newPatientName.trim() || !newPatientId.trim() || !newProviderId || !newPayerId || !newDos || !newBilledBy) {
       await stopWithMessage(isEnglish ? "Complete all claim header fields before saving." : "Complete todos los campos principales del claim antes de guardar.", "warning");
       return;
@@ -900,6 +920,8 @@ export default function App() {
       setNewBilledBy("");
       setNewProviderId("");
       setNewPayerId("");
+      setNewPayerSearch("");
+      setIsPayerPickerOpen(false);
       setNewClaimLines([createBlankClaimServiceLine()]);
       setIsSavingClaim(false);
       setClaimSaveProgress(0);
@@ -4607,17 +4629,78 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-slate-500 mb-1">{isEnglish ? "Insurance (Payer)" : "Aseguradora (Payer)"}</label>
-                  <select
-                    required
-                    value={newPayerId}
-                    onChange={(e) => setNewPayerId(e.target.value)}
-                    className="w-full p-2 border border-slate-200 rounded bg-slate-50 text-slate-700"
-                  >
-                    <option value="" disabled>{isEnglish ? "Select payer" : "Selecciona payer"}</option>
-                    {payers.map(p => (
-                      <option key={p.payer_id} value={p.payer_id}>{p.payer_name}</option>
-                    ))}
-                  </select>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      required
+                      value={newPayerSearch}
+                      onFocus={() => setIsPayerPickerOpen(true)}
+                      onBlur={() => window.setTimeout(() => setIsPayerPickerOpen(false), 140)}
+                      onChange={(event) => {
+                        const nextValue = event.target.value;
+                        setNewPayerSearch(nextValue);
+                        setIsPayerPickerOpen(true);
+                        const exactMatch = payers.find(payer => payer.payer_name.toLowerCase() === nextValue.trim().toLowerCase());
+                        setNewPayerId(exactMatch?.payer_id || "");
+                      }}
+                      placeholder={isEnglish ? "Type insurance name..." : "Escriba el nombre del insurance..."}
+                      className={`w-full rounded border bg-slate-50 py-2 pl-8 pr-8 text-slate-700 outline-none focus:border-primary-blue focus:bg-white focus:ring-2 focus:ring-blue-100 ${
+                        newPayerSearch && !newPayerId ? "border-amber-300" : "border-slate-200"
+                      }`}
+                    />
+                    {newPayerSearch && (
+                      <button
+                        type="button"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => {
+                          setNewPayerSearch("");
+                          setNewPayerId("");
+                          setIsPayerPickerOpen(true);
+                        }}
+                        className="absolute right-2 top-2 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                        title={isEnglish ? "Clear payer" : "Limpiar payer"}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    {isPayerPickerOpen && (
+                      <div className="absolute z-50 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-xl">
+                        {payerPickerOptions.length > 0 ? (
+                          payerPickerOptions.map(payer => (
+                            <button
+                              type="button"
+                              key={payer.payer_id}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setNewPayerId(payer.payer_id);
+                                setNewPayerSearch(payer.payer_name);
+                                setIsPayerPickerOpen(false);
+                              }}
+                              className={`flex w-full flex-col px-3 py-2 text-left text-[11px] hover:bg-blue-50 ${
+                                payer.payer_id === newPayerId ? "bg-blue-50 text-dark-blue" : "text-slate-700"
+                              }`}
+                            >
+                              <span className="font-bold">{payer.payer_name}</span>
+                              <span className="font-mono text-[9px] text-slate-400">{payer.payer_id}{payer.pverify_payer_code ? ` · ${payer.pverify_payer_code}` : ""}</span>
+                            </button>
+                          ))
+                        ) : (
+                          <div className="px-3 py-4 text-center text-[11px] font-semibold text-slate-400">
+                            {isEnglish ? "No matching payers." : "No hay payers coincidentes."}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  {newPayerSearch && !newPayerId && (
+                    <p className="mt-1 text-[10px] font-semibold text-amber-600">
+                      {isEnglish ? "Select a payer from the filtered list." : "Seleccione un payer de la lista filtrada."}
+                    </p>
+                  )}
+                  {selectedNewPayer && (
+                    <p className="mt-1 font-mono text-[10px] text-slate-400">ID: {selectedNewPayer.payer_id}</p>
+                  )}
                 </div>
               </div>
 
