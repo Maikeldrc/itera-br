@@ -5,7 +5,9 @@ export type MenuAccessId =
   | "claims"
   | "payments"
   | "payment-reconciliation-import"
+  | "import-exceptions"
   | "rcm-work-queue"
+  | "rcm-productivity"
   | "denials"
   | "errors"
   | "providers"
@@ -18,7 +20,9 @@ export const MENU_ACCESS_IDS: MenuAccessId[] = [
   "claims",
   "payments",
   "payment-reconciliation-import",
+  "import-exceptions",
   "rcm-work-queue",
+  "rcm-productivity",
   "denials",
   "errors",
   "providers",
@@ -30,9 +34,42 @@ export const MENU_ACCESS_IDS: MenuAccessId[] = [
 export const ROLE_DEFAULT_MENU_ACCESS: Record<UserRole, MenuAccessId[]> = {
   [UserRole.Admin]: MENU_ACCESS_IDS,
   [UserRole.BillingManager]: MENU_ACCESS_IDS,
-  [UserRole.ReconciliationSpecialist]: ["dashboard", "claims", "payments", "payment-reconciliation-import", "rcm-work-queue", "denials", "errors", "reports"],
-  [UserRole.ProviderViewer]: ["dashboard", "claims", "payments", "rcm-work-queue", "providers", "reports"],
-  [UserRole.Auditor]: ["dashboard", "claims", "rcm-work-queue", "denials", "errors", "providers", "reports", "audit-log"]
+  [UserRole.ReconciliationSpecialist]: ["dashboard", "claims", "payments", "payment-reconciliation-import", "import-exceptions", "rcm-work-queue", "rcm-productivity", "denials", "errors", "reports"],
+  [UserRole.ProviderViewer]: ["dashboard", "claims", "payments", "rcm-work-queue", "rcm-productivity", "providers", "reports"],
+  [UserRole.Auditor]: ["dashboard", "claims", "import-exceptions", "rcm-work-queue", "rcm-productivity", "denials", "errors", "providers", "reports", "audit-log"]
+};
+
+export type ActionAccessId =
+  | "claims.create"
+  | "claims.edit"
+  | "claims.delete"
+  | "claims.import"
+  | "payments.import"
+  | "payments.apply"
+  | "review.assign"
+  | "settings.manage"
+  | "backups.restore"
+  | "data.cleanup";
+
+export const ACTION_ACCESS_IDS: ActionAccessId[] = [
+  "claims.create",
+  "claims.edit",
+  "claims.delete",
+  "claims.import",
+  "payments.import",
+  "payments.apply",
+  "review.assign",
+  "settings.manage",
+  "backups.restore",
+  "data.cleanup"
+];
+
+export const ROLE_DEFAULT_ACTION_ACCESS: Record<UserRole, ActionAccessId[]> = {
+  [UserRole.Admin]: ACTION_ACCESS_IDS,
+  [UserRole.BillingManager]: ["claims.create", "claims.edit", "claims.import", "payments.import", "payments.apply", "review.assign", "settings.manage"],
+  [UserRole.ReconciliationSpecialist]: ["claims.edit", "payments.import", "payments.apply", "review.assign"],
+  [UserRole.ProviderViewer]: [],
+  [UserRole.Auditor]: []
 };
 
 const ALL_PROVIDERS = "ALL";
@@ -55,6 +92,7 @@ export function serializeMenuAccess(items: MenuAccessId[]) {
 }
 
 export function getUserMenuAccess(user: Partial<User>) {
+  if (user.role === UserRole.Admin) return MENU_ACCESS_IDS;
   const explicit = parseMenuAccess(user.menu_access);
   if (explicit.length > 0) return explicit;
   return ROLE_DEFAULT_MENU_ACCESS[user.role as UserRole] || [];
@@ -62,6 +100,18 @@ export function getUserMenuAccess(user: Partial<User>) {
 
 export function canUserAccessMenu(user: Partial<User>, menuId: MenuAccessId) {
   return getUserMenuAccess(user).includes(menuId);
+}
+
+export function getUserActionAccess(user: Partial<User>) {
+  if (user.role === UserRole.Admin) return ACTION_ACCESS_IDS;
+  const explicit = splitAccess((user as any).action_access)
+    .filter((item): item is ActionAccessId => ACTION_ACCESS_IDS.includes(item as ActionAccessId));
+  if (explicit.length > 0) return explicit;
+  return ROLE_DEFAULT_ACTION_ACCESS[user.role as UserRole] || [];
+}
+
+export function canUserPerformAction(user: Partial<User>, actionId: ActionAccessId) {
+  return getUserActionAccess(user).includes(actionId);
 }
 
 export function parseProviderAccess(value: unknown): string[] {
@@ -100,6 +150,7 @@ export function normalizeUserAccess(user: Partial<User>): Partial<User> {
   return {
     ...user,
     menu_access: serializeMenuAccess(parseMenuAccess(user.menu_access)),
+    action_access: Array.from(new Set(getUserActionAccess(user).filter(item => ACTION_ACCESS_IDS.includes(item)))).join(","),
     provider_access: userHasAllProviderAccess(user) ? ALL_PROVIDERS : serializeProviderAccess(parseProviderAccess(user.provider_access), false)
   };
 }

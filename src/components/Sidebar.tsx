@@ -10,6 +10,7 @@ import {
   Coins,
   ReceiptText,
   ListChecks,
+  ClipboardList,
   FileX,
   FileWarning,
   Hospital,
@@ -29,7 +30,9 @@ export type ViewType =
   | "claims"
   | "payments"
   | "payment-reconciliation-import"
+  | "import-exceptions"
   | "rcm-work-queue"
+  | "rcm-productivity"
   | "denials"
   | "errors"
   | "providers"
@@ -75,9 +78,21 @@ export function Sidebar({ currentView, onViewChange, currentUser, isCollapsed, o
       roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist],
     },
     {
+      id: "import-exceptions" as ViewType,
+      label: isEnglish ? "Import Exceptions" : "Excepciones de Importación",
+      icon: ClipboardList,
+      roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist, UserRole.Auditor],
+    },
+    {
       id: "rcm-work-queue" as ViewType,
       label: isEnglish ? "RCM Work Queue" : "Cola de Trabajo RCM",
       icon: ListChecks,
+      roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist, UserRole.ProviderViewer, UserRole.Auditor],
+    },
+    {
+      id: "rcm-productivity" as ViewType,
+      label: isEnglish ? "RCM Productivity" : "Productividad RCM",
+      icon: BarChart3,
       roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist, UserRole.ProviderViewer, UserRole.Auditor],
     },
     {

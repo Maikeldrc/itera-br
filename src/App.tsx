@@ -51,12 +51,17 @@ import { validateClaimCptRepeatLimitsAgainstExisting, validateCptRepeatLimits } 
 import { validateUniquePatientProvider } from "./patientRegistrationValidation";
 import {
   canUserAccessMenu,
+  canUserPerformAction,
   filterClaimsForUser,
   filterProvidersForUser,
+  getUserActionAccess,
   getUserMenuAccess,
   MENU_ACCESS_IDS,
   MenuAccessId,
+  ACTION_ACCESS_IDS,
+  ActionAccessId,
   ROLE_DEFAULT_MENU_ACCESS,
+  ROLE_DEFAULT_ACTION_ACCESS,
   serializeMenuAccess,
   serializeProviderAccess,
   userHasAllProviderAccess,
@@ -142,7 +147,9 @@ const VIEW_PATHS: Record<ViewType, string> = {
   claims: "/claims",
   payments: "/payments",
   "payment-reconciliation-import": "/payment-reconciliation-import",
+  "import-exceptions": "/import-exceptions",
   "rcm-work-queue": "/rcm-work-queue",
+  "rcm-productivity": "/rcm-productivity",
   denials: "/denials",
   errors: "/claims-with-errors",
   providers: "/physician-balances",
@@ -254,6 +261,7 @@ export default function App() {
     email: "egomez@itera.health",
     role: UserRole.BillingManager,
     menu_access: serializeMenuAccess(ROLE_DEFAULT_MENU_ACCESS[UserRole.BillingManager]),
+    action_access: ROLE_DEFAULT_ACTION_ACCESS[UserRole.BillingManager].join(","),
     provider_access: serializeProviderAccess([], true),
     active: true
   });
@@ -280,7 +288,7 @@ export default function App() {
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
 
   // Fee Schedule management UI states
-  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "operations" | "backups" | "data-cleanup">("language");
+  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "operations" | "import-templates" | "backups" | "data-cleanup">("language");
   const [backupConfig, setBackupConfig] = useState<BackupConfig | null>(null);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [operationsData, setOperationsData] = useState<any | null>(null);
@@ -290,6 +298,8 @@ export default function App() {
   const [isImportingBankDeposits, setIsImportingBankDeposits] = useState(false);
   const [bankDepositImportSummary, setBankDepositImportSummary] = useState<any | null>(null);
   const [savingReviewTaskId, setSavingReviewTaskId] = useState("");
+  const [savingTemplateId, setSavingTemplateId] = useState("");
+  const [editingTemplateDrafts, setEditingTemplateDrafts] = useState<Record<string, { template_name: string; provider_name: string; system_name: string }>>({});
   const bankDepositInputRef = useRef<HTMLInputElement | null>(null);
   const [backupFrequencyHours, setBackupFrequencyHours] = useState(24);
   const [backupEnabled, setBackupEnabled] = useState(true);
@@ -335,6 +345,7 @@ export default function App() {
   const [userEmailInput, setUserEmailInput] = useState("");
   const [userRoleInput, setUserRoleInput] = useState<UserRole>(UserRole.ReconciliationSpecialist);
   const [userMenuAccessInput, setUserMenuAccessInput] = useState<MenuAccessId[]>(ROLE_DEFAULT_MENU_ACCESS[UserRole.ReconciliationSpecialist]);
+  const [userActionAccessInput, setUserActionAccessInput] = useState<ActionAccessId[]>(ROLE_DEFAULT_ACTION_ACCESS[UserRole.ReconciliationSpecialist]);
   const [userProviderAccessAllInput, setUserProviderAccessAllInput] = useState(true);
   const [userProviderAccessIdsInput, setUserProviderAccessIdsInput] = useState<string[]>([]);
   const [userActiveInput, setUserActiveInput] = useState(true);
@@ -1226,6 +1237,29 @@ export default function App() {
     }
   };
 
+  const handleUpdateImportTemplate = async (template: any, updates: Record<string, unknown>) => {
+    if (!template?.template_id) return;
+    setSavingTemplateId(template.template_id);
+    try {
+      const res = await apiFetch(`/api/payment-reconciliation-import/templates/${encodeURIComponent(template.template_id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update payment import template.");
+      setOperationsData((current: any) => ({
+        ...current,
+        importMappingTemplates: (current?.importMappingTemplates || []).map((item: any) => item.template_id === template.template_id ? data.template : item)
+      }));
+      notify(isEnglish ? "Payment import template updated." : "Template de importación actualizado.", "success");
+    } catch (err: any) {
+      notify(`${isEnglish ? "Template update error" : "Error actualizando template"}: ${err.message}`, "error");
+    } finally {
+      setSavingTemplateId("");
+    }
+  };
+
   const handleSaveBackupSettings = async () => {
     setIsSavingBackupSettings(true);
     try {
@@ -1333,7 +1367,11 @@ export default function App() {
   }, [currentView, settingsTab, currentUser.role]);
 
   useEffect(() => {
-    if (currentView === "settings" && settingsTab === "operations") {
+    if (
+      (currentView === "settings" && ["operations", "import-templates"].includes(settingsTab)) ||
+      currentView === "import-exceptions" ||
+      currentView === "rcm-productivity"
+    ) {
       loadOperationsCenter();
     }
   }, [currentView, settingsTab, currentUser.role]);
@@ -1644,6 +1682,7 @@ export default function App() {
     setUserEmailInput("");
     setUserRoleInput(UserRole.ReconciliationSpecialist);
     setUserMenuAccessInput(ROLE_DEFAULT_MENU_ACCESS[UserRole.ReconciliationSpecialist]);
+    setUserActionAccessInput(ROLE_DEFAULT_ACTION_ACCESS[UserRole.ReconciliationSpecialist]);
     setUserProviderAccessAllInput(true);
     setUserProviderAccessIdsInput([]);
     setUserActiveInput(true);
@@ -1655,6 +1694,7 @@ export default function App() {
     setUserEmailInput(user.email);
     setUserRoleInput(user.role);
     setUserMenuAccessInput(getUserMenuAccess(user));
+    setUserActionAccessInput(getUserActionAccess(user));
     setUserProviderAccessAllInput(userHasAllProviderAccess(user));
     setUserProviderAccessIdsInput(parseProviderAccess(user.provider_access).filter(item => item !== "ALL"));
     setUserActiveInput(user.active);
@@ -1663,6 +1703,7 @@ export default function App() {
   const handleUserRoleChange = (role: UserRole) => {
     setUserRoleInput(role);
     setUserMenuAccessInput(ROLE_DEFAULT_MENU_ACCESS[role]);
+    setUserActionAccessInput(ROLE_DEFAULT_ACTION_ACCESS[role]);
   };
 
   const toggleUserMenuAccess = (menuId: MenuAccessId) => {
@@ -1670,6 +1711,14 @@ export default function App() {
       prev.includes(menuId)
         ? prev.filter(item => item !== menuId)
         : [...prev, menuId]
+    );
+  };
+
+  const toggleUserActionAccess = (actionId: ActionAccessId) => {
+    setUserActionAccessInput(prev =>
+      prev.includes(actionId)
+        ? prev.filter(item => item !== actionId)
+        : [...prev, actionId]
     );
   };
 
@@ -1701,6 +1750,7 @@ export default function App() {
       email: userEmailInput.trim().toLowerCase(),
       role: userRoleInput,
       menu_access: serializeMenuAccess(userMenuAccessInput),
+      action_access: Array.from(new Set(userActionAccessInput)).join(","),
       provider_access: serializeProviderAccess(userProviderAccessIdsInput, userProviderAccessAllInput),
       active: userActiveInput
     };
@@ -2045,6 +2095,7 @@ export default function App() {
                   </button>
                   <button
                     onClick={() => setIsImportOpen(true)}
+                    disabled={!canUserPerformAction(currentUser, "claims.import")}
                     className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 bg-white hover:bg-slate-100 rounded-xl text-xs font-semibold text-slate-600 transition-colors"
                   >
                     <Upload className="w-3.5 h-3.5 text-secondary-blue" />
@@ -2052,6 +2103,7 @@ export default function App() {
                   </button>
                   <button
                     onClick={handleOpenCreateClaim}
+                    disabled={!canUserPerformAction(currentUser, "claims.create")}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-blue hover:bg-secondary-blue text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-blue-500/10"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -2083,14 +2135,14 @@ export default function App() {
                 }}
                 onSelectAllClaims={(ids) => setSelectedClaimIds(ids)}
                 onViewDetails={(claim) => setSelectedClaim(claim)}
-                onEditClaim={currentUser.role === UserRole.Admin ? handleOpenEditClaim : undefined}
+                onEditClaim={canUserPerformAction(currentUser, "claims.edit") ? handleOpenEditClaim : undefined}
                 onUpdateClaim={async (updates, targetClaimId) => {
                   await handleUpdateClaim(updates, targetClaimId);
                 }}
                 onSaveServiceLineNotes={async (json, targetClaimId) => {
                   await handleSaveServiceLineNotes(json, targetClaimId);
                 }}
-                onDeleteClaim={handleSoftDeleteClaim}
+                onDeleteClaim={canUserPerformAction(currentUser, "claims.delete") ? handleSoftDeleteClaim : undefined}
                 userRole={currentUser.role}
                 allUsers={users}
                 notes={notes}
@@ -2117,9 +2169,161 @@ export default function App() {
             />
           )}
 
+          {/* VIEW: IMPORT EXCEPTIONS CENTER */}
+          {currentView === "import-exceptions" && (
+            <div className="space-y-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900">{isEnglish ? "Import Exceptions" : "Excepciones de Importación"}</h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {isEnglish ? "Centralized queue for rejected imports, rows requiring review and failed background jobs." : "Cola centralizada para imports rechazados, filas en revisión y procesos fallidos."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void loadOperationsCenter()}
+                  disabled={isLoadingOperations}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                >
+                  <RefreshCw className={`h-4 w-4 ${isLoadingOperations ? "animate-spin" : ""}`} />
+                  {isEnglish ? "Refresh" : "Actualizar"}
+                </button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-4">
+                {[
+                  [isEnglish ? "Open exceptions" : "Excepciones abiertas", operationsData?.importExceptions?.length || 0],
+                  [isEnglish ? "Review tasks" : "Tareas revisión", operationsData?.reviewTasks?.filter((task: any) => !["Resolved", "Dismissed"].includes(task.status)).length || 0],
+                  [isEnglish ? "Rejected rows" : "Filas rechazadas", (operationsData?.importHistory || []).reduce((sum: number, item: any) => sum + Number(item.rejected_rows || 0), 0)],
+                  [isEnglish ? "Failed jobs" : "Procesos fallidos", operationsData?.jobs?.filter((job: any) => job.status === "failed").length || 0]
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                    <p className="mt-2 text-2xl font-bold text-slate-900">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                <div className="border-b border-slate-100 px-5 py-4">
+                  <h3 className="text-sm font-bold text-slate-900">{isEnglish ? "Exception Queue" : "Cola de Excepciones"}</h3>
+                  <p className="mt-0.5 text-[10px] text-slate-500">{isEnglish ? "Review tasks can be assigned and resolved directly here." : "Las tareas de revisión se pueden asignar y resolver directamente aquí."}</p>
+                </div>
+                <div className="overflow-auto">
+                  <table className="w-full min-w-[1180px] text-left text-xs">
+                    <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2">Type</th>
+                        <th className="px-3 py-2">Source</th>
+                        <th className="px-3 py-2">Claim / CPT</th>
+                        <th className="px-3 py-2">Reason</th>
+                        <th className="px-3 py-2">Severity</th>
+                        <th className="px-3 py-2">Assigned</th>
+                        <th className="px-3 py-2">Due</th>
+                        <th className="px-3 py-2">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {(operationsData?.importExceptions || []).slice(0, 100).map((item: any) => {
+                        const task = (operationsData?.reviewTasks || []).find((candidate: any) => candidate.task_id === item.exception_id);
+                        return (
+                          <tr key={item.exception_id} className="hover:bg-slate-50">
+                            <td className="px-3 py-2 font-semibold text-slate-800">{item.type}</td>
+                            <td className="px-3 py-2 text-slate-600">{item.source || "-"}</td>
+                            <td className="px-3 py-2">
+                              <p className="font-mono font-bold text-dark-blue">{item.claim_id || "-"}</p>
+                              <p className="font-mono text-[10px] text-slate-400">{item.cpt_code || "-"}</p>
+                            </td>
+                            <td className="max-w-md px-3 py-2 text-slate-600">{item.reason || "-"}</td>
+                            <td className="px-3 py-2">
+                              <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${item.severity === "High" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>{item.severity || "-"}</span>
+                            </td>
+                            <td className="px-3 py-2">
+                              {task ? (
+                                <select value={task.assigned_to || ""} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { assigned_to: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold">
+                                  <option value="">{isEnglish ? "Unassigned" : "Sin asignar"}</option>
+                                  {users.filter(user => user.active).map(user => <option key={user.user_id} value={user.user_id}>{user.name || user.email}</option>)}
+                                </select>
+                              ) : item.assigned_to || "-"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {task ? <input type="date" value={task.due_date || ""} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { due_date: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold" /> : "-"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {task ? (
+                                <select value={task.status || "Open"} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { status: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold">
+                                  {["Open", "In Progress", "Resolved", "Dismissed"].map(value => <option key={value} value={value}>{value}</option>)}
+                                </select>
+                              ) : (
+                                <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">{item.status}</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {(!operationsData?.importExceptions || operationsData.importExceptions.length === 0) && (
+                        <tr><td colSpan={8} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">{isLoadingOperations ? (isEnglish ? "Loading..." : "Cargando...") : (isEnglish ? "No import exceptions." : "No hay excepciones de importación.")}</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* VIEW: RCM PRODUCTIVITY */}
+          {currentView === "rcm-productivity" && (
+            <div className="space-y-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="font-display text-2xl font-bold tracking-tight text-slate-900">{isEnglish ? "RCM Productivity" : "Productividad RCM"}</h2>
+                  <p className="mt-1 text-xs text-slate-500">{isEnglish ? "Operational workload, task assignment and payment throughput indicators." : "Indicadores de carga operativa, asignación y pagos."}</p>
+                </div>
+                <button type="button" onClick={() => void loadOperationsCenter()} disabled={isLoadingOperations} className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60">
+                  <RefreshCw className={`h-4 w-4 ${isLoadingOperations ? "animate-spin" : ""}`} />
+                  {isEnglish ? "Refresh" : "Actualizar"}
+                </button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-4">
+                {[
+                  [isEnglish ? "Total paid" : "Total pagado", `$${Number(operationsData?.metrics?.totalPaid || 0).toFixed(2)}`],
+                  [isEnglish ? "Open balance" : "Balance abierto", `$${Number(operationsData?.metrics?.totalBalance || 0).toFixed(2)}`],
+                  [isEnglish ? "Imported rows 30d" : "Filas importadas 30d", operationsData?.metrics?.importedRows30Days || 0],
+                  [isEnglish ? "Open review tasks" : "Tareas abiertas", operationsData?.health?.totals?.openReviewTasks || 0]
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                    <p className="mt-2 text-xl font-bold text-slate-900">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="grid gap-5 xl:grid-cols-3">
+                {[
+                  { title: isEnglish ? "Tasks by owner" : "Tareas por responsable", rows: Object.entries(operationsData?.metrics?.taskCounts || {}) },
+                  { title: isEnglish ? "Claims by status" : "Claims por estado", rows: Object.entries(operationsData?.metrics?.statusCounts || {}) },
+                  { title: isEnglish ? "Next actions" : "Próximas acciones", rows: Object.entries(operationsData?.metrics?.nextActionCounts || {}) }
+                ].map(section => (
+                  <div key={section.title} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                    <div className="border-b border-slate-100 px-5 py-4">
+                      <h3 className="text-sm font-bold text-slate-900">{section.title}</h3>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {section.rows.slice(0, 12).map(([label, value]) => (
+                        <div key={String(label)} className="flex items-center justify-between gap-3 px-5 py-3 text-xs">
+                          <span className="truncate font-semibold text-slate-700">{String(label)}</span>
+                          <span className="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-bold text-dark-blue">{String(value)}</span>
+                        </div>
+                      ))}
+                      {section.rows.length === 0 && <div className="px-5 py-8 text-center text-xs font-semibold text-slate-400">-</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* VIEW: PAYMENT RECONCILIATION IMPORT */}
           {currentView === "payment-reconciliation-import" && (
             <PaymentReconciliationImport
+              canApply={canUserPerformAction(currentUser, "payments.apply")}
               onImported={() => fetchAllData({ showInitialLoading: false })}
             />
           )}
@@ -2629,6 +2833,19 @@ export default function App() {
                     <span>{isEnglish ? "Operations Center" : "Centro Operativo"}</span>
                   </button>
                 )}
+                {[UserRole.Admin, UserRole.BillingManager].includes(currentUser.role) && (
+                  <button
+                    onClick={() => setSettingsTab("import-templates")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+                      settingsTab === "import-templates"
+                        ? "border-primary-blue text-primary-blue bg-blue-50/40 rounded-t-lg"
+                        : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg"
+                    }`}
+                  >
+                    <Upload className="w-4 h-4" />
+                    <span>{isEnglish ? "Import Templates" : "Templates de Import"}</span>
+                  </button>
+                )}
                 {currentUser.role === UserRole.Admin && (
                   <button
                     onClick={() => setSettingsTab("backups")}
@@ -3029,6 +3246,126 @@ export default function App() {
                 </div>
               )}
 
+              {settingsTab === "import-templates" && [UserRole.Admin, UserRole.BillingManager].includes(currentUser.role) && (
+                <div className="space-y-5">
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Payment Import Template Library" : "Biblioteca de Templates de Payment Import"}</h4>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {isEnglish
+                            ? "Saved column mappings are stored in the Import_Mapping_Templates sheet and are auto-selected when a provider file has the same column signature."
+                            : "Los mappings guardados se almacenan en Import_Mapping_Templates y se seleccionan automáticamente cuando el archivo tiene la misma firma de columnas."}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void loadOperationsCenter()}
+                        disabled={isLoadingOperations}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${isLoadingOperations ? "animate-spin" : ""}`} />
+                        {isEnglish ? "Refresh" : "Actualizar"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                    <div className="overflow-auto">
+                      <table className="w-full min-w-[1180px] text-left text-xs">
+                        <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                          <tr>
+                            <th className="px-3 py-2">Template</th>
+                            <th className="px-3 py-2">Provider</th>
+                            <th className="px-3 py-2">System</th>
+                            <th className="px-3 py-2">Mapped Fields</th>
+                            <th className="px-3 py-2">Column Signature</th>
+                            <th className="px-3 py-2">Updated</th>
+                            <th className="px-3 py-2">Status</th>
+                            <th className="px-3 py-2 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(operationsData?.importMappingTemplates || []).map((template: any) => {
+                            const draft = editingTemplateDrafts[template.template_id] || {
+                              template_name: template.template_name || "",
+                              provider_name: template.provider_name || "",
+                              system_name: template.system_name || ""
+                            };
+                            let mappedFields = 0;
+                            try {
+                              mappedFields = Object.values(JSON.parse(template.mapping_json || "{}")).filter(Boolean).length;
+                            } catch {
+                              mappedFields = 0;
+                            }
+                            return (
+                              <tr key={template.template_id} className="hover:bg-slate-50">
+                                <td className="px-3 py-2">
+                                  <input
+                                    value={draft.template_name}
+                                    onChange={event => setEditingTemplateDrafts(current => ({ ...current, [template.template_id]: { ...draft, template_name: event.target.value } }))}
+                                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-800"
+                                  />
+                                  <p className="mt-1 font-mono text-[9px] text-slate-400">{template.template_id}</p>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    value={draft.provider_name}
+                                    onChange={event => setEditingTemplateDrafts(current => ({ ...current, [template.template_id]: { ...draft, provider_name: event.target.value } }))}
+                                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <input
+                                    value={draft.system_name}
+                                    onChange={event => setEditingTemplateDrafts(current => ({ ...current, [template.template_id]: { ...draft, system_name: event.target.value } }))}
+                                    className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] text-slate-700"
+                                  />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-bold text-dark-blue">{mappedFields}</span>
+                                </td>
+                                <td className="max-w-xs px-3 py-2">
+                                  <p className="truncate font-mono text-[10px] text-slate-500" title={template.headers_signature}>{template.headers_signature || "-"}</p>
+                                </td>
+                                <td className="px-3 py-2 font-mono text-[10px] text-slate-500">{template.updated_at ? new Date(template.updated_at).toLocaleString() : "-"}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${template.active !== false ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>
+                                    {template.active !== false ? "Active" : "Inactive"}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={savingTemplateId === template.template_id}
+                                      onClick={() => void handleUpdateImportTemplate(template, draft)}
+                                      className="rounded-lg bg-primary-blue px-3 py-1.5 text-[11px] font-bold text-white hover:bg-dark-blue disabled:opacity-60"
+                                    >
+                                      {savingTemplateId === template.template_id ? (isEnglish ? "Saving..." : "Guardando...") : (isEnglish ? "Save" : "Guardar")}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={savingTemplateId === template.template_id}
+                                      onClick={() => void handleUpdateImportTemplate(template, { active: template.active === false })}
+                                      className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                                    >
+                                      {template.active === false ? (isEnglish ? "Activate" : "Activar") : (isEnglish ? "Deactivate" : "Desactivar")}
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {(!operationsData?.importMappingTemplates || operationsData.importMappingTemplates.length === 0) && (
+                            <tr><td colSpan={8} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">{isLoadingOperations ? (isEnglish ? "Loading..." : "Cargando...") : (isEnglish ? "No saved payment import templates." : "No hay templates guardados.")}</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {settingsTab === "backups" && currentUser.role === UserRole.Admin && (
                 <div className="space-y-5">
                   <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs">
@@ -3370,7 +3707,7 @@ export default function App() {
                         </button>
                       )}
                     </div>
-                    <div className="lg:col-span-6 grid gap-3 border-t border-blue-100 pt-3 lg:grid-cols-2">
+                    <div className="lg:col-span-6 grid gap-3 border-t border-blue-100 pt-3 lg:grid-cols-3">
                       <div className="rounded-lg border border-slate-200 bg-white p-3">
                         <div className="mb-2 flex items-center justify-between gap-2">
                           <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
@@ -3391,7 +3728,9 @@ export default function App() {
                               claims: isEnglish ? "Claims Worklist" : "Worklist de Claims",
                               payments: isEnglish ? "Payment Control" : "Control de Pagos",
                               "payment-reconciliation-import": isEnglish ? "Payment Import" : "Importar Pagos",
+                              "import-exceptions": isEnglish ? "Import Exceptions" : "Excepciones Import",
                               "rcm-work-queue": isEnglish ? "RCM Work Queue" : "Cola RCM",
+                              "rcm-productivity": isEnglish ? "RCM Productivity" : "Productividad RCM",
                               denials: isEnglish ? "Denials Report" : "Reporte de Denials",
                               errors: isEnglish ? "Claims with Errors" : "Claims con Errores",
                               providers: isEnglish ? "Physician Balances" : "Balance de Médicos",
@@ -3408,6 +3747,48 @@ export default function App() {
                                   className="h-3.5 w-3.5 accent-primary-blue"
                                 />
                                 <span>{labels[menuId]}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500">
+                            {isEnglish ? "Action permissions" : "Permisos de acción"}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setUserActionAccessInput(ROLE_DEFAULT_ACTION_ACCESS[userRoleInput])}
+                            className="text-[9px] font-bold text-primary-blue hover:text-dark-blue"
+                          >
+                            {isEnglish ? "Role default" : "Default del rol"}
+                          </button>
+                        </div>
+                        <div className="grid max-h-32 grid-cols-1 gap-1.5 overflow-y-auto pr-1">
+                          {ACTION_ACCESS_IDS.map(actionId => {
+                            const labels: Record<ActionAccessId, string> = {
+                              "claims.create": isEnglish ? "Create claims" : "Crear claims",
+                              "claims.edit": isEnglish ? "Edit claims" : "Editar claims",
+                              "claims.delete": isEnglish ? "Delete claims" : "Eliminar claims",
+                              "claims.import": isEnglish ? "Import claims" : "Importar claims",
+                              "payments.import": isEnglish ? "Import payments" : "Importar pagos",
+                              "payments.apply": isEnglish ? "Apply payment matches" : "Aplicar matches de pago",
+                              "review.assign": isEnglish ? "Assign review tasks" : "Asignar tareas",
+                              "settings.manage": isEnglish ? "Manage settings" : "Gestionar settings",
+                              "backups.restore": isEnglish ? "Restore backups" : "Restaurar salvas",
+                              "data.cleanup": isEnglish ? "Clean test data" : "Limpiar data prueba"
+                            };
+                            return (
+                              <label key={actionId} className="flex items-center gap-2 rounded-md border border-slate-100 px-2 py-1.5 text-[10px] font-semibold text-slate-700">
+                                <input
+                                  type="checkbox"
+                                  checked={userActionAccessInput.includes(actionId)}
+                                  onChange={() => toggleUserActionAccess(actionId)}
+                                  className="h-3.5 w-3.5 accent-primary-blue"
+                                />
+                                <span>{labels[actionId]}</span>
                               </label>
                             );
                           })}

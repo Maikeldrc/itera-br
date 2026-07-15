@@ -1406,9 +1406,9 @@ export class GoogleSheetsService {
     return [...this.importHistory].sort((a, b) => String(b.imported_at).localeCompare(String(a.imported_at)));
   }
 
-  public async getImportMappingTemplates(importType = "Payment Import"): Promise<ImportMappingTemplate[]> {
+  public async getImportMappingTemplates(importType = "Payment Import", includeInactive = false): Promise<ImportMappingTemplate[]> {
     return this.importMappingTemplates
-      .filter(template => template.active !== false && (!importType || template.import_type === importType))
+      .filter(template => (includeInactive || template.active !== false) && (!importType || template.import_type === importType))
       .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
   }
 
@@ -1429,6 +1429,18 @@ export class GoogleSheetsService {
       active: recordData.active !== false
     };
     return this.appendOperationalRecord("Import_Mapping_Templates", record);
+  }
+
+  public async updateImportMappingTemplate(templateId: string, updates: Partial<ImportMappingTemplate>): Promise<ImportMappingTemplate | null> {
+    const index = this.importMappingTemplates.findIndex(template => template.template_id === templateId);
+    if (index === -1) return null;
+    this.importMappingTemplates[index] = {
+      ...this.importMappingTemplates[index],
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+    await this.overwriteOperationalRecords("Import_Mapping_Templates", this.importMappingTemplates);
+    return this.importMappingTemplates[index];
   }
 
   public async createReviewTask(recordData: Partial<ReviewTask>): Promise<ReviewTask> {
@@ -1889,7 +1901,7 @@ const PAYERS_HEADERS = [
 ];
 
 const USERS_HEADERS = [
-  "user_id", "name", "email", "role", "menu_access", "provider_access", "active"
+  "user_id", "name", "email", "role", "menu_access", "provider_access", "action_access", "active"
 ];
 
 const SETTINGS_HEADERS = [

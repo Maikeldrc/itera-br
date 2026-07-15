@@ -867,20 +867,82 @@ async function startServer() {
 
   app.get("/api/admin/operations", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (_req: AppRequest, res) => {
     try {
+      const jobs = await sheetsService.getJobs();
+      const importHistory = await sheetsService.getImportHistory();
+      const reviewTasks = await sheetsService.getReviewTasks();
+      const notifications = await sheetsService.getNotifications();
+      const importMappingTemplates = await sheetsService.getImportMappingTemplates("", true);
+      const importExceptions = [
+        ...reviewTasks
+          .filter(task => !["Resolved", "Dismissed"].includes(task.status))
+          .map(task => ({
+            exception_id: task.task_id,
+            type: "Review Task",
+            source: task.source,
+            claim_id: task.claim_id,
+            cpt_code: task.cpt_code,
+            reason: task.reason,
+            severity: task.priority,
+            status: task.status,
+            assigned_to: task.assigned_to,
+            due_date: task.due_date,
+            created_at: task.created_at
+          })),
+        ...importHistory
+          .filter(item => Number(item.rejected_rows || 0) > 0 || Number(item.review_rows || 0) > 0)
+          .map(item => ({
+            exception_id: item.import_id,
+            type: "Import Result",
+            source: item.import_type,
+            claim_id: "",
+            cpt_code: "",
+            reason: `${item.rejected_rows || 0} rejected row(s), ${item.review_rows || 0} review row(s) in ${item.file_name || "uploaded file"}.`,
+            severity: Number(item.rejected_rows || 0) > 0 ? "High" : "Medium",
+            status: item.status,
+            assigned_to: item.requested_by,
+            due_date: "",
+            created_at: item.imported_at
+          })),
+        ...jobs
+          .filter(job => job.status === "failed")
+          .map(job => ({
+            exception_id: job.job_id,
+            type: "Failed Job",
+            source: job.job_type,
+            claim_id: "",
+            cpt_code: "",
+            reason: job.error_message || "Job failed.",
+            severity: "High",
+            status: job.status,
+            assigned_to: job.requested_by,
+            due_date: "",
+            created_at: job.requested_at
+          }))
+      ].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
       res.json({
         success: true,
         health: sheetsService.getSystemHealth(),
         metrics: sheetsService.getRcmProductivityMetrics(),
-        jobs: await sheetsService.getJobs(),
-        importHistory: await sheetsService.getImportHistory(),
+        jobs,
+        importHistory,
         activity: await sheetsService.getUserActivityLogs(),
-        reviewTasks: await sheetsService.getReviewTasks(),
-        notifications: await sheetsService.getNotifications(),
+        reviewTasks,
+        notifications,
+        importExceptions,
+        importMappingTemplates,
         bankDeposits: await sheetsService.getBankDeposits(),
         monthlyClosures: await sheetsService.getMonthlyClosures()
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to load operations center." });
+    }
+  });
+
+  app.get("/api/payment-reconciliation-import/templates", requireRoles(...API_ROLE_GROUPS.claimWrite), async (_req: AppRequest, res) => {
+    try {
+      res.json({ success: true, templates: await sheetsService.getImportMappingTemplates("Payment Import") });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Payment import templates could not be loaded." });
     }
   });
 
@@ -2152,6 +2214,34 @@ async function startServer() {
       res.json({ success: true, template: saved });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Payment import mapping template could not be saved." });
+    }
+  });
+
+  app.put("/api/payment-reconciliation-import/templates/:templateId", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
+    try {
+      const updates: any = {};
+      if (req.body?.template_name !== undefined || req.body?.templateName !== undefined) {
+        updates.template_name = textValue(req.body?.template_name ?? req.body?.templateName);
+      }
+      if (req.body?.provider_name !== undefined || req.body?.providerName !== undefined) {
+        updates.provider_name = textValue(req.body?.provider_name ?? req.body?.providerName);
+      }
+      if (req.body?.system_name !== undefined || req.body?.systemName !== undefined) {
+        updates.system_name = textValue(req.body?.system_name ?? req.body?.systemName);
+      }
+      if (req.body?.active !== undefined) updates.active = Boolean(req.body.active);
+      const updated = await sheetsService.updateImportMappingTemplate(req.params.templateId, updates);
+      if (!updated) return res.status(404).json({ error: "Payment import template not found." });
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(req),
+        action: "Update payment import mapping template",
+        entity_type: "Import_Mapping_Template",
+        entity_id: updated.template_id,
+        metadata_json: JSON.stringify(updates)
+      });
+      res.json({ success: true, template: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Payment import template could not be updated." });
     }
   });
 

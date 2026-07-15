@@ -225,6 +225,7 @@ export interface User {
   role: UserRole;
   menu_access?: string;
   provider_access?: string;
+  action_access?: string;
   active: boolean;
 }
 

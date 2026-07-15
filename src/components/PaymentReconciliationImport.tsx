@@ -83,6 +83,7 @@ type ImportProgressState = {
 
 interface PaymentReconciliationImportProps {
   onImported: () => Promise<void>;
+  canApply?: boolean;
 }
 
 const REQUIRED_COLUMNS = [
@@ -179,7 +180,7 @@ function statusBadge(status: PaymentImportRow["status"], isEnglish: boolean) {
   return <span className={`rounded-md border px-2 py-1 text-[10px] font-bold ${classes[status]}`}>{labels[status]}</span>;
 }
 
-export function PaymentReconciliationImport({ onImported }: PaymentReconciliationImportProps) {
+export function PaymentReconciliationImport({ onImported, canApply = true }: PaymentReconciliationImportProps) {
   const { notify } = useFeedback();
   const { language } = useLanguage();
   const isEnglish = language === "en";
@@ -748,8 +749,9 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
           </button>
           <button
             onClick={() => void submit(true)}
-            disabled={!payload || isProcessing || isSchemaLoading || (schema ? !mappingIssues.valid : false) || !result || result.summary.readyToImport === 0}
+            disabled={!payload || isProcessing || isSchemaLoading || (schema ? !mappingIssues.valid : false) || !result || result.summary.readyToImport === 0 || !canApply}
             className="rounded-lg bg-primary-blue px-4 py-2 text-xs font-bold text-white shadow-md hover:bg-dark-blue disabled:opacity-50"
+            title={!canApply ? (isEnglish ? "You do not have permission to apply payment imports." : "No tiene permiso para aplicar imports de pago.") : undefined}
           >
             {isProcessing && progress?.mode === "import" ? (isEnglish ? "Importing..." : "Importando...") : (isEnglish ? "Import safe matches" : "Importar coincidencias seguras")}
           </button>
@@ -823,11 +825,19 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-800">{isEnglish ? "Payment Import Result" : "Resultado de importación de pagos"}</h3>
+              <h3 className="text-sm font-bold text-slate-800">
+                {result?.applied
+                  ? (isEnglish ? "Payment Import Result" : "Resultado de importación de pagos")
+                  : (isEnglish ? "Preflight Analysis" : "Análisis previo")}
+              </h3>
               <p className="mt-0.5 text-xs text-slate-500">
-                {isEnglish
-                  ? "Rows marked Ready can be imported. Needs Review rows were intentionally not overwritten."
-                  : "Las filas Ready pueden importarse. Las filas en revisión no se sobreescriben."}
+                {result?.applied
+                  ? (isEnglish
+                    ? "Rows marked Ready were imported. Needs Review rows were intentionally not overwritten."
+                    : "Las filas Ready se importaron. Las filas en revisión no se sobreescriben.")
+                  : (isEnglish
+                    ? "This is a dry-run validation. No claim or payment data has been written yet."
+                    : "Esta es una validación previa. Todavía no se ha escrito información de claims ni pagos.")}
               </p>
             </div>
             <div className="max-h-[520px] overflow-auto">
