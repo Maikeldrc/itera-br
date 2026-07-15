@@ -46,6 +46,13 @@ type PaymentImportResult = {
   rows: PaymentImportRow[];
 };
 
+type ImportProgressState = {
+  mode: "analyze" | "import";
+  percent: number;
+  label: string;
+  steps: Array<{ label: string; status: "pending" | "running" | "done" }>;
+};
+
 interface PaymentReconciliationImportProps {
   onImported: () => Promise<void>;
 }
@@ -122,6 +129,8 @@ function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(Number.isFinite(value) ? value : 0);
 }
 
+const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
+
 function statusBadge(status: PaymentImportRow["status"], isEnglish: boolean) {
   const labels = {
     ready: isEnglish ? "Ready" : "Lista",
@@ -146,6 +155,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<ImportPayload | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [progress, setProgress] = useState<ImportProgressState | null>(null);
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
   const [result, setResult] = useState<PaymentImportResult | null>(null);
 
@@ -153,6 +163,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
     setFileName("");
     setPayload(null);
     setResult(null);
+    setProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -180,29 +191,81 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       notify(isEnglish ? "Select a payment report first." : "Seleccione primero un reporte de pagos.", "warning");
       return;
     }
+    const steps = apply
+      ? [
+          isEnglish ? "Preparing safe-match import" : "Preparando importación de matches seguros",
+          isEnglish ? "Validating ready rows" : "Validando filas listas",
+          isEnglish ? "Applying payments to CPT lines" : "Aplicando pagos a líneas CPT",
+          isEnglish ? "Writing claims and payment records" : "Guardando claims y registros de pago",
+          isEnglish ? "Refreshing reconciliation data" : "Actualizando datos de conciliación"
+        ]
+      : [
+          isEnglish ? "Uploading file for analysis" : "Subiendo archivo para análisis",
+          isEnglish ? "Matching claims and CPT lines" : "Buscando matches de claims y CPT",
+          isEnglish ? "Classifying ready/review/rejected rows" : "Clasificando filas listas/revisión/rechazadas",
+          isEnglish ? "Preparing result table" : "Preparando tabla de resultados"
+        ];
+    const setStep = (index: number, percent: number, label?: string) => {
+      setProgress({
+        mode: apply ? "import" : "analyze",
+        percent,
+        label: label || steps[index] || "",
+        steps: steps.map((step, stepIndex) => ({
+          label: step,
+          status: stepIndex < index ? "done" : stepIndex === index ? "running" : "pending"
+        }))
+      });
+    };
     setIsProcessing(true);
+    setStep(0, apply ? 8 : 12);
     try {
+      await wait(150);
+      setStep(1, apply ? 24 : 36);
       const response = await apiFetch("/api/payment-reconciliation-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...payload, apply })
       });
+      setStep(apply ? 2 : 2, apply ? 52 : 70);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Payment import failed.");
+      setStep(apply ? 3 : 3, apply ? 76 : 92);
       setResult(data);
       if (apply) {
+        setStep(4, 90);
+        await onImported();
+        setProgress({
+          mode: "import",
+          percent: 100,
+          label: isEnglish ? "Payment import completed." : "Importación de pagos completada.",
+          steps: steps.map(step => ({ label: step, status: "done" }))
+        });
         notify(
           isEnglish
             ? `Imported ${data.importedCount} payment row(s). ${data.summary.needsReviewRows} require review.`
             : `Importadas ${data.importedCount} fila(s) de pago. ${data.summary.needsReviewRows} requieren revisión.`,
           data.importedCount > 0 ? "success" : "warning"
         );
-        await onImported();
+      } else {
+        setProgress({
+          mode: "analyze",
+          percent: 100,
+          label: isEnglish ? "Analysis completed." : "Análisis completado.",
+          steps: steps.map(step => ({ label: step, status: "done" }))
+        });
       }
+      await wait(500);
     } catch (err: any) {
+      setProgress(current => current ? {
+        ...current,
+        percent: 100,
+        label: isEnglish ? "Process failed." : "El proceso falló."
+      } : null);
       notify(`${isEnglish ? "Import error" : "Error de importación"}: ${err.message}`, "error");
+      await wait(700);
     } finally {
       setIsProcessing(false);
+      setProgress(null);
     }
   };
 
@@ -370,16 +433,61 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
             disabled={!payload || isProcessing}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
-            {isProcessing ? (isEnglish ? "Processing..." : "Procesando...") : (isEnglish ? "Analyze file" : "Analizar archivo")}
+            {isProcessing && progress?.mode === "analyze" ? (isEnglish ? "Analyzing..." : "Analizando...") : (isEnglish ? "Analyze file" : "Analizar archivo")}
           </button>
           <button
             onClick={() => void submit(true)}
             disabled={!payload || isProcessing || !result || result.summary.readyToImport === 0}
             className="rounded-lg bg-primary-blue px-4 py-2 text-xs font-bold text-white shadow-md hover:bg-dark-blue disabled:opacity-50"
           >
-            {isEnglish ? "Import safe matches" : "Importar coincidencias seguras"}
+            {isProcessing && progress?.mode === "import" ? (isEnglish ? "Importing..." : "Importando...") : (isEnglish ? "Import safe matches" : "Importar coincidencias seguras")}
           </button>
         </div>
+
+        {progress && (
+          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-4">
+            <div className="mb-2 flex items-center justify-between gap-4">
+              <div>
+                <h4 className="text-sm font-bold text-dark-blue">
+                  {progress.mode === "import"
+                    ? (isEnglish ? "Import progress" : "Progreso de importación")
+                    : (isEnglish ? "Analysis progress" : "Progreso de análisis")}
+                </h4>
+                <p className="mt-0.5 text-xs text-slate-600">{progress.label}</p>
+              </div>
+              <span className="font-mono text-xs font-bold text-primary-blue">{Math.round(progress.percent)}%</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-white">
+              <div
+                className="h-full rounded-full bg-primary-blue transition-all duration-300"
+                style={{ width: `${Math.max(0, Math.min(100, progress.percent))}%` }}
+              />
+            </div>
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-5">
+              {progress.steps.map(step => (
+                <div
+                  key={step.label}
+                  className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-[10px] font-bold ${
+                    step.status === "done"
+                      ? "border-emerald-100 bg-white text-emerald-700"
+                      : step.status === "running"
+                        ? "border-blue-200 bg-white text-dark-blue"
+                        : "border-slate-100 bg-white/60 text-slate-400"
+                  }`}
+                >
+                  {step.status === "done" ? (
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                  ) : step.status === "running" ? (
+                    <RefreshCw className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                  ) : (
+                    <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-200" />
+                  )}
+                  <span className="leading-tight">{step.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {summary && (
