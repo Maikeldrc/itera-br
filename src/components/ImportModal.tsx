@@ -15,7 +15,7 @@ interface ImportModalProps {
   onImport: (payload: ImportPayload) => Promise<ImportResult>;
 }
 
-type ImportPayload = any[] | { fileName: string; fileBase64: string; retryRows?: number[] };
+type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[] };
 
 type ImportSummary = {
   totalRowsRead: number;
@@ -327,7 +327,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     setIsProcessing(true);
     startImportProgress();
     try {
-      const res = await onImport(payload);
+      const res = await onImport(Array.isArray(payload) ? { rows: payload, fileName: file?.name || "" } : payload);
       clearProgressTimer();
       setImportProgress({
         percent: 100,

@@ -280,9 +280,13 @@ export default function App() {
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
 
   // Fee Schedule management UI states
-  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "backups" | "data-cleanup">("language");
+  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "operations" | "backups" | "data-cleanup">("language");
   const [backupConfig, setBackupConfig] = useState<BackupConfig | null>(null);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
+  const [operationsData, setOperationsData] = useState<any | null>(null);
+  const [isLoadingOperations, setIsLoadingOperations] = useState(false);
+  const [closingMonth, setClosingMonth] = useState(false);
+  const [closeMonthPeriod, setCloseMonthPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const [backupFrequencyHours, setBackupFrequencyHours] = useState(24);
   const [backupEnabled, setBackupEnabled] = useState(true);
   const [backupFolderId, setBackupFolderId] = useState("");
@@ -1060,7 +1064,7 @@ export default function App() {
   };
 
   // Import claims CSV handler
-  const handleImportCSV = async (payload: any[] | { fileName: string; fileBase64: string; retryRows?: number[] }) => {
+  const handleImportCSV = async (payload: any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[] }) => {
     const res = await apiFetch("/api/import-csv", {
       method: "POST",
       headers: {
@@ -1116,6 +1120,41 @@ export default function App() {
       notify(`${isEnglish ? "Unable to load backups" : "No se pudieron cargar las salvas"}: ${err.message}`, "error");
     } finally {
       setIsLoadingBackups(false);
+    }
+  };
+
+  const loadOperationsCenter = async () => {
+    if (![UserRole.Admin, UserRole.BillingManager].includes(currentUser.role)) return;
+    setIsLoadingOperations(true);
+    try {
+      const res = await apiFetch("/api/admin/operations");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load operations center.");
+      setOperationsData(data);
+    } catch (err: any) {
+      notify(`${isEnglish ? "Operations Center error" : "Error del centro operativo"}: ${err.message}`, "error");
+    } finally {
+      setIsLoadingOperations(false);
+    }
+  };
+
+  const handleCloseMonth = async () => {
+    if (currentUser.role !== UserRole.Admin) return;
+    setClosingMonth(true);
+    try {
+      const res = await apiFetch("/api/admin/monthly-closures", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period: closeMonthPeriod, notes: "Closed from Operations Center." })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to close month.");
+      notify(isEnglish ? `Month ${closeMonthPeriod} closed.` : `Mes ${closeMonthPeriod} cerrado.`, "success");
+      await loadOperationsCenter();
+    } catch (err: any) {
+      notify(`${isEnglish ? "Monthly close error" : "Error de cierre mensual"}: ${err.message}`, "error");
+    } finally {
+      setClosingMonth(false);
     }
   };
 
@@ -1222,6 +1261,12 @@ export default function App() {
   useEffect(() => {
     if (currentView === "settings" && settingsTab === "backups" && currentUser.role === UserRole.Admin) {
       loadBackups();
+    }
+  }, [currentView, settingsTab, currentUser.role]);
+
+  useEffect(() => {
+    if (currentView === "settings" && settingsTab === "operations") {
+      loadOperationsCenter();
     }
   }, [currentView, settingsTab, currentUser.role]);
 
@@ -2503,6 +2548,19 @@ export default function App() {
                   <Sliders className="w-4 h-4" />
                   <span>{isEnglish ? "Contract Rules (Shares)" : "Reglas Contractuales (Shares)"}</span>
                 </button>
+                {[UserRole.Admin, UserRole.BillingManager].includes(currentUser.role) && (
+                  <button
+                    onClick={() => setSettingsTab("operations")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+                      settingsTab === "operations"
+                        ? "border-primary-blue text-primary-blue bg-blue-50/40 rounded-t-lg"
+                        : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg"
+                    }`}
+                  >
+                    <LayoutDashboard className="w-4 h-4" />
+                    <span>{isEnglish ? "Operations Center" : "Centro Operativo"}</span>
+                  </button>
+                )}
                 {currentUser.role === UserRole.Admin && (
                   <button
                     onClick={() => setSettingsTab("backups")}
@@ -2582,6 +2640,181 @@ export default function App() {
                     <p className="mt-4 text-[10px] leading-relaxed text-slate-400">
                       {isEnglish ? "The preference is saved in this browser and applied automatically on future visits." : "La preferencia se guarda en este navegador y se aplica automáticamente en futuras visitas."}
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === "operations" && [UserRole.Admin, UserRole.BillingManager].includes(currentUser.role) && (
+                <div className="space-y-5">
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Operations Center" : "Centro Operativo"}</h4>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {isEnglish
+                            ? "Monitor imports, data quality, review work, deposits, user activity and month-end controls."
+                            : "Monitorea importaciones, calidad de datos, revisiones, depósitos, actividad de usuarios y cierres mensuales."}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => void loadOperationsCenter()}
+                        disabled={isLoadingOperations}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                      >
+                        <RefreshCw className={`h-4 w-4 ${isLoadingOperations ? "animate-spin" : ""}`} />
+                        {isEnglish ? "Refresh" : "Actualizar"}
+                      </button>
+                    </div>
+
+                    <div className="mt-5 grid gap-3 md:grid-cols-4">
+                      {[
+                        { label: isEnglish ? "Active claims" : "Claims activos", value: operationsData?.health?.totals?.activeClaims ?? 0 },
+                        { label: isEnglish ? "Open balance" : "Balance abierto", value: `$${Number(operationsData?.health?.totals?.openBalance || 0).toFixed(2)}` },
+                        { label: isEnglish ? "Open review tasks" : "Tareas abiertas", value: operationsData?.health?.totals?.openReviewTasks ?? 0 },
+                        { label: isEnglish ? "Imported rows 30d" : "Filas importadas 30d", value: operationsData?.metrics?.importedRows30Days ?? 0 }
+                      ].map(card => (
+                        <div key={card.label} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{card.label}</p>
+                          <p className="mt-2 text-lg font-bold text-slate-900">{card.value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
+                    <div className="rounded-xl border border-slate-200 bg-white shadow-xs">
+                      <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "System Health Checks" : "Validaciones de Salud"}</h4>
+                          <p className="mt-0.5 text-[10px] text-slate-500">{operationsData?.health?.generatedAt ? new Date(operationsData.health.generatedAt).toLocaleString() : "-"}</p>
+                        </div>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {(operationsData?.health?.checks || []).map((check: any) => (
+                          <div key={check.key} className="flex items-center justify-between gap-4 px-5 py-3">
+                            <div className="flex items-center gap-3">
+                              {check.severity === "ok" ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-amber-600" />}
+                              <span className="text-xs font-semibold text-slate-700">{check.label}</span>
+                            </div>
+                            <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${check.severity === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                              {check.count}
+                            </span>
+                          </div>
+                        ))}
+                        {(!operationsData?.health?.checks || operationsData.health.checks.length === 0) && (
+                          <div className="px-5 py-6 text-center text-xs font-semibold text-slate-400">{isLoadingOperations ? (isEnglish ? "Loading..." : "Cargando...") : "-"}</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Month-End Close" : "Cierre Mensual"}</h4>
+                          <p className="mt-1 text-xs text-slate-500">
+                            {isEnglish ? "Create a backup and register a formal close for a period." : "Crea una salva y registra un cierre formal del período."}
+                          </p>
+                        </div>
+                        <Calendar className="h-5 w-5 text-primary-blue" />
+                      </div>
+                      <div className="mt-5 flex gap-3">
+                        <input
+                          type="month"
+                          value={closeMonthPeriod}
+                          onChange={event => setCloseMonthPeriod(event.target.value)}
+                          className="h-10 flex-1 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleCloseMonth}
+                          disabled={currentUser.role !== UserRole.Admin || closingMonth}
+                          className="rounded-lg bg-dark-blue px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-60"
+                        >
+                          {closingMonth ? (isEnglish ? "Closing..." : "Cerrando...") : (isEnglish ? "Close month" : "Cerrar mes")}
+                        </button>
+                      </div>
+                      <div className="mt-4 max-h-44 overflow-auto rounded-lg border border-slate-100">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                            <tr><th className="px-3 py-2">Period</th><th className="px-3 py-2">Status</th><th className="px-3 py-2">Closed By</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {(operationsData?.monthlyClosures || []).slice(0, 8).map((item: any) => (
+                              <tr key={item.close_id}>
+                                <td className="px-3 py-2 font-mono text-slate-700">{item.period}</td>
+                                <td className="px-3 py-2"><span className="rounded-md bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">{item.status}</span></td>
+                                <td className="px-3 py-2 text-slate-500">{item.closed_by || "-"}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-5 xl:grid-cols-2">
+                    {[
+                      { title: isEnglish ? "Import History" : "Historial de Importación", rows: operationsData?.importHistory || [], columns: ["import_type", "file_name", "imported_rows", "rejected_rows", "status"] },
+                      { title: isEnglish ? "Review Tasks" : "Tareas de Revisión", rows: operationsData?.reviewTasks || [], columns: ["source", "claim_id", "cpt_code", "priority", "status"] },
+                      { title: isEnglish ? "Jobs" : "Procesos", rows: operationsData?.jobs || [], columns: ["job_type", "status", "progress", "requested_by", "requested_at"] },
+                      { title: isEnglish ? "Bank Deposits" : "Depósitos Bancarios", rows: operationsData?.bankDeposits || [], columns: ["deposit_date", "payer_name", "deposit_amount", "matched_payment_total", "status"] }
+                    ].map(section => (
+                      <div key={section.title} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                          <h4 className="text-sm font-bold text-slate-900">{section.title}</h4>
+                          <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">{section.rows.length}</span>
+                        </div>
+                        <div className="max-h-72 overflow-auto">
+                          <table className="w-full min-w-[640px] text-left text-xs">
+                            <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                              <tr>
+                                {section.columns.map(column => <th key={column} className="px-3 py-2">{column.replace(/_/g, " ")}</th>)}
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {section.rows.slice(0, 12).map((row: any, index: number) => (
+                                <tr key={row.import_id || row.task_id || row.job_id || row.deposit_id || index} className="hover:bg-slate-50">
+                                  {section.columns.map(column => (
+                                    <td key={column} className="max-w-[180px] truncate px-3 py-2 text-slate-600" title={String(row[column] ?? "")}>
+                                      {column.includes("amount") || column.includes("total") ? `$${Number(row[column] || 0).toFixed(2)}` : String(row[column] ?? "-")}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                              {section.rows.length === 0 && (
+                                <tr><td colSpan={section.columns.length} className="px-3 py-6 text-center text-xs font-semibold text-slate-400">{isEnglish ? "No records." : "No hay registros."}</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+                      <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Recent User Activity" : "Actividad Reciente de Usuarios"}</h4>
+                      <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500">{operationsData?.activity?.length || 0}</span>
+                    </div>
+                    <div className="max-h-72 overflow-auto">
+                      <table className="w-full min-w-[860px] text-left text-xs">
+                        <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                          <tr><th className="px-3 py-2">When</th><th className="px-3 py-2">User</th><th className="px-3 py-2">Action</th><th className="px-3 py-2">Entity</th><th className="px-3 py-2">ID</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {(operationsData?.activity || []).slice(0, 20).map((item: any) => (
+                            <tr key={item.activity_id} className="hover:bg-slate-50">
+                              <td className="px-3 py-2 font-mono text-slate-500">{item.created_at ? new Date(item.created_at).toLocaleString() : "-"}</td>
+                              <td className="px-3 py-2 text-slate-700">{item.user_email}</td>
+                              <td className="px-3 py-2 font-semibold text-slate-700">{item.action}</td>
+                              <td className="px-3 py-2 text-slate-500">{item.entity_type}</td>
+                              <td className="px-3 py-2 font-mono text-slate-500">{item.entity_id || "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}

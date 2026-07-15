@@ -579,6 +579,13 @@ async function startServer() {
   app.post("/api/admin/clear-operational-data", requireRoles(...API_ROLE_GROUPS.adminOnly), async (_req: AppRequest, res) => {
     try {
       const result = await sheetsService.clearOperationalData();
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(_req),
+        action: "Clear operational data",
+        entity_type: "System",
+        entity_id: "Claims,Payments,Notes,Audit_Log",
+        metadata_json: JSON.stringify(result)
+      });
       res.json({
         success: true,
         message: "Operational test data cleared.",
@@ -619,6 +626,13 @@ async function startServer() {
   app.post("/api/admin/backups", requireRoles(...API_ROLE_GROUPS.adminOnly), async (req: AppRequest, res) => {
     try {
       const backup = await sheetsService.createSpreadsheetBackup(getOperatorEmail(req), textValue(req.body?.notes) || "Manual backup from System Settings.");
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(req),
+        action: "Create backup",
+        entity_type: "Backup",
+        entity_id: backup.backup_file_id,
+        metadata_json: JSON.stringify({ backup_file_name: backup.backup_file_name, backup_drive_url: backup.backup_drive_url })
+      });
       res.status(201).json({ success: true, backup, config: sheetsService.getBackupConfiguration() });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to create backup." });
@@ -631,9 +645,100 @@ async function startServer() {
         return res.status(400).json({ success: false, error: "RESTORE confirmation is required." });
       }
       const result = await sheetsService.restoreSpreadsheetBackup(req.params.fileId, getOperatorEmail(req));
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(req),
+        action: "Restore backup",
+        entity_type: "Backup",
+        entity_id: req.params.fileId,
+        metadata_json: JSON.stringify({ restoredTabs: result.restoredTabs, preRestoreBackup: result.preRestoreBackup.backup_file_id })
+      });
       res.json({ success: true, ...result });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to restore backup." });
+    }
+  });
+
+  app.get("/api/admin/operations", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (_req: AppRequest, res) => {
+    try {
+      res.json({
+        success: true,
+        health: sheetsService.getSystemHealth(),
+        metrics: sheetsService.getRcmProductivityMetrics(),
+        jobs: await sheetsService.getJobs(),
+        importHistory: await sheetsService.getImportHistory(),
+        activity: await sheetsService.getUserActivityLogs(),
+        reviewTasks: await sheetsService.getReviewTasks(),
+        notifications: await sheetsService.getNotifications(),
+        bankDeposits: await sheetsService.getBankDeposits(),
+        monthlyClosures: await sheetsService.getMonthlyClosures()
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to load operations center." });
+    }
+  });
+
+  app.post("/api/admin/monthly-closures", requireRoles(...API_ROLE_GROUPS.adminOnly), async (req: AppRequest, res) => {
+    try {
+      const period = textValue(req.body?.period);
+      if (!/^\d{4}-\d{2}$/.test(period)) {
+        return res.status(400).json({ success: false, error: "Period must use YYYY-MM format." });
+      }
+      const close = await sheetsService.createMonthlyClose(period, getOperatorEmail(req), textValue(req.body?.notes));
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(req),
+        action: "Monthly close",
+        entity_type: "Monthly_Closure",
+        entity_id: close.close_id,
+        metadata_json: JSON.stringify({ period, backup_file_id: close.backup_file_id })
+      });
+      res.status(201).json({ success: true, close });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to close month." });
+    }
+  });
+
+  app.post("/api/admin/bank-deposits", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
+    try {
+      const deposit = await sheetsService.createBankDeposit({
+        deposit_date: textValue(req.body?.deposit_date),
+        check_or_eft_number: textValue(req.body?.check_or_eft_number),
+        payer_name: textValue(req.body?.payer_name),
+        deposit_amount: Number(req.body?.deposit_amount || 0),
+        matched_payment_total: Number(req.body?.matched_payment_total || 0),
+        notes: textValue(req.body?.notes)
+      });
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(req),
+        action: "Create bank deposit",
+        entity_type: "Bank_Deposit",
+        entity_id: deposit.deposit_id,
+        metadata_json: JSON.stringify(deposit)
+      });
+      res.status(201).json({ success: true, deposit });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to create bank deposit." });
+    }
+  });
+
+  app.put("/api/review-tasks/:id", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const updated = await sheetsService.updateReviewTask(req.params.id, {
+        assigned_to: textValue(req.body?.assigned_to),
+        priority: req.body?.priority,
+        status: req.body?.status,
+        due_date: textValue(req.body?.due_date)
+      });
+      if (!updated) return res.status(404).json({ success: false, error: "Review task not found." });
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(req),
+        action: "Update review task",
+        entity_type: "Review_Task",
+        entity_id: updated.task_id,
+        metadata_json: JSON.stringify(updated)
+      });
+      res.json({ success: true, task: updated });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to update review task." });
     }
   });
 
@@ -1321,7 +1426,7 @@ async function startServer() {
   app.post("/api/import-csv", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, retryRows } = req.body;
+      const { rows, fileBase64, retryRows, fileName } = req.body;
       const retryRowSet = Array.isArray(retryRows)
         ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
         : null;
@@ -1592,6 +1697,33 @@ async function startServer() {
       }
 
       const summary = summarizeImport(importRows, importedClaims, errors);
+      await sheetsService.createJob({
+        job_type: retryRowSet ? "Claims corrected rows import" : "Claims import",
+        status: errors.length > 0 ? "failed" : "completed",
+        requested_by: operatorEmail,
+        progress: 100,
+        summary_json: JSON.stringify(summary),
+        error_message: errors.length > 0 ? `${errors.length} rejected row(s)` : ""
+      });
+      await sheetsService.createImportHistory({
+        import_type: retryRowSet ? "Claims corrected rows" : "Claims",
+        file_name: textValue(fileName),
+        requested_by: operatorEmail,
+        total_rows: Number(summary.totalRowsRead || importRows.length || 0),
+        imported_rows: importedClaims.length,
+        rejected_rows: errors.length,
+        review_rows: 0,
+        total_amount: Number(summary.totalBilledChargeImported || 0),
+        summary_json: JSON.stringify(summary),
+        status: errors.length > 0 ? "Completed with errors" : "Completed"
+      });
+      await sheetsService.addUserActivityLog({
+        user_email: operatorEmail,
+        action: retryRowSet ? "Import corrected claim rows" : "Import claims",
+        entity_type: "Import",
+        entity_id: textValue(fileName),
+        metadata_json: JSON.stringify({ importedCount: importedClaims.length, errorCount: errors.length })
+      });
 
       res.json({
         success: errors.length === 0 && summary.allRowsAccounted,
@@ -1608,7 +1740,7 @@ async function startServer() {
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, apply } = req.body;
+      const { rows, fileBase64, apply, fileName } = req.body;
       const importRows = fileBase64 ? parseXlsxRows(fileBase64) : rows;
 
       if (!importRows || !Array.isArray(importRows)) {
@@ -1936,6 +2068,49 @@ async function startServer() {
         totalPaymentInFile: Number(normalizedRows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2)),
         totalPaymentImported: Number(resultRows.filter(row => row.status === "imported").reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2))
       };
+
+      const importHistory = await sheetsService.createImportHistory({
+        import_type: apply ? "Payment Import applied" : "Payment Import analysis",
+        file_name: textValue(fileName),
+        requested_by: operatorEmail,
+        total_rows: summary.totalRowsRead,
+        imported_rows: summary.importedRows,
+        rejected_rows: summary.rejectedRows,
+        review_rows: summary.needsReviewRows,
+        total_amount: summary.totalPaymentInFile,
+        summary_json: JSON.stringify(summary),
+        status: apply ? "Applied" : "Analyzed"
+      });
+      await sheetsService.createJob({
+        job_type: apply ? "Payment Import" : "Payment Import analysis",
+        status: summary.rejectedRows > 0 ? "failed" : "completed",
+        requested_by: operatorEmail,
+        progress: 100,
+        summary_json: JSON.stringify(summary),
+        error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
+      });
+      await sheetsService.addUserActivityLog({
+        user_email: operatorEmail,
+        action: apply ? "Apply payment import" : "Analyze payment import",
+        entity_type: "Import",
+        entity_id: importHistory.import_id,
+        metadata_json: JSON.stringify({ fileName: textValue(fileName), summary })
+      });
+      if (apply) {
+        const reviewCandidates = resultRows.filter(row => row.status === "needs_review" || row.status === "rejected");
+        for (const row of reviewCandidates.slice(0, 100)) {
+          await sheetsService.createReviewTask({
+            source: "Payment Import",
+            claim_id: row.claimId || "",
+            cpt_code: row.cptCode || "",
+            reason: [...(row.errors || []), ...(row.warnings || [])].join(" ") || "Payment import row requires review.",
+            assigned_to: "",
+            priority: row.status === "rejected" ? "High" : "Medium",
+            status: "Open",
+            due_date: ""
+          });
+        }
+      }
 
       res.json({
         success: summary.rejectedRows === 0 && summary.needsReviewRows === 0,

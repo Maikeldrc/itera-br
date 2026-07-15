@@ -248,6 +248,93 @@ export interface BackupRecord {
   last_restored_by?: string;
 }
 
+export interface JobRecord {
+  job_id: string;
+  job_type: string;
+  status: "queued" | "running" | "completed" | "failed";
+  progress: number;
+  requested_by: string;
+  requested_at: string;
+  started_at: string;
+  completed_at: string;
+  summary_json: string;
+  error_message: string;
+}
+
+export interface ImportHistoryRecord {
+  import_id: string;
+  import_type: string;
+  file_name: string;
+  file_drive_url: string;
+  requested_by: string;
+  imported_at: string;
+  total_rows: number;
+  imported_rows: number;
+  rejected_rows: number;
+  review_rows: number;
+  total_amount: number;
+  summary_json: string;
+  status: string;
+}
+
+export interface UserActivityLog {
+  activity_id: string;
+  user_email: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  metadata_json: string;
+  created_at: string;
+}
+
+export interface ReviewTask {
+  task_id: string;
+  source: string;
+  claim_id: string;
+  cpt_code: string;
+  reason: string;
+  assigned_to: string;
+  priority: "Low" | "Medium" | "High";
+  status: "Open" | "In Progress" | "Resolved" | "Dismissed";
+  due_date: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationRecord {
+  notification_id: string;
+  severity: "info" | "warning" | "error";
+  title: string;
+  message: string;
+  target_role: string;
+  read_by_json: string;
+  created_at: string;
+}
+
+export interface BankDeposit {
+  deposit_id: string;
+  deposit_date: string;
+  check_or_eft_number: string;
+  payer_name: string;
+  deposit_amount: number;
+  matched_payment_total: number;
+  difference: number;
+  status: "Matched" | "Mismatch" | "Unmatched";
+  notes: string;
+  created_at: string;
+}
+
+export interface MonthlyCloseRecord {
+  close_id: string;
+  period: string;
+  status: "Open" | "Closed" | "Reopened";
+  closed_by: string;
+  closed_at: string;
+  backup_file_id: string;
+  validation_summary_json: string;
+  notes: string;
+}
+
 export interface FeeSchedule {
   id: string;
   cpt_code: string;

@@ -168,7 +168,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       if (isXlsx) {
         setPayload({ fileName: file.name, fileBase64: value });
       } else {
-        setPayload({ rows: parseCsv(value) });
+        setPayload({ rows: parseCsv(value), fileName: file.name });
       }
     };
     if (isXlsx) reader.readAsDataURL(file);

@@ -5,7 +5,7 @@
 
 import { google } from "googleapis";
 import { Readable } from "stream";
-import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule, BackupRecord } from "./types";
+import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule, BackupRecord, JobRecord, ImportHistoryRecord, UserActivityLog, ReviewTask, NotificationRecord, BankDeposit, MonthlyCloseRecord } from "./types";
 import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS, SEED_PAYERS, SEED_USERS, SEED_SETTINGS, SEED_FEE_SCHEDULES, SEED_ELIGIBILITY_COVERAGE, SEED_REPORT_FEE_SCHEDULES } from "./seedData";
 import { normalizeUserAccess } from "./accessControl";
 
@@ -50,6 +50,13 @@ export class GoogleSheetsService {
   public feeSchedules: FeeSchedule[] = [];
   public eligibilityCoverage: EligibilityCoverage[] = [];
   public reportFeeSchedules: ReportFeeSchedule[] = [];
+  public jobs: JobRecord[] = [];
+  public importHistory: ImportHistoryRecord[] = [];
+  public userActivityLogs: UserActivityLog[] = [];
+  public reviewTasks: ReviewTask[] = [];
+  public notifications: NotificationRecord[] = [];
+  public bankDeposits: BankDeposit[] = [];
+  public monthlyClosures: MonthlyCloseRecord[] = [];
   private scheduledBackupInFlight = false;
 
   constructor() {
@@ -262,7 +269,14 @@ export class GoogleSheetsService {
         { name: "FeeSchedules", headers: FEESCHEDULES_HEADERS, seed: this.feeSchedules },
         { name: "Fee_Schedule", headers: REPORT_FEESCHEDULE_HEADERS, seed: this.reportFeeSchedules },
         { name: "Eligibility_Coverage", headers: ELIGIBILITY_COVERAGE_HEADERS, seed: this.eligibilityCoverage },
-        { name: "Backups_Index", headers: BACKUPS_INDEX_HEADERS, seed: [] }
+        { name: "Backups_Index", headers: BACKUPS_INDEX_HEADERS, seed: [] },
+        { name: "Jobs", headers: JOBS_HEADERS, seed: [] },
+        { name: "Import_History", headers: IMPORT_HISTORY_HEADERS, seed: [] },
+        { name: "User_Activity_Log", headers: USER_ACTIVITY_LOG_HEADERS, seed: [] },
+        { name: "Review_Tasks", headers: REVIEW_TASKS_HEADERS, seed: [] },
+        { name: "Notifications", headers: NOTIFICATIONS_HEADERS, seed: [] },
+        { name: "Bank_Deposits", headers: BANK_DEPOSITS_HEADERS, seed: [] },
+        { name: "Monthly_Closures", headers: MONTHLY_CLOSURES_HEADERS, seed: [] }
       ];
 
       for (const tab of requiredTabs) {
@@ -295,7 +309,7 @@ export class GoogleSheetsService {
   private async loadAllFromSheets() {
     if (!this.isConfigured) return;
 
-    const tabs = ["Claims", "Payments", "Notes", "Audit_Log", "Providers", "Payers", "Users", "Settings", "FeeSchedules", "Fee_Schedule", "Eligibility_Coverage"];
+    const tabs = ["Claims", "Payments", "Notes", "Audit_Log", "Providers", "Payers", "Users", "Settings", "FeeSchedules", "Fee_Schedule", "Eligibility_Coverage", "Jobs", "Import_History", "User_Activity_Log", "Review_Tasks", "Notifications", "Bank_Deposits", "Monthly_Closures"];
     for (const tab of tabs) {
       try {
         const response = await this.sheets.spreadsheets.values.get({
@@ -320,6 +334,13 @@ export class GoogleSheetsService {
         if (tab === "FeeSchedules") this.feeSchedules = mappedObjects as FeeSchedule[];
         if (tab === "Fee_Schedule") this.reportFeeSchedules = mappedObjects as ReportFeeSchedule[];
         if (tab === "Eligibility_Coverage") this.eligibilityCoverage = mappedObjects as EligibilityCoverage[];
+        if (tab === "Jobs") this.jobs = mappedObjects as JobRecord[];
+        if (tab === "Import_History") this.importHistory = mappedObjects as ImportHistoryRecord[];
+        if (tab === "User_Activity_Log") this.userActivityLogs = mappedObjects as UserActivityLog[];
+        if (tab === "Review_Tasks") this.reviewTasks = mappedObjects as ReviewTask[];
+        if (tab === "Notifications") this.notifications = mappedObjects as NotificationRecord[];
+        if (tab === "Bank_Deposits") this.bankDeposits = mappedObjects as BankDeposit[];
+        if (tab === "Monthly_Closures") this.monthlyClosures = mappedObjects as MonthlyCloseRecord[];
       } catch (err) {
         console.error(`Failed to load tab ${tab} from Google Sheets:`, err);
       }
@@ -1232,6 +1253,298 @@ export class GoogleSheetsService {
     return { restoredTabs, preRestoreBackup };
   }
 
+  private async appendOperationalRecord<T>(tabName: string, record: T): Promise<T> {
+    const collectionMap: Record<string, keyof GoogleSheetsService> = {
+      Jobs: "jobs",
+      Import_History: "importHistory",
+      User_Activity_Log: "userActivityLogs",
+      Review_Tasks: "reviewTasks",
+      Notifications: "notifications",
+      Bank_Deposits: "bankDeposits",
+      Monthly_Closures: "monthlyClosures"
+    };
+    const key = collectionMap[tabName];
+    if (key) {
+      (this[key] as T[]).push(record);
+    }
+    if (this.isConfigured) {
+      await this.appendRow(tabName, mapObjectToRow(tabName, record));
+    }
+    return record;
+  }
+
+  private async overwriteOperationalRecords<T>(tabName: string, records: T[]): Promise<void> {
+    if (this.isConfigured) {
+      await this.overwriteTabStrict(tabName, getHeadersForTab(tabName), records.map(record => mapObjectToRow(tabName, record)));
+    }
+  }
+
+  public async addUserActivityLog(recordData: Partial<UserActivityLog>): Promise<UserActivityLog> {
+    const record: UserActivityLog = {
+      activity_id: recordData.activity_id || `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      user_email: recordData.user_email || "system@itera.health",
+      action: recordData.action || "Activity",
+      entity_type: recordData.entity_type || "System",
+      entity_id: recordData.entity_id || "",
+      metadata_json: recordData.metadata_json || "{}",
+      created_at: recordData.created_at || new Date().toISOString()
+    };
+    return this.appendOperationalRecord("User_Activity_Log", record);
+  }
+
+  public async getUserActivityLogs(): Promise<UserActivityLog[]> {
+    return [...this.userActivityLogs].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  }
+
+  public async createJob(recordData: Partial<JobRecord>): Promise<JobRecord> {
+    const now = new Date().toISOString();
+    const record: JobRecord = {
+      job_id: recordData.job_id || `JOB-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      job_type: recordData.job_type || "General",
+      status: recordData.status || "completed",
+      progress: Number(recordData.progress ?? 100),
+      requested_by: recordData.requested_by || "system@itera.health",
+      requested_at: recordData.requested_at || now,
+      started_at: recordData.started_at || now,
+      completed_at: recordData.completed_at || now,
+      summary_json: recordData.summary_json || "{}",
+      error_message: recordData.error_message || ""
+    };
+    return this.appendOperationalRecord("Jobs", record);
+  }
+
+  public async updateJob(jobId: string, updates: Partial<JobRecord>): Promise<JobRecord | null> {
+    const index = this.jobs.findIndex(job => job.job_id === jobId);
+    if (index === -1) return null;
+    this.jobs[index] = { ...this.jobs[index], ...updates };
+    await this.overwriteOperationalRecords("Jobs", this.jobs);
+    return this.jobs[index];
+  }
+
+  public async getJobs(): Promise<JobRecord[]> {
+    return [...this.jobs].sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)));
+  }
+
+  public async createImportHistory(recordData: Partial<ImportHistoryRecord>): Promise<ImportHistoryRecord> {
+    const record: ImportHistoryRecord = {
+      import_id: recordData.import_id || `IMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      import_type: recordData.import_type || "Import",
+      file_name: recordData.file_name || "",
+      file_drive_url: recordData.file_drive_url || "",
+      requested_by: recordData.requested_by || "system@itera.health",
+      imported_at: recordData.imported_at || new Date().toISOString(),
+      total_rows: Number(recordData.total_rows || 0),
+      imported_rows: Number(recordData.imported_rows || 0),
+      rejected_rows: Number(recordData.rejected_rows || 0),
+      review_rows: Number(recordData.review_rows || 0),
+      total_amount: Number(recordData.total_amount || 0),
+      summary_json: recordData.summary_json || "{}",
+      status: recordData.status || "Completed"
+    };
+    return this.appendOperationalRecord("Import_History", record);
+  }
+
+  public async getImportHistory(): Promise<ImportHistoryRecord[]> {
+    return [...this.importHistory].sort((a, b) => String(b.imported_at).localeCompare(String(a.imported_at)));
+  }
+
+  public async createReviewTask(recordData: Partial<ReviewTask>): Promise<ReviewTask> {
+    const now = new Date().toISOString();
+    const record: ReviewTask = {
+      task_id: recordData.task_id || `TASK-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      source: recordData.source || "System",
+      claim_id: recordData.claim_id || "",
+      cpt_code: recordData.cpt_code || "",
+      reason: recordData.reason || "Review required",
+      assigned_to: recordData.assigned_to || "",
+      priority: recordData.priority || "Medium",
+      status: recordData.status || "Open",
+      due_date: recordData.due_date || "",
+      created_at: recordData.created_at || now,
+      updated_at: recordData.updated_at || now
+    };
+    return this.appendOperationalRecord("Review_Tasks", record);
+  }
+
+  public async updateReviewTask(taskId: string, updates: Partial<ReviewTask>): Promise<ReviewTask | null> {
+    const index = this.reviewTasks.findIndex(task => task.task_id === taskId);
+    if (index === -1) return null;
+    this.reviewTasks[index] = { ...this.reviewTasks[index], ...updates, updated_at: new Date().toISOString() };
+    await this.overwriteOperationalRecords("Review_Tasks", this.reviewTasks);
+    return this.reviewTasks[index];
+  }
+
+  public async getReviewTasks(): Promise<ReviewTask[]> {
+    return [...this.reviewTasks].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  }
+
+  public async createNotification(recordData: Partial<NotificationRecord>): Promise<NotificationRecord> {
+    const record: NotificationRecord = {
+      notification_id: recordData.notification_id || `NOTIF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      severity: recordData.severity || "info",
+      title: recordData.title || "Notification",
+      message: recordData.message || "",
+      target_role: recordData.target_role || "Admin",
+      read_by_json: recordData.read_by_json || "[]",
+      created_at: recordData.created_at || new Date().toISOString()
+    };
+    return this.appendOperationalRecord("Notifications", record);
+  }
+
+  public async getNotifications(): Promise<NotificationRecord[]> {
+    return [...this.notifications].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  }
+
+  public async createBankDeposit(recordData: Partial<BankDeposit>): Promise<BankDeposit> {
+    const depositAmount = Number(recordData.deposit_amount || 0);
+    const matchedPaymentTotal = Number(recordData.matched_payment_total || 0);
+    const difference = Number((depositAmount - matchedPaymentTotal).toFixed(2));
+    const record: BankDeposit = {
+      deposit_id: recordData.deposit_id || `DEP-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      deposit_date: recordData.deposit_date || new Date().toISOString().slice(0, 10),
+      check_or_eft_number: recordData.check_or_eft_number || "",
+      payer_name: recordData.payer_name || "",
+      deposit_amount: depositAmount,
+      matched_payment_total: matchedPaymentTotal,
+      difference,
+      status: recordData.status || (Math.abs(difference) < 0.01 ? "Matched" : "Mismatch"),
+      notes: recordData.notes || "",
+      created_at: recordData.created_at || new Date().toISOString()
+    };
+    return this.appendOperationalRecord("Bank_Deposits", record);
+  }
+
+  public async getBankDeposits(): Promise<BankDeposit[]> {
+    return [...this.bankDeposits].sort((a, b) => String(b.deposit_date).localeCompare(String(a.deposit_date)));
+  }
+
+  public getSystemHealth() {
+    const activeClaims = this.claims.filter(claim => !claim.deleted_flag);
+    const claimIds = new Set(activeClaims.map(claim => claim.claim_id));
+    const orphanPayments = this.payments.filter(payment => !claimIds.has(payment.claim_id));
+    const claimsWithoutServiceLines = activeClaims.filter(claim => {
+      try {
+        const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+        return !Array.isArray(lines) || lines.length === 0;
+      } catch {
+        return true;
+      }
+    });
+    const feeScheduleKeys = new Set(this.feeSchedules.map(item => `${item.cpt_code}-${item.year}`));
+    const missingFeeSchedules = activeClaims.flatMap(claim => {
+      const year = Number(String(claim.date_of_service_from || claim.month_of_service || "").slice(0, 4)) || new Date().getFullYear();
+      const codes = String(claim.cpt_hcpcs || "").split(/[,;/]+/).map(code => code.trim()).filter(Boolean);
+      return codes
+        .filter(code => !feeScheduleKeys.has(`${code}-${year}`))
+        .map(code => ({ claim_id: claim.claim_id, cpt_code: code, year }));
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    const overdueReviewTasks = this.reviewTasks.filter(task =>
+      !["Resolved", "Dismissed"].includes(task.status) && task.due_date && task.due_date < today
+    );
+    const openBalance = Number(activeClaims.reduce((sum, claim) => sum + Number(claim.ar_balance || 0), 0).toFixed(2));
+    const lastBackupAt = this.getSettingValue("BACKUP_LAST_CREATED_AT", "");
+
+    return {
+      generatedAt: new Date().toISOString(),
+      checks: [
+        { key: "orphan_payments", label: "Payments without active claim", count: orphanPayments.length, severity: orphanPayments.length ? "warning" : "ok" },
+        { key: "claims_without_service_lines", label: "Claims without CPT service lines", count: claimsWithoutServiceLines.length, severity: claimsWithoutServiceLines.length ? "warning" : "ok" },
+        { key: "missing_fee_schedules", label: "Claim CPT/year combinations without fee schedule", count: missingFeeSchedules.length, severity: missingFeeSchedules.length ? "warning" : "ok" },
+        { key: "overdue_review_tasks", label: "Overdue review tasks", count: overdueReviewTasks.length, severity: overdueReviewTasks.length ? "warning" : "ok" },
+        { key: "backup_status", label: "Last backup registered", count: lastBackupAt ? 1 : 0, severity: lastBackupAt ? "ok" : "warning" }
+      ],
+      totals: {
+        activeClaims: activeClaims.length,
+        payments: this.payments.length,
+        openReviewTasks: this.reviewTasks.filter(task => !["Resolved", "Dismissed"].includes(task.status)).length,
+        openBalance,
+        providers: this.providers.length,
+        payers: this.payers.length,
+        feeSchedules: this.feeSchedules.length,
+        backups: this.getSettingValue("BACKUP_LAST_CREATED_AT", "") ? 1 : 0
+      },
+      details: {
+        orphanPayments: orphanPayments.slice(0, 50),
+        claimsWithoutServiceLines: claimsWithoutServiceLines.slice(0, 50).map(claim => claim.claim_id),
+        missingFeeSchedules: missingFeeSchedules.slice(0, 50),
+        overdueReviewTasks: overdueReviewTasks.slice(0, 50)
+      }
+    };
+  }
+
+  public getRcmProductivityMetrics() {
+    const openClaims = this.claims.filter(claim => !claim.deleted_flag);
+    const taskCounts = this.reviewTasks.reduce<Record<string, number>>((acc, task) => {
+      const key = task.assigned_to || "Unassigned";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const statusCounts = openClaims.reduce<Record<string, number>>((acc, claim) => {
+      acc[claim.claim_status] = (acc[claim.claim_status] || 0) + 1;
+      return acc;
+    }, {});
+    const nextActionCounts = openClaims.reduce<Record<string, number>>((acc, claim) => {
+      try {
+        const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+        if (Array.isArray(lines)) {
+          lines.forEach((line: any) => {
+            const key = String(line?.nextAction || "No action");
+            acc[key] = (acc[key] || 0) + 1;
+          });
+        }
+      } catch {
+        acc["Invalid service lines"] = (acc["Invalid service lines"] || 0) + 1;
+      }
+      return acc;
+    }, {});
+
+    return {
+      generatedAt: new Date().toISOString(),
+      taskCounts,
+      statusCounts,
+      nextActionCounts,
+      totalPaid: Number(openClaims.reduce((sum, claim) => sum + Number(claim.paid_amount || 0), 0).toFixed(2)),
+      totalBalance: Number(openClaims.reduce((sum, claim) => sum + Number(claim.ar_balance || 0), 0).toFixed(2)),
+      importedRows30Days: this.importHistory.filter(item => {
+        const imported = new Date(item.imported_at).getTime();
+        return Number.isFinite(imported) && imported >= Date.now() - 30 * 24 * 60 * 60 * 1000;
+      }).reduce((sum, item) => sum + Number(item.imported_rows || 0), 0)
+    };
+  }
+
+  public async createMonthlyClose(period: string, closedBy: string, notes = ""): Promise<MonthlyCloseRecord> {
+    const normalizedPeriod = period || new Date().toISOString().slice(0, 7);
+    const existing = this.monthlyClosures.find(item => item.period === normalizedPeriod && item.status === "Closed");
+    if (existing) {
+      throw new Error(`Period ${normalizedPeriod} is already closed.`);
+    }
+    const backup = await this.createSpreadsheetBackup(closedBy, `Monthly close safety backup for ${normalizedPeriod}.`);
+    const health = this.getSystemHealth();
+    const record: MonthlyCloseRecord = {
+      close_id: `CLOSE-${normalizedPeriod}-${Date.now()}`,
+      period: normalizedPeriod,
+      status: "Closed",
+      closed_by: closedBy,
+      closed_at: new Date().toISOString(),
+      backup_file_id: backup.backup_file_id,
+      validation_summary_json: JSON.stringify(health),
+      notes
+    };
+    await this.appendOperationalRecord("Monthly_Closures", record);
+    await this.createNotification({
+      severity: "info",
+      title: `Monthly close completed for ${normalizedPeriod}`,
+      message: `Closed by ${closedBy}. Backup ${backup.backup_file_name} was created before closing.`,
+      target_role: "Admin"
+    });
+    return record;
+  }
+
+  public async getMonthlyClosures(): Promise<MonthlyCloseRecord[]> {
+    return [...this.monthlyClosures].sort((a, b) => String(b.period).localeCompare(String(a.period)));
+  }
+
   public async clearOperationalData(): Promise<{ clearedSheets: string[]; counts: Record<string, number> }> {
     const counts = {
       Claims: this.claims.length,
@@ -1513,6 +1826,38 @@ const BACKUPS_INDEX_HEADERS = [
   "created_by", "created_at", "source_spreadsheet_id", "status", "notes", "last_restored_at", "last_restored_by"
 ];
 
+const JOBS_HEADERS = [
+  "job_id", "job_type", "status", "progress", "requested_by", "requested_at",
+  "started_at", "completed_at", "summary_json", "error_message"
+];
+
+const IMPORT_HISTORY_HEADERS = [
+  "import_id", "import_type", "file_name", "file_drive_url", "requested_by", "imported_at",
+  "total_rows", "imported_rows", "rejected_rows", "review_rows", "total_amount", "summary_json", "status"
+];
+
+const USER_ACTIVITY_LOG_HEADERS = [
+  "activity_id", "user_email", "action", "entity_type", "entity_id", "metadata_json", "created_at"
+];
+
+const REVIEW_TASKS_HEADERS = [
+  "task_id", "source", "claim_id", "cpt_code", "reason", "assigned_to",
+  "priority", "status", "due_date", "created_at", "updated_at"
+];
+
+const NOTIFICATIONS_HEADERS = [
+  "notification_id", "severity", "title", "message", "target_role", "read_by_json", "created_at"
+];
+
+const BANK_DEPOSITS_HEADERS = [
+  "deposit_id", "deposit_date", "check_or_eft_number", "payer_name", "deposit_amount",
+  "matched_payment_total", "difference", "status", "notes", "created_at"
+];
+
+const MONTHLY_CLOSURES_HEADERS = [
+  "close_id", "period", "status", "closed_by", "closed_at", "backup_file_id", "validation_summary_json", "notes"
+];
+
 const BACKUP_RESTORE_TABS = [
   "Claims",
   "Payments",
@@ -1524,7 +1869,14 @@ const BACKUP_RESTORE_TABS = [
   "Settings",
   "FeeSchedules",
   "Fee_Schedule",
-  "Eligibility_Coverage"
+  "Eligibility_Coverage",
+  "Jobs",
+  "Import_History",
+  "User_Activity_Log",
+  "Review_Tasks",
+  "Notifications",
+  "Bank_Deposits",
+  "Monthly_Closures"
 ];
 
 function getHeadersForTab(tabName: string): string[] {
@@ -1540,6 +1892,13 @@ function getHeadersForTab(tabName: string): string[] {
   if (tabName === "Fee_Schedule") return REPORT_FEESCHEDULE_HEADERS;
   if (tabName === "Eligibility_Coverage") return ELIGIBILITY_COVERAGE_HEADERS;
   if (tabName === "Backups_Index") return BACKUPS_INDEX_HEADERS;
+  if (tabName === "Jobs") return JOBS_HEADERS;
+  if (tabName === "Import_History") return IMPORT_HISTORY_HEADERS;
+  if (tabName === "User_Activity_Log") return USER_ACTIVITY_LOG_HEADERS;
+  if (tabName === "Review_Tasks") return REVIEW_TASKS_HEADERS;
+  if (tabName === "Notifications") return NOTIFICATIONS_HEADERS;
+  if (tabName === "Bank_Deposits") return BANK_DEPOSITS_HEADERS;
+  if (tabName === "Monthly_Closures") return MONTHLY_CLOSURES_HEADERS;
   return [];
 }
 
