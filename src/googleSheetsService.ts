@@ -5,7 +5,7 @@
 
 import { google } from "googleapis";
 import { Readable } from "stream";
-import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule, BackupRecord, JobRecord, ImportHistoryRecord, UserActivityLog, ReviewTask, NotificationRecord, BankDeposit, MonthlyCloseRecord } from "./types";
+import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule, BackupRecord, JobRecord, ImportHistoryRecord, UserActivityLog, ReviewTask, NotificationRecord, BankDeposit, MonthlyCloseRecord, ImportMappingTemplate } from "./types";
 import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS, SEED_PAYERS, SEED_USERS, SEED_SETTINGS, SEED_FEE_SCHEDULES, SEED_ELIGIBILITY_COVERAGE, SEED_REPORT_FEE_SCHEDULES } from "./seedData";
 import { normalizeUserAccess } from "./accessControl";
 
@@ -57,6 +57,7 @@ export class GoogleSheetsService {
   public notifications: NotificationRecord[] = [];
   public bankDeposits: BankDeposit[] = [];
   public monthlyClosures: MonthlyCloseRecord[] = [];
+  public importMappingTemplates: ImportMappingTemplate[] = [];
   private scheduledBackupInFlight = false;
 
   constructor() {
@@ -276,7 +277,8 @@ export class GoogleSheetsService {
         { name: "Review_Tasks", headers: REVIEW_TASKS_HEADERS, seed: [] },
         { name: "Notifications", headers: NOTIFICATIONS_HEADERS, seed: [] },
         { name: "Bank_Deposits", headers: BANK_DEPOSITS_HEADERS, seed: [] },
-        { name: "Monthly_Closures", headers: MONTHLY_CLOSURES_HEADERS, seed: [] }
+        { name: "Monthly_Closures", headers: MONTHLY_CLOSURES_HEADERS, seed: [] },
+        { name: "Import_Mapping_Templates", headers: IMPORT_MAPPING_TEMPLATE_HEADERS, seed: [] }
       ];
 
       for (const tab of requiredTabs) {
@@ -325,7 +327,7 @@ export class GoogleSheetsService {
   private async loadAllFromSheets() {
     if (!this.isConfigured) return;
 
-    const tabs = ["Claims", "Payments", "Notes", "Audit_Log", "Providers", "Payers", "Users", "Settings", "FeeSchedules", "Fee_Schedule", "Eligibility_Coverage", "Jobs", "Import_History", "User_Activity_Log", "Review_Tasks", "Notifications", "Bank_Deposits", "Monthly_Closures"];
+    const tabs = ["Claims", "Payments", "Notes", "Audit_Log", "Providers", "Payers", "Users", "Settings", "FeeSchedules", "Fee_Schedule", "Eligibility_Coverage", "Jobs", "Import_History", "User_Activity_Log", "Review_Tasks", "Notifications", "Bank_Deposits", "Monthly_Closures", "Import_Mapping_Templates"];
     for (const tab of tabs) {
       try {
         const response = await this.sheets.spreadsheets.values.get({
@@ -357,6 +359,7 @@ export class GoogleSheetsService {
         if (tab === "Notifications") this.notifications = mappedObjects as NotificationRecord[];
         if (tab === "Bank_Deposits") this.bankDeposits = mappedObjects as BankDeposit[];
         if (tab === "Monthly_Closures") this.monthlyClosures = mappedObjects as MonthlyCloseRecord[];
+        if (tab === "Import_Mapping_Templates") this.importMappingTemplates = mappedObjects as ImportMappingTemplate[];
         if (tab === "Settings") await this.ensureDefaultSettings();
       } catch (err) {
         console.error(`Failed to load tab ${tab} from Google Sheets:`, err);
@@ -1403,6 +1406,31 @@ export class GoogleSheetsService {
     return [...this.importHistory].sort((a, b) => String(b.imported_at).localeCompare(String(a.imported_at)));
   }
 
+  public async getImportMappingTemplates(importType = "Payment Import"): Promise<ImportMappingTemplate[]> {
+    return this.importMappingTemplates
+      .filter(template => template.active !== false && (!importType || template.import_type === importType))
+      .sort((a, b) => String(b.updated_at || b.created_at).localeCompare(String(a.updated_at || a.created_at)));
+  }
+
+  public async createImportMappingTemplate(recordData: Partial<ImportMappingTemplate>): Promise<ImportMappingTemplate> {
+    const now = new Date().toISOString();
+    const record: ImportMappingTemplate = {
+      template_id: recordData.template_id || `MAP-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      template_name: recordData.template_name || "Payment import mapping",
+      import_type: recordData.import_type || "Payment Import",
+      provider_id: recordData.provider_id || "",
+      provider_name: recordData.provider_name || "",
+      system_name: recordData.system_name || "",
+      headers_signature: recordData.headers_signature || "",
+      mapping_json: recordData.mapping_json || "{}",
+      created_by: recordData.created_by || "system@itera.health",
+      created_at: recordData.created_at || now,
+      updated_at: recordData.updated_at || now,
+      active: recordData.active !== false
+    };
+    return this.appendOperationalRecord("Import_Mapping_Templates", record);
+  }
+
   public async createReviewTask(recordData: Partial<ReviewTask>): Promise<ReviewTask> {
     const now = new Date().toISOString();
     const record: ReviewTask = {
@@ -1919,6 +1947,12 @@ const MONTHLY_CLOSURES_HEADERS = [
   "close_id", "period", "status", "closed_by", "closed_at", "backup_file_id", "validation_summary_json", "notes"
 ];
 
+const IMPORT_MAPPING_TEMPLATE_HEADERS = [
+  "template_id", "template_name", "import_type", "provider_id", "provider_name",
+  "system_name", "headers_signature", "mapping_json", "created_by", "created_at",
+  "updated_at", "active"
+];
+
 const BACKUP_RESTORE_TABS = [
   "Claims",
   "Payments",
@@ -1937,7 +1971,8 @@ const BACKUP_RESTORE_TABS = [
   "Review_Tasks",
   "Notifications",
   "Bank_Deposits",
-  "Monthly_Closures"
+  "Monthly_Closures",
+  "Import_Mapping_Templates"
 ];
 
 function getHeadersForTab(tabName: string): string[] {
@@ -1960,6 +1995,7 @@ function getHeadersForTab(tabName: string): string[] {
   if (tabName === "Notifications") return NOTIFICATIONS_HEADERS;
   if (tabName === "Bank_Deposits") return BANK_DEPOSITS_HEADERS;
   if (tabName === "Monthly_Closures") return MONTHLY_CLOSURES_HEADERS;
+  if (tabName === "Import_Mapping_Templates") return IMPORT_MAPPING_TEMPLATE_HEADERS;
   return [];
 }
 

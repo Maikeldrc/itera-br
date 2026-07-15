@@ -1,10 +1,38 @@
 import React, { useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, RefreshCw, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, FileSpreadsheet, RefreshCw, Save, SlidersHorizontal, Upload, XCircle } from "lucide-react";
 import { apiFetch } from "../apiClient";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
 
 type ImportPayload = { rows?: Record<string, string>[]; fileName?: string; fileBase64?: string };
+
+type PaymentImportMapping = Record<string, string>;
+
+type PaymentImportSchema = {
+  headers: string[];
+  headersSignature: string;
+  fieldLabels: Record<string, string>;
+  requiredFields: string[];
+  paymentFields: string[];
+  autoMapping: PaymentImportMapping;
+  mapping: PaymentImportMapping;
+  requirements: {
+    missingRequired: string[];
+    missingPayment: boolean;
+    valid: boolean;
+  };
+  templates: Array<{
+    templateId: string;
+    templateName: string;
+    providerName: string;
+    systemName: string;
+    headersSignature: string;
+    mapping: PaymentImportMapping;
+    exactHeaderMatch: boolean;
+  }>;
+  selectedTemplateId: string;
+  previewRows: Array<Record<string, unknown>>;
+};
 
 type PaymentImportSummary = {
   totalRowsRead: number;
@@ -85,6 +113,10 @@ const REQUIRED_COLUMNS = [
   "Payer Withheld"
 ];
 
+const CORE_MAPPING_FIELDS = ["patientAcctNo", "patientName", "claimNo", "cptCode", "serviceDate", "payerName"];
+const PAYMENT_MAPPING_FIELDS = ["payment", "payerPayment", "patientPayment", "paymentDate", "checkNo", "externalPaymentId"];
+const FINANCIAL_MAPPING_FIELDS = ["allowedAmount", "contractualAdjustment", "coinsurance", "deductible", "copay", "balance", "responsibleParty"];
+
 function parseCsv(text: string) {
   const rows: string[][] = [];
   let current = "";
@@ -154,6 +186,13 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<ImportPayload | null>(null);
+  const [schema, setSchema] = useState<PaymentImportSchema | null>(null);
+  const [mapping, setMapping] = useState<PaymentImportMapping>({});
+  const [mappingExpanded, setMappingExpanded] = useState(true);
+  const [templateName, setTemplateName] = useState("");
+  const [systemName, setSystemName] = useState("");
+  const [isSchemaLoading, setIsSchemaLoading] = useState(false);
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<ImportProgressState | null>(null);
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
@@ -162,6 +201,11 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
   const reset = () => {
     setFileName("");
     setPayload(null);
+    setSchema(null);
+    setMapping({});
+    setMappingExpanded(true);
+    setTemplateName("");
+    setSystemName("");
     setResult(null);
     setProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -169,26 +213,103 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
 
   const rowKey = (row: PaymentImportRow) => `${row.rowNumber}-${row.claimId}-${row.cptCode}-${row.reportPayerName || row.payerName}`;
 
+  const mappingIssues = schema ? {
+    missingRequired: (schema.requiredFields || []).filter(field => !mapping[field]),
+    missingPayment: !(schema.paymentFields || []).some(field => mapping[field]),
+    valid: (schema.requiredFields || []).every(field => Boolean(mapping[field])) && (schema.paymentFields || []).some(field => Boolean(mapping[field]))
+  } : { missingRequired: [], missingPayment: true, valid: false };
+
+  const analyzeSchema = async (nextPayload: ImportPayload) => {
+    setIsSchemaLoading(true);
+    setSchema(null);
+    setMapping({});
+    try {
+      const response = await apiFetch("/api/payment-reconciliation-import/analyze-schema", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextPayload)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not analyze payment file columns.");
+      setSchema(data);
+      setMapping(data.mapping || {});
+      const exactTemplate = data.templates?.find((template: PaymentImportSchema["templates"][number]) => template.templateId === data.selectedTemplateId);
+      setTemplateName(exactTemplate?.templateName || "");
+      setSystemName(exactTemplate?.systemName || "");
+      setMappingExpanded(!data.requirements?.valid);
+      if (!data.requirements?.valid) {
+        notify(
+          isEnglish
+            ? "Review the column mapping before analyzing this payment file."
+            : "Revise el mapeo de columnas antes de analizar este archivo de pagos.",
+          "warning"
+        );
+      }
+    } catch (err: any) {
+      notify(`${isEnglish ? "Column analysis error" : "Error analizando columnas"}: ${err.message}`, "error");
+    } finally {
+      setIsSchemaLoading(false);
+    }
+  };
+
   const processFile = (file: File) => {
     setFileName(file.name);
     setResult(null);
+    setSchema(null);
+    setMapping({});
     const reader = new FileReader();
     const isXlsx = file.name.toLowerCase().endsWith(".xlsx");
     reader.onload = event => {
       const value = String(event.target?.result || "");
+      const nextPayload = isXlsx ? { fileName: file.name, fileBase64: value } : { rows: parseCsv(value), fileName: file.name };
       if (isXlsx) {
-        setPayload({ fileName: file.name, fileBase64: value });
+        setPayload(nextPayload);
       } else {
-        setPayload({ rows: parseCsv(value), fileName: file.name });
+        setPayload(nextPayload);
       }
+      void analyzeSchema(nextPayload);
     };
     if (isXlsx) reader.readAsDataURL(file);
     else reader.readAsText(file);
   };
 
+  const saveMappingTemplate = async () => {
+    if (!schema || !mappingIssues.valid) return;
+    setIsSavingTemplate(true);
+    try {
+      const response = await apiFetch("/api/payment-reconciliation-import/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateName: templateName || `${fileName || "Payment report"} mapping`,
+          systemName,
+          headersSignature: schema.headersSignature,
+          mapping
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not save mapping template.");
+      notify(isEnglish ? "Payment import mapping template saved." : "Plantilla de mapeo guardada.", "success");
+    } catch (err: any) {
+      notify(`${isEnglish ? "Template save error" : "Error guardando plantilla"}: ${err.message}`, "error");
+    } finally {
+      setIsSavingTemplate(false);
+    }
+  };
+
   const submit = async (apply: boolean) => {
     if (!payload) {
       notify(isEnglish ? "Select a payment report first." : "Seleccione primero un reporte de pagos.", "warning");
+      return;
+    }
+    if (schema && !mappingIssues.valid) {
+      notify(
+        isEnglish
+          ? "Complete the required column mapping before continuing."
+          : "Complete el mapeo de columnas requerido antes de continuar.",
+        "warning"
+      );
+      setMappingExpanded(true);
       return;
     }
     const steps = apply
@@ -224,7 +345,7 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
       const response = await apiFetch("/api/payment-reconciliation-import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, apply })
+        body: JSON.stringify({ ...payload, apply, mapping: schema ? mapping : undefined })
       });
       setStep(apply ? 2 : 2, apply ? 52 : 70);
       const data = await response.json();
@@ -358,8 +479,13 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
         <div className="flex gap-3">
           <FileSpreadsheet className="mt-0.5 h-5 w-5 shrink-0 text-primary-blue" />
           <div>
-            <h3 className="font-bold text-dark-blue">{isEnglish ? "Expected report columns" : "Columnas esperadas del reporte"}</h3>
-            <p className="mt-1 text-xs leading-relaxed">{REQUIRED_COLUMNS.join(", ")}</p>
+            <h3 className="font-bold text-dark-blue">{isEnglish ? "Default payment report columns" : "Columnas estándar del reporte de pagos"}</h3>
+            <p className="mt-1 text-xs leading-relaxed">
+              {isEnglish
+                ? "This format is recognized automatically, and other provider formats can be mapped below after selecting a file: "
+                : "Este formato se reconoce automáticamente, y otros formatos de providers se pueden mapear debajo luego de seleccionar un archivo: "}
+              {REQUIRED_COLUMNS.join(", ")}
+            </p>
           </div>
         </div>
       </div>
@@ -422,22 +548,150 @@ export function PaymentReconciliationImport({ onImported }: PaymentReconciliatio
             onClick={() => fileInputRef.current?.click()}
             disabled={isProcessing}
             className="mt-4 rounded-lg bg-dark-blue px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-50"
-          >
-            {isEnglish ? "Choose file" : "Seleccionar archivo"}
-          </button>
-        </div>
+        >
+          {isEnglish ? "Choose file" : "Seleccionar archivo"}
+        </button>
+      </div>
+
+        {(isSchemaLoading || schema) && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white shadow-sm">
+            <div className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-3">
+                <SlidersHorizontal className="mt-0.5 h-5 w-5 text-primary-blue" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">{isEnglish ? "Column Mapping" : "Mapeo de columnas"}</h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {isEnglish
+                      ? "Map the provider report headers to the fields required for claim/CPT matching and payment import."
+                      : "Mapee las columnas del reporte del provider contra los campos requeridos para matching e importación de pagos."}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {isSchemaLoading && <RefreshCw className="h-4 w-4 animate-spin text-primary-blue" />}
+                {schema && (
+                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${mappingIssues.valid ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                    {mappingIssues.valid ? (isEnglish ? "Ready to analyze" : "Listo para analizar") : (isEnglish ? "Mapping required" : "Mapeo requerido")}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setMappingExpanded(current => !current)}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50"
+                >
+                  {mappingExpanded ? (isEnglish ? "Collapse" : "Contraer") : (isEnglish ? "Edit mapping" : "Editar mapeo")}
+                </button>
+              </div>
+            </div>
+
+            {schema && !mappingIssues.valid && (
+              <div className="border-b border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                <AlertTriangle className="mr-2 inline h-4 w-4 align-text-bottom" />
+                {isEnglish ? "Missing required mapping: " : "Falta mapeo requerido: "}
+                {[...mappingIssues.missingRequired.map(field => schema.fieldLabels[field] || field), ...(mappingIssues.missingPayment ? [isEnglish ? "one payment amount source" : "una fuente de monto pagado"] : [])].join(", ")}
+              </div>
+            )}
+
+            {schema && mappingExpanded && (
+              <div className="space-y-4 p-4">
+                {schema.templates?.length > 0 && (
+                  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3">
+                    <label className="text-[10px] font-bold uppercase tracking-wide text-dark-blue">{isEnglish ? "Saved templates" : "Plantillas guardadas"}</label>
+                    <select
+                      className="mt-2 w-full rounded-lg border border-blue-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                      value=""
+                      onChange={event => {
+                        const template = schema.templates.find(item => item.templateId === event.target.value);
+                        if (!template) return;
+                        setMapping(template.mapping || {});
+                        setTemplateName(template.templateName || "");
+                        setSystemName(template.systemName || "");
+                      }}
+                    >
+                      <option value="">{isEnglish ? "Select a template..." : "Seleccione una plantilla..."}</option>
+                      {schema.templates.map(template => (
+                        <option key={template.templateId} value={template.templateId}>
+                          {template.templateName}{template.systemName ? ` - ${template.systemName}` : ""}{template.exactHeaderMatch ? (isEnglish ? " (same headers)" : " (mismos headers)") : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {[
+                  [isEnglish ? "Matching fields" : "Campos de matching", CORE_MAPPING_FIELDS],
+                  [isEnglish ? "Payment fields" : "Campos de pago", PAYMENT_MAPPING_FIELDS],
+                  [isEnglish ? "Optional financial details" : "Detalles financieros opcionales", FINANCIAL_MAPPING_FIELDS]
+                ].map(([title, fields]) => (
+                  <div key={String(title)}>
+                    <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{String(title)}</h4>
+                    <div className="mt-2 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {(fields as string[]).map(field => {
+                        const required = schema.requiredFields.includes(field) || (field === "payment" && mappingIssues.missingPayment);
+                        return (
+                          <label key={field} className="block">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                              {schema.fieldLabels[field] || field}{required ? " *" : ""}
+                            </span>
+                            <select
+                              className={`mt-1 w-full rounded-lg border px-3 py-2 text-xs font-semibold text-slate-700 ${required && !mapping[field] ? "border-amber-300 bg-amber-50" : "border-slate-200 bg-white"}`}
+                              value={mapping[field] || ""}
+                              onChange={event => setMapping(current => ({ ...current, [field]: event.target.value }))}
+                            >
+                              <option value="">{isEnglish ? "Not mapped" : "Sin mapear"}</option>
+                              {schema.headers.map(header => (
+                                <option key={header} value={header}>{header}</option>
+                              ))}
+                            </select>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{isEnglish ? "Save this mapping" : "Guardar este mapeo"}</h4>
+                  <div className="mt-2 grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+                    <input
+                      value={templateName}
+                      onChange={event => setTemplateName(event.target.value)}
+                      placeholder={isEnglish ? "Template name" : "Nombre de plantilla"}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                    />
+                    <input
+                      value={systemName}
+                      onChange={event => setSystemName(event.target.value)}
+                      placeholder={isEnglish ? "Provider system (optional)" : "Sistema del provider (opcional)"}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void saveMappingTemplate()}
+                      disabled={!mappingIssues.valid || isSavingTemplate}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-dark-blue px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-50"
+                    >
+                      {isSavingTemplate ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      {isEnglish ? "Save template" : "Guardar plantilla"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="mt-4 flex justify-end gap-2">
           <button
             onClick={() => void submit(false)}
-            disabled={!payload || isProcessing}
+            disabled={!payload || isProcessing || isSchemaLoading || (schema ? !mappingIssues.valid : false)}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
           >
             {isProcessing && progress?.mode === "analyze" ? (isEnglish ? "Analyzing..." : "Analizando...") : (isEnglish ? "Analyze file" : "Analizar archivo")}
           </button>
           <button
             onClick={() => void submit(true)}
-            disabled={!payload || isProcessing || !result || result.summary.readyToImport === 0}
+            disabled={!payload || isProcessing || isSchemaLoading || (schema ? !mappingIssues.valid : false) || !result || result.summary.readyToImport === 0}
             className="rounded-lg bg-primary-blue px-4 py-2 text-xs font-bold text-white shadow-md hover:bg-dark-blue disabled:opacity-50"
           >
             {isProcessing && progress?.mode === "import" ? (isEnglish ? "Importing..." : "Importando...") : (isEnglish ? "Import safe matches" : "Importar coincidencias seguras")}

@@ -335,6 +335,21 @@ export interface MonthlyCloseRecord {
   notes: string;
 }
 
+export interface ImportMappingTemplate {
+  template_id: string;
+  template_name: string;
+  import_type: string;
+  provider_id: string;
+  provider_name: string;
+  system_name: string;
+  headers_signature: string;
+  mapping_json: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  active: boolean;
+}
+
 export interface FeeSchedule {
   id: string;
   cpt_code: string;

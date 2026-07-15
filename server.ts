@@ -275,39 +275,169 @@ function linePaymentTotal(line: any) {
   return Number(line?.paid || 0) + Number(line?.secondaryPaid || 0);
 }
 
-function normalizePaymentImportRow(row: Record<string, unknown>, index: number) {
-  const payerPayment = parseMoney(importField(row, ["Payer Payment"]));
-  const patientPayment = parseMoney(importField(row, ["Patient Payment"]));
-  const explicitPayment = parseMoney(importField(row, ["Payment"]));
+const PAYMENT_IMPORT_FIELD_LABELS = {
+  cptCode: "CPT Code",
+  facilityName: "Facility Name",
+  renderingProviderName: "Rendering Provider",
+  patientName: "Patient Name",
+  patientAcctNo: "Patient Account No",
+  payerName: "Payer Name",
+  serviceDate: "Service Date",
+  claimDate: "Claim Date",
+  paymentDate: "Payment Date",
+  checkNo: "Check / EFT #",
+  paymentType: "Payment Type",
+  payerType: "Payer Type",
+  claimNo: "Claim Number",
+  cptGroupName: "CPT Group Name",
+  externalPaymentId: "Payment ID",
+  payment: "Total Payment",
+  payerPayment: "Payer Payment",
+  patientPayment: "Patient Payment",
+  contractualAdjustment: "Contractual Adjustment",
+  payerWithheld: "Payer Withheld",
+  allowedAmount: "Allowed Amount",
+  coinsurance: "Co-Insurance Amount",
+  deductible: "Deductible Amount",
+  copay: "Copay",
+  balance: "Balance",
+  responsibleParty: "Currently Responsible",
+  primaryPolicyNumber: "Primary Policy Number",
+  secondaryPayerName: "Secondary Insurance",
+  secondaryPolicyNumber: "Secondary Policy Number",
+  dateOfBirth: "Date of Birth",
+  cptDescription: "CPT Description"
+} as const;
+
+type PaymentImportFieldKey = keyof typeof PAYMENT_IMPORT_FIELD_LABELS;
+type PaymentImportMapping = Partial<Record<PaymentImportFieldKey, string>>;
+
+const PAYMENT_IMPORT_FIELD_ALIASES: Record<PaymentImportFieldKey, string[]> = {
+  cptCode: ["CPT Code", "CPT"],
+  facilityName: ["Facility Name", "Practice Name"],
+  renderingProviderName: ["Rendering Provider Name", "Provider", "Rendering Provider"],
+  patientName: ["Patient Name", "Full Name (Last name First name Mi)", "Full Name", "Patient"],
+  patientAcctNo: ["Patient Acct No", "Patient Account No", "Account Number", "MRN", "Patient ID"],
+  payerName: ["Payer Name", "Payer", "Primary Insurance Name", "Insurance"],
+  serviceDate: ["Service Date", "DOS", "Date Of Service (From) Date", "Date of Service"],
+  claimDate: ["Claim Date", "Original Primary Submission Date"],
+  paymentDate: ["Payment Date", "Payment Posted Date", "Payment Deposit Date", "Payment Check Date", "Payment EOB Date"],
+  checkNo: ["Payment Check No", "Check No", "EFT", "Check", "Check / EFT #"],
+  paymentType: ["Payment Type"],
+  payerType: ["Payer Type"],
+  claimNo: ["Claim No", "Claim ID", "Claim Number"],
+  cptGroupName: ["CPT Group Name"],
+  externalPaymentId: ["Payment ID"],
+  payment: ["Payment", "Total Payment"],
+  payerPayment: ["Payer Payment", "Insurance Payment Column with Reversal and Refund as Negative Payment"],
+  patientPayment: ["Patient Payment", "Patient Payment Column  with Reversal and Refund as Negative Payment", "Patient Payment Column with Reversal and Refund as Negative Payment"],
+  contractualAdjustment: ["Contractual Adjustment", "Contractual Adj"],
+  payerWithheld: ["Payer Withheld"],
+  allowedAmount: ["Allowed Amount"],
+  coinsurance: ["Co-Insurance Amount", "Coinsurance Amount"],
+  deductible: ["Deductible Amount"],
+  copay: ["Copayment Applied To A Charge", "Copay"],
+  balance: ["Balance"],
+  responsibleParty: ["Currently Responsible"],
+  primaryPolicyNumber: ["Primary Policy Number"],
+  secondaryPayerName: ["Secondary Insurance Name"],
+  secondaryPolicyNumber: ["Secondary Policy Number"],
+  dateOfBirth: ["Date Of Birth", "DOB", "Date of Birth"],
+  cptDescription: ["CPT Description"]
+};
+
+const PAYMENT_IMPORT_REQUIRED_FIELDS: PaymentImportFieldKey[] = ["patientAcctNo", "cptCode", "serviceDate"];
+const PAYMENT_IMPORT_PAYMENT_FIELDS: PaymentImportFieldKey[] = ["payment", "payerPayment", "patientPayment"];
+
+function getUploadedTableHeaders(rows: Record<string, unknown>[]) {
+  const seen = new Set<string>();
+  const headers: string[] = [];
+  rows.slice(0, 25).forEach(row => {
+    Object.keys(row || {}).forEach(header => {
+      const trimmed = header.trim();
+      const key = trimmed.toLowerCase();
+      if (trimmed && !seen.has(key)) {
+        seen.add(key);
+        headers.push(trimmed);
+      }
+    });
+  });
+  return headers;
+}
+
+function paymentImportHeadersSignature(headers: string[]) {
+  return headers.map(header => normalizeMatchText(header)).filter(Boolean).sort().join("|");
+}
+
+function autoDetectPaymentImportMapping(headers: string[]): PaymentImportMapping {
+  const normalizedHeaderMap = new Map(headers.map(header => [normalizeMatchText(header), header]));
+  const mapping: PaymentImportMapping = {};
+  (Object.keys(PAYMENT_IMPORT_FIELD_ALIASES) as PaymentImportFieldKey[]).forEach(field => {
+    const match = PAYMENT_IMPORT_FIELD_ALIASES[field].find(alias => normalizedHeaderMap.has(normalizeMatchText(alias)));
+    if (match) mapping[field] = normalizedHeaderMap.get(normalizeMatchText(match)) || match;
+  });
+  return mapping;
+}
+
+function paymentImportMappingIssues(mapping: PaymentImportMapping) {
+  const missingRequired = PAYMENT_IMPORT_REQUIRED_FIELDS.filter(field => !textValue(mapping[field]));
+  const hasPaymentSource = PAYMENT_IMPORT_PAYMENT_FIELDS.some(field => textValue(mapping[field]));
+  return {
+    missingRequired,
+    missingPayment: !hasPaymentSource,
+    valid: missingRequired.length === 0 && hasPaymentSource
+  };
+}
+
+function mappedImportField(row: Record<string, unknown>, mapping: PaymentImportMapping | undefined, field: PaymentImportFieldKey, fallbackNames: string[] = []) {
+  const names = [mapping?.[field], ...fallbackNames].filter(Boolean) as string[];
+  return importField(row, names);
+}
+
+function normalizePaymentImportRow(row: Record<string, unknown>, index: number, mapping?: PaymentImportMapping) {
+  const payerPayment = parseMoney(mappedImportField(row, mapping, "payerPayment", ["Payer Payment"]));
+  const patientPayment = parseMoney(mappedImportField(row, mapping, "patientPayment", ["Patient Payment"]));
+  const explicitPayment = parseMoney(mappedImportField(row, mapping, "payment", ["Payment"]));
   const payment = explicitPayment || Number((payerPayment + patientPayment).toFixed(2));
   const paymentDate =
-    excelSerialToIsoDate(importField(row, ["Payment Date"])) ||
+    excelSerialToIsoDate(mappedImportField(row, mapping, "paymentDate", ["Payment Date"])) ||
     excelSerialToIsoDate(importField(row, ["Payment Posted Date"])) ||
     excelSerialToIsoDate(importField(row, ["Payment Deposit Date"])) ||
     excelSerialToIsoDate(importField(row, ["Payment Check Date"]));
 
   return {
     rowNumber: index + 1,
-    cptCode: importField(row, ["CPT Code", "CPT"]),
-    facilityName: importField(row, ["Facility Name"]),
-    renderingProviderName: importField(row, ["Rendering Provider Name", "Provider"]),
-    patientName: importField(row, ["Patient Name"]),
-    patientAcctNo: importField(row, ["Patient Acct No", "Patient Account No", "MRN", "Patient ID"]),
-    payerName: importField(row, ["Payer Name", "Payer"]),
-    serviceDate: excelSerialToIsoDate(importField(row, ["Service Date", "DOS"])),
-    claimDate: excelSerialToIsoDate(importField(row, ["Claim Date"])),
+    cptCode: mappedImportField(row, mapping, "cptCode", ["CPT Code", "CPT"]),
+    facilityName: mappedImportField(row, mapping, "facilityName", ["Facility Name"]),
+    renderingProviderName: mappedImportField(row, mapping, "renderingProviderName", ["Rendering Provider Name", "Provider"]),
+    patientName: mappedImportField(row, mapping, "patientName", ["Patient Name"]),
+    patientAcctNo: mappedImportField(row, mapping, "patientAcctNo", ["Patient Acct No", "Patient Account No", "MRN", "Patient ID"]),
+    payerName: mappedImportField(row, mapping, "payerName", ["Payer Name", "Payer"]),
+    serviceDate: excelSerialToIsoDate(mappedImportField(row, mapping, "serviceDate", ["Service Date", "DOS"])),
+    claimDate: excelSerialToIsoDate(mappedImportField(row, mapping, "claimDate", ["Claim Date"])),
     paymentDate,
-    checkNo: importField(row, ["Payment Check No", "Check No", "EFT", "Check"]),
-    paymentType: importField(row, ["Payment Type"]),
-    payerType: importField(row, ["Payer Type"]),
-    claimNo: importField(row, ["Claim No", "Claim ID", "Claim Number"]),
-    cptGroupName: importField(row, ["CPT Group Name"]),
-    externalPaymentId: importField(row, ["Payment ID"]),
+    checkNo: mappedImportField(row, mapping, "checkNo", ["Payment Check No", "Check No", "EFT", "Check"]),
+    paymentType: mappedImportField(row, mapping, "paymentType", ["Payment Type"]),
+    payerType: mappedImportField(row, mapping, "payerType", ["Payer Type"]),
+    claimNo: mappedImportField(row, mapping, "claimNo", ["Claim No", "Claim ID", "Claim Number"]),
+    cptGroupName: mappedImportField(row, mapping, "cptGroupName", ["CPT Group Name"]),
+    externalPaymentId: mappedImportField(row, mapping, "externalPaymentId", ["Payment ID"]),
     payment,
     payerPayment,
     patientPayment,
-    contractualAdjustment: parseMoney(importField(row, ["Contractual Adjustment"])),
-    payerWithheld: parseMoney(importField(row, ["Payer Withheld"]))
+    contractualAdjustment: parseMoney(mappedImportField(row, mapping, "contractualAdjustment", ["Contractual Adjustment"])),
+    payerWithheld: parseMoney(mappedImportField(row, mapping, "payerWithheld", ["Payer Withheld"])),
+    allowedAmount: parseMoney(mappedImportField(row, mapping, "allowedAmount", ["Allowed Amount"])),
+    coinsurance: parseMoney(mappedImportField(row, mapping, "coinsurance", ["Co-Insurance Amount"])),
+    deductible: parseMoney(mappedImportField(row, mapping, "deductible", ["Deductible Amount"])),
+    copay: parseMoney(mappedImportField(row, mapping, "copay", ["Copayment Applied To A Charge"])),
+    balance: parseMoney(mappedImportField(row, mapping, "balance", ["Balance"])),
+    responsibleParty: mappedImportField(row, mapping, "responsibleParty", ["Currently Responsible"]),
+    primaryPolicyNumber: mappedImportField(row, mapping, "primaryPolicyNumber", ["Primary Policy Number"]),
+    secondaryPayerName: mappedImportField(row, mapping, "secondaryPayerName", ["Secondary Insurance Name"]),
+    secondaryPolicyNumber: mappedImportField(row, mapping, "secondaryPolicyNumber", ["Secondary Policy Number"]),
+    dateOfBirth: excelSerialToIsoDate(mappedImportField(row, mapping, "dateOfBirth", ["Date Of Birth", "DOB"])),
+    cptDescription: mappedImportField(row, mapping, "cptDescription", ["CPT Description"])
   };
 }
 
@@ -1919,14 +2049,107 @@ async function startServer() {
     }
   });
 
+  app.post("/api/payment-reconciliation-import/analyze-schema", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const { rows, fileBase64, fileName } = req.body;
+      const importRows = fileBase64 ? parseUploadedTableRows(fileBase64, textValue(fileName)) : rows;
+      if (!importRows || !Array.isArray(importRows)) {
+        return res.status(400).json({ error: "Rows or XLSX file content are required for payment import schema analysis." });
+      }
+
+      const headers = getUploadedTableHeaders(importRows);
+      const headersSignature = paymentImportHeadersSignature(headers);
+      const autoMapping = autoDetectPaymentImportMapping(headers);
+      const requirements = paymentImportMappingIssues(autoMapping);
+      const templates = (await sheetsService.getImportMappingTemplates("Payment Import")).map(template => ({
+        templateId: template.template_id,
+        templateName: template.template_name,
+        providerName: template.provider_name,
+        systemName: template.system_name,
+        headersSignature: template.headers_signature,
+        mapping: (() => {
+          try {
+            return JSON.parse(template.mapping_json || "{}");
+          } catch {
+            return {};
+          }
+        })(),
+        exactHeaderMatch: template.headers_signature === headersSignature
+      }));
+      const preferredTemplate = templates.find(template => template.exactHeaderMatch);
+      const mapping = preferredTemplate?.mapping || autoMapping;
+      const finalRequirements = paymentImportMappingIssues(mapping);
+      const previewRows = fillDownPaymentImportRows(
+        importRows.slice(0, 5).map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index, mapping))
+      );
+
+      res.json({
+        success: true,
+        headers,
+        headersSignature,
+        fieldLabels: PAYMENT_IMPORT_FIELD_LABELS,
+        requiredFields: PAYMENT_IMPORT_REQUIRED_FIELDS,
+        paymentFields: PAYMENT_IMPORT_PAYMENT_FIELDS,
+        autoMapping,
+        mapping,
+        requirements: finalRequirements,
+        templates,
+        selectedTemplateId: preferredTemplate?.templateId || "",
+        previewRows
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Payment import schema analysis failed." });
+    }
+  });
+
+  app.post("/api/payment-reconciliation-import/templates", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const { templateName, providerName, systemName, headersSignature, mapping } = req.body;
+      if (!mapping || typeof mapping !== "object") {
+        return res.status(400).json({ error: "A column mapping is required." });
+      }
+      const requirements = paymentImportMappingIssues(mapping);
+      if (!requirements.valid) {
+        return res.status(400).json({ error: "The mapping is incomplete. Patient account, CPT, service date and a payment amount source are required." });
+      }
+      const saved = await sheetsService.createImportMappingTemplate({
+        template_name: textValue(templateName) || "Payment import mapping",
+        import_type: "Payment Import",
+        provider_name: textValue(providerName),
+        system_name: textValue(systemName),
+        headers_signature: textValue(headersSignature),
+        mapping_json: JSON.stringify(mapping),
+        created_by: operatorEmail
+      });
+      await sheetsService.addUserActivityLog({
+        user_email: operatorEmail,
+        action: "Create payment import mapping template",
+        entity_type: "Import_Mapping_Template",
+        entity_id: saved.template_id,
+        metadata_json: JSON.stringify({ templateName: saved.template_name, systemName: saved.system_name })
+      });
+      res.json({ success: true, template: saved });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Payment import mapping template could not be saved." });
+    }
+  });
+
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, apply, fileName } = req.body;
+      const { rows, fileBase64, apply, fileName, mapping } = req.body;
       const importRows = fileBase64 ? parseUploadedTableRows(fileBase64, textValue(fileName)) : rows;
 
       if (!importRows || !Array.isArray(importRows)) {
         return res.status(400).json({ error: "Rows or XLSX file content are required for payment reconciliation import." });
+      }
+      const importMapping = mapping && typeof mapping === "object" ? mapping as PaymentImportMapping : undefined;
+      if (importMapping) {
+        const mappingIssues = paymentImportMappingIssues(importMapping);
+        if (!mappingIssues.valid) {
+          return res.status(400).json({ error: "The payment import column mapping is incomplete. Patient account, CPT, service date and a payment amount source are required." });
+        }
       }
 
       const settings = await sheetsService.getSettings();
@@ -1941,7 +2164,7 @@ async function startServer() {
       );
 
       const normalizedRows = fillDownPaymentImportRows(
-        importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index))
+        importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index, importMapping))
       );
       const analyzedRows = normalizedRows.map(row => {
         const errors: string[] = [];
