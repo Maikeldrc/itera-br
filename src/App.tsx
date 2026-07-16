@@ -856,6 +856,7 @@ export default function App() {
       payment_received_by: claimBeingEdited?.payment_received_by || "Unknown",
       claim_status: claimBeingEdited?.claim_status || ClaimStatus.Draft,
       claim_classification: claimBeingEdited?.claim_classification || ClaimClassification.CleanClaim,
+      claim_label: claimBeingEdited?.claim_label || "",
       billed_charge: totalCharge,
       allowed_amount: Number(serviceLines.reduce((sum, line) => sum + Number(line.allowed || 0), 0).toFixed(2)),
       paid_amount: Number(serviceLines.reduce((sum, line) => sum + Number(line.paid || 0) + Number(line.secondaryPaid || 0), 0).toFixed(2)),
@@ -1888,7 +1889,8 @@ export default function App() {
       const matchId = toText(claim.claim_id).toLowerCase().includes(searchLower);
       const matchPatient = toText(claim.patient_display_name_masked).toLowerCase().includes(searchLower) || toText(claim.patient_id).toLowerCase().includes(searchLower);
       const matchProvider = toText(claim.provider_name).toLowerCase().includes(searchLower);
-      if (!matchId && !matchPatient && !matchProvider) return false;
+      const matchLabel = toText(claim.claim_label).toLowerCase().includes(searchLower);
+      if (!matchId && !matchPatient && !matchProvider && !matchLabel) return false;
     }
 
     // Dates

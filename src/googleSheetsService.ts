@@ -1745,6 +1745,7 @@ export function getClaimDifferences(prev: Claim, curr: Claim): { field: string, 
   const fieldsToCheck: Array<keyof Claim> = [
     "claim_status",
     "claim_classification",
+    "claim_label",
     "billed_by",
     "payment_received_by",
     "billed_charge",
@@ -1776,6 +1777,7 @@ export function getClaimDifferences(prev: Claim, curr: Claim): { field: string, 
       else if (field === "error_flag" && !curr.error_flag) reason = "Cleared error status";
       else if (field === "claim_status") reason = `Status transitioned from ${prev.claim_status} to ${curr.claim_status}`;
       else if (field === "claim_classification") reason = `Classification transitioned from ${prev.claim_classification} to ${curr.claim_classification}`;
+      else if (field === "claim_label") reason = `Label changed from ${prev.claim_label || "None"} to ${curr.claim_label || "None"}`;
       else if (field === "service_lines_json") {
         try {
           const prevLines = prev.service_lines_json ? JSON.parse(prev.service_lines_json) : [];
@@ -1883,7 +1885,7 @@ const CLAIMS_HEADERS = [
   "provider_id", "provider_name", "provider_npi", "payer_id", "payer_name", "service_type",
   "cpt_hcpcs", "modifiers", "units", "date_of_service_from", "date_of_service_to",
   "month_of_service", "billed_by", "payment_received_by", "claim_status", "claim_classification",
-  "billed_charge", "allowed_amount", "paid_amount", "insurance_adjustment", "denied_amount",
+  "claim_label", "billed_charge", "allowed_amount", "paid_amount", "insurance_adjustment", "denied_amount",
   "write_off_amount", "uncollectible_amount", "net_collectible_revenue", "itera_direct_collection",
   "provider_direct_collection", "total_collections", "ar_balance", "itera_ar", "provider_ar",
   "account_payable_to_physician", "payment_to_physician", "ending_ap_to_physician",

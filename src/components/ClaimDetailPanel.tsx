@@ -31,7 +31,8 @@ import {
   Pencil,
   Trash2,
   Check,
-  UserRound
+  UserRound,
+  Tag
 } from "lucide-react";
 import { Claim, ClaimStatus, ClaimClassification, ErrorCategory, Payment, Note, AuditLog, FeeSchedule, Payer } from "../types";
 import { StatusBadge } from "./StatusBadge";
@@ -41,6 +42,7 @@ import { useLanguage } from "./LanguageProvider";
 import { PayerCombobox } from "./PayerCombobox";
 import { PENDING_ERA_ACTION, validateServiceLineDetails } from "../serviceLineValidation";
 import { validateCptRepeatLimitsByLine } from "../cptRepeatLimits";
+import { CLAIM_LABEL_OPTIONS, getClaimLabelClasses, normalizeClaimLabel } from "../claimLabels";
 
 const COMMON_CPT_DESCRIPTIONS: Record<string, string> = {
   "99453": "RPM - Initial device setup, patient education, and training.",
@@ -705,6 +707,8 @@ export function ClaimDetailPanel({
   // Local form states
   const [status, setStatus] = useState<ClaimStatus>(claim.claim_status);
   const [classification, setClassification] = useState<ClaimClassification>(claim.claim_classification);
+  const [claimLabel, setClaimLabel] = useState(normalizeClaimLabel(claim.claim_label));
+  const [customClaimLabel, setCustomClaimLabel] = useState("");
   const [billedBy, setBilledBy] = useState<"ITERA" | "Provider">(claim.billed_by);
   const [paymentReceivedBy, setPaymentReceivedBy] = useState<Claim["payment_received_by"]>(claim.payment_received_by);
   
@@ -898,6 +902,8 @@ export function ClaimDetailPanel({
   useEffect(() => {
     setStatus(claim.claim_status);
     setClassification(claim.claim_classification);
+    setClaimLabel(normalizeClaimLabel(claim.claim_label));
+    setCustomClaimLabel("");
     setBilledBy(claim.billed_by);
     setPaymentReceivedBy(claim.payment_received_by);
     setBilledCharge(claim.billed_charge);
@@ -1111,6 +1117,7 @@ export function ClaimDetailPanel({
       const updates: Partial<Claim> = {
         claim_status: status,
         claim_classification: classification,
+        claim_label: claimLabel,
         billed_by: billedBy,
         payment_received_by: paymentReceivedBy,
         billed_charge: Number(billedCharge),
@@ -1299,6 +1306,7 @@ export function ClaimDetailPanel({
   const FIELD_LABELS: Record<string, string> = {
     claim_status: isEnglish ? "Claim Status" : "Estado del Claim",
     claim_classification: isEnglish ? "Classification" : "Clasificación",
+    claim_label: "Label",
     billed_by: isEnglish ? "Billed by" : "Facturado por",
     payment_received_by: isEnglish ? "Payment received by" : "Pago recibido por",
     billed_charge: isEnglish ? "Billed Charge" : "Charge Facturado",
@@ -1572,6 +1580,12 @@ export function ClaimDetailPanel({
                   <span className="font-mono text-sm font-bold tracking-wide text-dark-blue">{claim.claim_id}</span>
                   <StatusBadge status={claim.claim_status} />
                   <ClassificationBadge classification={claim.claim_classification} />
+                  {normalizeClaimLabel(claim.claim_label) && (
+                    <span className={`inline-flex max-w-[170px] items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold ${getClaimLabelClasses(claim.claim_label || "")}`} title={claim.claim_label}>
+                      <Tag className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{claim.claim_label}</span>
+                    </span>
+                  )}
                 </div>
                 <p className="mt-0.5 truncate text-[9px] text-slate-500">{isEnglish ? "Quick audit and reconciliation" : "Auditoría y conciliación rápida"}</p>
               </div>
@@ -2006,6 +2020,67 @@ export function ClaimDetailPanel({
                         <option value="Eligibility Error">Eligibility Error</option>
                         <option value="Underpaid">Underpaid</option>
                       </select>
+                    </div>
+
+                    <div className="col-span-2 rounded-lg border border-slate-200 bg-slate-50/70 p-2">
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <label className="flex items-center gap-1 text-[10px] font-bold uppercase text-slate-500">
+                          <Tag className="h-3.5 w-3.5 text-primary-blue" />
+                          Label
+                        </label>
+                        {claimLabel ? (
+                          <span className={`inline-flex max-w-[220px] items-center gap-1 rounded-full border px-2 py-0.5 text-[9px] font-bold ${getClaimLabelClasses(claimLabel)}`} title={claimLabel}>
+                            <Tag className="h-3 w-3 shrink-0" />
+                            <span className="truncate">{claimLabel}</span>
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-semibold text-slate-400">{isEnglish ? "No label selected" : "Sin label seleccionado"}</span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_auto]">
+                        <select
+                          value={CLAIM_LABEL_OPTIONS.includes(claimLabel as any) || !claimLabel ? claimLabel : "__custom__"}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            if (nextValue === "__custom__") {
+                              setCustomClaimLabel(claimLabel);
+                              return;
+                            }
+                            setClaimLabel(nextValue);
+                            setCustomClaimLabel("");
+                          }}
+                          disabled={isReadOnly}
+                          className="min-h-8 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-bold text-slate-700 shadow-sm focus:border-primary-blue disabled:cursor-not-allowed disabled:bg-slate-100"
+                        >
+                          <option value="">{isEnglish ? "No label" : "Sin label"}</option>
+                          {CLAIM_LABEL_OPTIONS.map(option => (
+                            <option key={option} value={option}>{option}</option>
+                          ))}
+                          <option value="__custom__">{isEnglish ? "Custom label..." : "Label personalizado..."}</option>
+                        </select>
+                        <input
+                          type="text"
+                          value={customClaimLabel || (!CLAIM_LABEL_OPTIONS.includes(claimLabel as any) ? claimLabel : "")}
+                          onChange={(event) => {
+                            setCustomClaimLabel(event.target.value);
+                            setClaimLabel(event.target.value.trim());
+                          }}
+                          disabled={isReadOnly}
+                          placeholder={isEnglish ? "Type a custom label" : "Escribe un label personalizado"}
+                          className="min-h-8 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] font-semibold text-slate-700 shadow-sm focus:border-primary-blue disabled:cursor-not-allowed disabled:bg-slate-100"
+                        />
+                        <button
+                          type="button"
+                          disabled={isReadOnly || !claimLabel}
+                          onClick={() => {
+                            setClaimLabel("");
+                            setCustomClaimLabel("");
+                          }}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[10px] font-bold text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {isEnglish ? "Clear" : "Limpiar"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

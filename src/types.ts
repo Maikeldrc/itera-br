@@ -96,6 +96,7 @@ export interface Claim {
   payment_received_by: "ITERA" | "Provider" | "Split" | "Unknown";
   claim_status: ClaimStatus;
   claim_classification: ClaimClassification;
+  claim_label?: string;
   
   // Financial fields
   billed_charge: number;

@@ -25,7 +25,8 @@ import {
   FileText,
   Check,
   Loader2,
-  MessageSquareText
+  MessageSquareText,
+  Tag
 } from "lucide-react";
 import { Claim, ClaimStatus, ClaimClassification, UserRole, type Note, type User as AppUser } from "../types";
 import { StatusBadge } from "./StatusBadge";
@@ -46,6 +47,7 @@ import {
   quickCodesForCategory,
   type IssueGroupCode
 } from "../registerIssueCoding";
+import { getClaimLabelClasses, normalizeClaimLabel } from "../claimLabels";
 
 interface ClaimsTableProps {
   claims: Claim[];
@@ -903,6 +905,18 @@ export function ClaimsTable({
   };
 
   const isAdmin = userRole === UserRole.Admin;
+  const ClaimLabelBadge = ({ label }: { label?: string }) => {
+    const normalized = normalizeClaimLabel(label);
+    if (!normalized) {
+      return <span className="text-[10px] italic text-slate-400">{isEnglish ? "No label" : "Sin label"}</span>;
+    }
+    return (
+      <span className={`inline-flex max-w-[170px] items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${getClaimLabelClasses(normalized)}`} title={normalized}>
+        <Tag className="h-3 w-3 shrink-0" />
+        <span className="truncate">{normalized}</span>
+      </span>
+    );
+  };
 
   const requestSoftDeleteClaim = async (claim: Claim) => {
     if (!onDeleteClaim || !isAdmin) return;
@@ -1018,6 +1032,11 @@ export function ClaimsTable({
                   {sortField === "claim_status" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
                 </div>
               </th>
+              <th className="px-4 py-3">
+                <div className="flex items-center gap-1">
+                  Label
+                </div>
+              </th>
               <th onClick={() => handleSort("payer_name")} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
                 <div className="flex items-center gap-1">
                   {isEnglish ? "Primary Payer" : "Pagador Primario"}
@@ -1038,7 +1057,7 @@ export function ClaimsTable({
             {viewMode === "patient" ? (
               paginatedClaims.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="text-center p-12 text-slate-500 font-sans">
+                  <td colSpan={14} className="text-center p-12 text-slate-500 font-sans">
                     {isEnglish ? "No claims found for the selected filters." : "No se encontraron claims para los filtros seleccionados."}
                   </td>
                 </tr>
@@ -1127,6 +1146,11 @@ export function ClaimsTable({
                       {/* Status Badge */}
                       <td className="px-4 py-3">
                         <StatusBadge status={claim.claim_status} />
+                      </td>
+
+                      {/* Label */}
+                      <td className="px-4 py-3">
+                        <ClaimLabelBadge label={claim.claim_label} />
                       </td>
 
                       {/* Primary Payer */}
@@ -1320,7 +1344,7 @@ export function ClaimsTable({
             ) : (
               paginatedServiceLines.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="text-center p-12 text-slate-500 font-sans">
+                  <td colSpan={14} className="text-center p-12 text-slate-500 font-sans">
                     {isEnglish ? "No service lines found for the selected filters." : "No se encontraron líneas de servicio para los filtros seleccionados."}
                   </td>
                 </tr>
@@ -1396,6 +1420,11 @@ export function ClaimsTable({
                       {/* Status */}
                       <td className="px-4 py-3">
                         <StatusBadge status={slRow.status as ClaimStatus} />
+                      </td>
+
+                      {/* Label */}
+                      <td className="px-4 py-3">
+                        <ClaimLabelBadge label={claim.claim_label} />
                       </td>
 
                       {/* Primary Payer */}
