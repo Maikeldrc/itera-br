@@ -152,5 +152,23 @@ export async function runGoogleSheetsServiceTests() {
     failures.push(`Audit log filtering threw: ${err.message || String(err)}`);
   }
 
+  try {
+    const note = await service.createNote({
+      note_id: "",
+      claim_id: "CLM-QA",
+      note_type: "General",
+      note_text: "QA follow-up note",
+      created_by: "",
+      created_at: ""
+    }, "qa@example.com");
+    const notes = await service.getNotes();
+    const saved = notes.find(candidate => candidate.note_id === note.note_id);
+    if (!saved || saved.created_by !== "qa@example.com" || saved.note_text !== "QA follow-up note") {
+      failures.push("Follow-up note creation did not persist the expected note record.");
+    }
+  } catch (err: any) {
+    failures.push(`Follow-up note creation threw: ${err.message || String(err)}`);
+  }
+
   return failures;
 }

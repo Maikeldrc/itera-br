@@ -1524,10 +1524,6 @@ async function startServer() {
       if (!canAccessClaim(req, noteClaim)) {
         return res.status(403).json({ error: "This user does not have access to this provider." });
       }
-      if (sheetsService.isPeriodClosed(claimPeriod(noteClaim))) {
-        return res.status(423).json({ error: `Period ${claimPeriod(noteClaim)} is closed. Reopen the period before adding notes.` });
-      }
-
       const note = await sheetsService.createNote(noteData, authorEmail);
 
       // Update claim's last_note

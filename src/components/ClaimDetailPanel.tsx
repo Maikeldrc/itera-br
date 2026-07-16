@@ -673,7 +673,7 @@ interface ClaimDetailPanelProps {
   claim: Claim;
   onClose: () => void;
   onUpdate: (updated: Partial<Claim>) => Promise<void>;
-  onAddNote: (noteType: Note["note_type"], text: string) => Promise<void>;
+  onAddNote: (noteType: Note["note_type"], text: string, claimId: string) => Promise<void>;
   onAddPayment: (pmt: Partial<Payment>) => Promise<void>;
   notes: Note[];
   auditLogs: AuditLog[];
@@ -745,6 +745,7 @@ export function ClaimDetailPanel({
   // New Note state
   const [newNoteType, setNewNoteType] = useState<Note["note_type"]>("General");
   const [newNoteText, setNewNoteText] = useState("");
+  const [isAddingFollowUpNote, setIsAddingFollowUpNote] = useState(false);
 
   // New Payment logger state
   const [logPaymentAmount, setLogPaymentAmount] = useState<number | "">("");
@@ -1172,13 +1173,16 @@ export function ClaimDetailPanel({
   };
 
   const handlePostNote = async () => {
-    if (!newNoteText.trim()) return;
+    if (!newNoteText.trim() || isAddingFollowUpNote) return;
+    setIsAddingFollowUpNote(true);
     try {
-      await onAddNote(newNoteType, newNoteText);
+      await onAddNote(newNoteType, newNoteText, claim.claim_id);
       setNewNoteText("");
       notify(isEnglish ? "Note added." : "Nota registrada.", "success");
     } catch (err: any) {
       notify(`${isEnglish ? "Note save error" : "Error al guardar nota"}: ${err.message}`, "error");
+    } finally {
+      setIsAddingFollowUpNote(false);
     }
   };
 
@@ -2243,10 +2247,10 @@ export function ClaimDetailPanel({
                       <button
                         type="button"
                         onClick={handlePostNote}
-                        disabled={!newNoteText.trim()}
-                        className="bg-primary-blue hover:bg-secondary-blue disabled:opacity-50 text-white font-bold px-3 py-1 rounded-lg text-[11px] transition-all cursor-pointer"
+                        disabled={!newNoteText.trim() || isAddingFollowUpNote}
+                        className="bg-primary-blue hover:bg-secondary-blue disabled:cursor-not-allowed disabled:opacity-50 text-white font-bold px-3 py-1 rounded-lg text-[11px] transition-all cursor-pointer"
                       >
-                        {isEnglish ? "Add note" : "Anotar"}
+                        {isAddingFollowUpNote ? (isEnglish ? "Adding..." : "Guardando...") : (isEnglish ? "Add note" : "Anotar")}
                       </button>
                     </div>
                   </div>
@@ -3055,11 +3059,13 @@ export function ClaimDetailPanel({
                   />
                 </div>
                 <button
+                  type="button"
                   onClick={handlePostNote}
-                  className="w-full bg-slate-800 hover:bg-slate-900 text-white font-semibold text-xs py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                  disabled={!newNoteText.trim() || isAddingFollowUpNote}
+                  className="w-full bg-slate-800 hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50 text-white font-semibold text-xs py-1.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  {isEnglish ? "Add Note to History" : "Agregar Nota al Historial"}
+                  {isAddingFollowUpNote ? (isEnglish ? "Adding..." : "Guardando...") : (isEnglish ? "Add Note to History" : "Agregar Nota al Historial")}
                 </button>
               </div>
 

@@ -985,8 +985,10 @@ export default function App() {
   };
 
   // Add notes to a claim
-  const handleAddClaimNote = async (noteType: Note["note_type"], text: string) => {
-    if (!selectedClaim) return;
+  const handleAddClaimNote = async (noteType: Note["note_type"], text: string, claimId = selectedClaim?.claim_id || "") => {
+    if (!claimId) {
+      throw new Error("No claim is selected for this note.");
+    }
     const res = await apiFetch("/api/notes", {
       method: "POST",
       headers: {
@@ -994,17 +996,22 @@ export default function App() {
         "x-user-email": currentUser.email
       },
       body: JSON.stringify({
-        claim_id: selectedClaim.claim_id,
+        claim_id: claimId,
         note_type: noteType,
         note_text: text
       })
     });
 
     if (!res.ok) {
-      throw new Error("Failed to post note.");
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || "Failed to post note.");
     }
 
-    await fetchAllData();
+    const savedNote = await res.json();
+    setNotes(prev => [savedNote, ...prev.filter(note => note.note_id !== savedNote.note_id)]);
+    setClaims(prev => prev.map(claim => claim.claim_id === claimId ? { ...claim, last_note: text } : claim));
+    setSelectedClaim(prev => prev?.claim_id === claimId ? { ...prev, last_note: text } : prev);
+    await fetchAllData({ showInitialLoading: false });
   };
 
   // Add payments to a claim
