@@ -1303,9 +1303,18 @@ async function startServer() {
         return res.status(403).json({ error: "This user does not have access to this provider." });
       }
 
-      // Validate
+      // Validate. Patient/provider uniqueness is a registration/edit rule, not a
+      // service-line note rule. Running it for partial service_lines_json updates
+      // can incorrectly block CPT notes on historical claims that predate the rule.
       const validationErrors = validateClaim(calculated);
-      validationErrors.push(...validateUniquePatientProvider(calculated, claims, req.params.id));
+      const patientProviderFieldsChanged = [
+        "patient_id",
+        "provider_id",
+        "provider_npi"
+      ].some(field => Object.prototype.hasOwnProperty.call(rawClaimUpdates, field));
+      if (patientProviderFieldsChanged) {
+        validationErrors.push(...validateUniquePatientProvider(calculated, claims, req.params.id));
+      }
       validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
       validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
         calculated,
