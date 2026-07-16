@@ -90,6 +90,7 @@ type NewClaimServiceLine = {
   id: string;
   serviceType: string;
   cpt: string;
+  charge?: number;
 };
 
 type BackupRecord = {
@@ -117,6 +118,23 @@ type BackupConfig = {
 };
 
 const DIGITAL_CARE_SERVICE_TYPES = ["RPM", "CCM", "APCM", "TCM", "BHI"];
+
+const DEFAULT_SERVICE_TYPE_BY_CPT: Record<string, string> = {
+  "99490": "CCM",
+  "99439": "CCM",
+  "99487": "CCM",
+  "99489": "CCM",
+  "99453": "RPM",
+  "99454": "RPM",
+  "99457": "RPM",
+  "99458": "RPM",
+  "99484": "BHI",
+  "99495": "TCM",
+  "99496": "TCM",
+  "G0556": "APCM",
+  "G0557": "APCM",
+  "G0558": "APCM"
+};
 
 const createNewClaimServiceLine = (overrides: Partial<NewClaimServiceLine> = {}): NewClaimServiceLine => ({
   id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -612,9 +630,21 @@ export default function App() {
     return Array.from(new Set([...DIGITAL_CARE_SERVICE_TYPES, ...configuredServices])).sort();
   };
 
+  const inferServiceTypeForCpt = (cpt: string, preferredService?: unknown) => {
+    const normalizedPreferred = normalizeServiceType(preferredService);
+    const normalizedCpt = toText(cpt);
+    if (normalizedPreferred && getCptOptionsForService(normalizedPreferred).some(option => option.cpt === normalizedCpt)) {
+      return normalizedPreferred;
+    }
+    const matched = getConfiguredCptOptions().find(option => option.cpt === normalizedCpt);
+    return matched?.serviceType || DEFAULT_SERVICE_TYPE_BY_CPT[normalizedCpt] || normalizedPreferred || "";
+  };
+
   const isCptAllowedForService = (serviceType: string, cpt: string) => {
     const normalizedCpt = toText(cpt);
-    return getCptOptionsForService(serviceType).some(option => option.cpt === normalizedCpt);
+    const normalizedService = normalizeServiceType(serviceType);
+    return getCptOptionsForService(normalizedService).some(option => option.cpt === normalizedCpt)
+      || DEFAULT_SERVICE_TYPE_BY_CPT[normalizedCpt] === normalizedService;
   };
 
   const getFirstAvailableCptForService = (serviceType: string, excludedCpts: string[] = []) => {
@@ -645,8 +675,10 @@ export default function App() {
       && Number(item.year) === year
       && serviceTypeFromDescription(item.description) === serviceType
     );
-    if (!schedule) return 0;
-    return Number(Number(month >= 7 ? schedule.semester2_rate : schedule.semester1_rate).toFixed(2));
+    if (schedule) {
+      return Number(Number(month >= 7 ? schedule.semester2_rate : schedule.semester1_rate).toFixed(2));
+    }
+    return Number(line.charge || 0);
   };
 
   const getNormalizedNewClaimLines = () => newClaimLines
@@ -698,12 +730,17 @@ export default function App() {
     }
     const cptFallback = toText(claim.cpt_hcpcs).split(/[\s,]+/).filter(Boolean);
     const lines = parsedLines.length > 0
-      ? parsedLines.map(line => createNewClaimServiceLine({
-          serviceType: normalizeServiceType(line?.serviceType || line?.service_type || serviceTypeFromDescription(line?.description)),
-          cpt: toText(line?.cpt)
-        }))
+      ? parsedLines.map(line => {
+          const cpt = toText(line?.cpt || line?.cptCode || line?.cpt_code || line?.code);
+          const importedService = line?.serviceType || line?.service_type || line?.service || line?.program || serviceTypeFromDescription(line?.description);
+          return createNewClaimServiceLine({
+            serviceType: inferServiceTypeForCpt(cpt, importedService || claim.service_type),
+            cpt,
+            charge: Number(line?.charged ?? line?.charge ?? line?.billed ?? line?.amount ?? 0) || undefined
+          });
+        }).filter(line => line.cpt)
       : cptFallback.map(cpt => createNewClaimServiceLine({
-          serviceType: normalizeServiceType(claim.service_type),
+          serviceType: inferServiceTypeForCpt(cpt, claim.service_type),
           cpt
         }));
     setNewClaimLines(lines.length > 0 ? lines : [createBlankClaimServiceLine()]);
@@ -4713,6 +4750,9 @@ export default function App() {
                     const charge = getManualClaimLineCharge(line);
                     const cptOptions = getCptOptionsForService(line.serviceType);
                     const hasSelectedCpt = cptOptions.some(option => option.cpt === line.cpt);
+                    const visibleCptOptions = line.cpt && !hasSelectedCpt
+                      ? [{ cpt: line.cpt, serviceType: line.serviceType || inferServiceTypeForCpt(line.cpt), description: `${line.serviceType || "Imported"} - ${line.cpt}` }, ...cptOptions]
+                      : cptOptions;
                     return (
                       <div key={line.id} className="grid grid-cols-[112px_minmax(0,1fr)_120px_34px] gap-2">
                         <select
@@ -4724,7 +4764,8 @@ export default function App() {
                               return {
                                 ...item,
                                 serviceType,
-                                cpt: ""
+                                cpt: "",
+                                charge: undefined
                               };
                             }));
                           }}
@@ -4737,19 +4778,19 @@ export default function App() {
                         </select>
                         <select
                           required
-                          value={hasSelectedCpt ? line.cpt : ""}
-                          onChange={(e) => setNewClaimLines(prev => prev.map(item => item.id === line.id ? { ...item, cpt: e.target.value } : item))}
-                          disabled={!line.serviceType || cptOptions.length === 0}
+                          value={line.cpt && visibleCptOptions.some(option => option.cpt === line.cpt) ? line.cpt : ""}
+                          onChange={(e) => setNewClaimLines(prev => prev.map(item => item.id === line.id ? { ...item, cpt: e.target.value, charge: undefined } : item))}
+                          disabled={!line.serviceType || visibleCptOptions.length === 0}
                           className="w-full rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] disabled:bg-slate-100 disabled:text-slate-400"
                         >
                           <option value="" disabled>
                             {!line.serviceType
                               ? (isEnglish ? "Select service first" : "Selecciona servicio primero")
-                              : cptOptions.length === 0
+                              : visibleCptOptions.length === 0
                                 ? (isEnglish ? "No CPTs configured" : "Sin CPT configurados")
                                 : (isEnglish ? "Select CPT" : "Selecciona CPT")}
                           </option>
-                          {cptOptions.map(option => (
+                          {visibleCptOptions.map(option => (
                             <option key={`${option.serviceType}-${option.cpt}`} value={option.cpt}>
                               {option.cpt} — {option.description.replace(`${option.serviceType} - `, "")}
                             </option>
