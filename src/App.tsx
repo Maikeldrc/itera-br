@@ -84,6 +84,8 @@ const INITIAL_FILTERS: FilterState = {
   errorFlag: ""
 };
 
+const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
+
 type NewClaimServiceLine = {
   id: string;
   serviceType: string;
@@ -313,6 +315,8 @@ export default function App() {
   const [restoreConfirmationText, setRestoreConfirmationText] = useState("");
   const [showClearOperationalDataConfirm, setShowClearOperationalDataConfirm] = useState(false);
   const [clearOperationalDataText, setClearOperationalDataText] = useState("");
+  const [clearOperationalDataProgress, setClearOperationalDataProgress] = useState(0);
+  const [clearOperationalDataProgressLabel, setClearOperationalDataProgressLabel] = useState("");
   const [restoreProgress, setRestoreProgress] = useState(0);
   const [restoreProgressLabel, setRestoreProgressLabel] = useState("");
   const [editingFs, setEditingFs] = useState<FeeSchedule | null>(null);
@@ -507,7 +511,12 @@ export default function App() {
     }
 
     setIsClearingOperationalData(true);
+    setClearOperationalDataProgress(8);
+    setClearOperationalDataProgressLabel(isEnglish ? "Validating confirmation phrase..." : "Validando frase de confirmación...");
     try {
+      await wait(200);
+      setClearOperationalDataProgress(18);
+      setClearOperationalDataProgressLabel(isEnglish ? "Requesting operational data cleanup..." : "Solicitando limpieza de datos operativos...");
       const res = await apiFetch("/api/admin/clear-operational-data", {
         method: "POST",
         headers: {
@@ -516,30 +525,44 @@ export default function App() {
         },
         body: JSON.stringify({ confirmationPhrase: clearOperationalDataText })
       });
+      setClearOperationalDataProgress(62);
+      setClearOperationalDataProgressLabel(isEnglish ? "Clearing Claims, Payments, Notes and Audit_Log..." : "Limpiando Claims, Payments, Notes y Audit_Log...");
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         throw new Error(data.error || "Failed to clear operational data.");
       }
 
+      setClearOperationalDataProgress(82);
+      setClearOperationalDataProgressLabel(isEnglish ? "Updating local workspace..." : "Actualizando área de trabajo local...");
       setClaims([]);
       setPayments([]);
       setNotes([]);
       setAuditLogs([]);
       setSelectedClaim(null);
       setSelectedClaimIds([]);
-      setShowClearOperationalDataConfirm(false);
-      setClearOperationalDataText("");
+      setClearOperationalDataProgress(94);
+      setClearOperationalDataProgressLabel(isEnglish ? "Refreshing clean production data..." : "Refrescando datos limpios de producción...");
+      await fetchAllData({ showInitialLoading: false });
+      setClearOperationalDataProgress(100);
+      setClearOperationalDataProgressLabel(isEnglish ? "Cleanup completed." : "Limpieza completada.");
       notify(
         isEnglish
           ? "Operational sheets cleared: Claims, Payments, Notes and Audit_Log."
           : "Hojas operativas limpiadas: Claims, Payments, Notes y Audit_Log.",
         "success"
       );
-      await fetchAllData();
+      await wait(500);
+      setShowClearOperationalDataConfirm(false);
+      setClearOperationalDataText("");
     } catch (err: any) {
+      setClearOperationalDataProgress(100);
+      setClearOperationalDataProgressLabel(isEnglish ? "Cleanup failed." : "Error en la limpieza.");
       notify(`${isEnglish ? "Cleanup error" : "Error al limpiar"}: ${err.message}`, "error");
+      await wait(700);
     } finally {
       setIsClearingOperationalData(false);
+      setClearOperationalDataProgress(0);
+      setClearOperationalDataProgressLabel("");
     }
   };
 
@@ -4954,6 +4977,8 @@ export default function App() {
                   if (isClearingOperationalData) return;
                   setShowClearOperationalDataConfirm(false);
                   setClearOperationalDataText("");
+                  setClearOperationalDataProgress(0);
+                  setClearOperationalDataProgressLabel("");
                 }}
                 disabled={isClearingOperationalData}
                 className="rounded-full p-1 text-slate-500 hover:bg-white disabled:opacity-50"
@@ -4987,6 +5012,35 @@ export default function App() {
                   placeholder="CLEAR OPERATIONAL DATA"
                 />
               </label>
+
+              {isClearingOperationalData && (
+                <div className="rounded-xl border border-rose-100 bg-white p-3 shadow-sm">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-rose-700">
+                        {isEnglish ? "Cleanup progress" : "Progreso de limpieza"}
+                      </p>
+                      <p className="mt-0.5 text-[11px] font-semibold text-slate-600">
+                        {clearOperationalDataProgressLabel || (isEnglish ? "Processing cleanup..." : "Procesando limpieza...")}
+                      </p>
+                    </div>
+                    <span className="font-mono text-xs font-bold text-rose-700">
+                      {clearOperationalDataProgress}%
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-rose-100">
+                    <div
+                      className="h-full rounded-full bg-rose-600 transition-all duration-300 ease-out"
+                      style={{ width: `${clearOperationalDataProgress}%` }}
+                    />
+                  </div>
+                  <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+                    {isEnglish
+                      ? "Please keep this window open until the cleanup finishes."
+                      : "Mantenga esta ventana abierta hasta que termine la limpieza."}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4">
@@ -4995,6 +5049,8 @@ export default function App() {
                 onClick={() => {
                   setShowClearOperationalDataConfirm(false);
                   setClearOperationalDataText("");
+                  setClearOperationalDataProgress(0);
+                  setClearOperationalDataProgressLabel("");
                 }}
                 disabled={isClearingOperationalData}
                 className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
