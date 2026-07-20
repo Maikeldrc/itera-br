@@ -1662,6 +1662,37 @@ async function startServer() {
     }
   });
 
+  app.post("/api/users/:id/password", requireRoles(UserRole.Admin), async (req: AppRequest, res) => {
+    try {
+      if (!authRequired || getApps().length === 0) {
+        return res.status(400).json({ error: "Firebase Auth is not configured for password changes." });
+      }
+      const newPassword = textValue(req.body?.newPassword);
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: "New password must be at least 8 characters." });
+      }
+      const user = (await sheetsService.getUsers()).find(item => item.user_id === req.params.id);
+      if (!user) return res.status(404).json({ error: "User not found." });
+      if (!user.email?.trim()) return res.status(400).json({ error: "User has no email address." });
+
+      const firebaseUser = await getAuth().getUserByEmail(user.email.trim().toLowerCase());
+      await getAuth().updateUser(firebaseUser.uid, { password: newPassword });
+      await sheetsService.addUserActivityLog({
+        user_email: getOperatorEmail(req),
+        action: "Admin password change",
+        entity_type: "User",
+        entity_id: user.user_id,
+        metadata_json: JSON.stringify({ targetEmail: user.email, targetUserId: user.user_id })
+      });
+      res.json({ success: true });
+    } catch (err: any) {
+      if (err?.code === "auth/user-not-found") {
+        return res.status(404).json({ error: "Firebase Auth user was not found for this email." });
+      }
+      res.status(500).json({ error: err.message || "Failed to change user password." });
+    }
+  });
+
   app.delete("/api/users/:id", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req, res) => {
     try {
       await sheetsService.deleteUser(req.params.id);

@@ -28,7 +28,8 @@ import {
   Calendar,
   DollarSign,
   Languages,
-  UserRound
+  UserRound,
+  KeyRound
 } from "lucide-react";
 
 import { Claim, ClaimStatus, ClaimClassification, ErrorCategory, Payment, Note, AuditLog, Provider, Payer, User, Setting, UserRole, FeeSchedule, EligibilityCoverage, ReportFeeSchedule } from "./types";
@@ -374,6 +375,10 @@ export default function App() {
   const [userProviderAccessAllInput, setUserProviderAccessAllInput] = useState(true);
   const [userProviderAccessIdsInput, setUserProviderAccessIdsInput] = useState<string[]>([]);
   const [userActiveInput, setUserActiveInput] = useState(true);
+  const [passwordTargetUser, setPasswordTargetUser] = useState<User | null>(null);
+  const [adminNewPassword, setAdminNewPassword] = useState("");
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState("");
+  const [isChangingUserPassword, setIsChangingUserPassword] = useState(false);
 
   const visibleClaims = filterClaimsForUser(claims, currentUser);
   const visibleProviders = filterProvidersForUser(providers, currentUser);
@@ -1908,6 +1913,72 @@ export default function App() {
     }
   };
 
+  const openAdminPasswordModal = (user: User) => {
+    setPasswordTargetUser(user);
+    setAdminNewPassword("");
+    setAdminConfirmPassword("");
+  };
+
+  const closeAdminPasswordModal = () => {
+    if (isChangingUserPassword) return;
+    setPasswordTargetUser(null);
+    setAdminNewPassword("");
+    setAdminConfirmPassword("");
+  };
+
+  const handleAdminChangeUserPassword = async () => {
+    if (!passwordTargetUser) return;
+    if (currentUser.role !== UserRole.Admin) {
+      notify(isEnglish ? "Only admins can change user passwords." : "Solo el admin puede cambiar passwords de usuarios.", "warning");
+      return;
+    }
+    if (adminNewPassword.length < 8) {
+      notify(isEnglish ? "New password must be at least 8 characters." : "El nuevo password debe tener al menos 8 caracteres.", "warning");
+      return;
+    }
+    if (adminNewPassword !== adminConfirmPassword) {
+      notify(isEnglish ? "Password confirmation does not match." : "La confirmación del password no coincide.", "warning");
+      return;
+    }
+
+    setIsChangingUserPassword(true);
+    try {
+      const res = await apiFetch(`/api/users/${encodeURIComponent(passwordTargetUser.user_id)}/password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-email": currentUser.email
+        },
+        body: JSON.stringify({ newPassword: adminNewPassword })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Unable to change user password.");
+      }
+      notify(
+        isEnglish
+          ? `Password changed for ${passwordTargetUser.email}.`
+          : `Password cambiado para ${passwordTargetUser.email}.`,
+        "success"
+      );
+      setPasswordTargetUser(null);
+      setAdminNewPassword("");
+      setAdminConfirmPassword("");
+    } catch (err: any) {
+      notify(`${isEnglish ? "Password change failed" : "Error al cambiar password"}: ${err.message}`, "error");
+    } finally {
+      setIsChangingUserPassword(false);
+    }
+  };
+
+  const handleChangeOwnPassword = async (currentPassword: string, newPassword: string) => {
+    if (!auth.isAuthEnabled) {
+      throw new Error("Firebase Auth is not configured.");
+    }
+    await auth.changePassword(currentPassword, newPassword);
+    notify(isEnglish ? "Password changed successfully." : "Password cambiado correctamente.", "success");
+  };
+
   // Trigger quick physician payout recording from Balances view
   const handleRecordPhysicianPayout = async (providerId: string, amount: number) => {
     if (amount <= 0) {
@@ -2131,6 +2202,7 @@ export default function App() {
           isSyncing={isSyncing}
           isAuthEnabled={auth.isAuthEnabled}
           onSignOut={auth.signOut}
+          onChangePassword={handleChangeOwnPassword}
         />
 
         {/* Scrollable View Content */}
@@ -3966,6 +4038,17 @@ export default function App() {
                                   >
                                     <Mail className="h-3.5 w-3.5" />
                                   </button>
+                                  {currentUser.role === UserRole.Admin && (
+                                    <button
+                                      type="button"
+                                      disabled={!user.email}
+                                      onClick={() => openAdminPasswordModal(user)}
+                                      className="rounded p-1 text-slate-500 hover:bg-blue-50 hover:text-primary-blue disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-400"
+                                      title={isEnglish ? "Change password" : "Cambiar password"}
+                                    >
+                                      <KeyRound className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => handleEditUser(user)}
@@ -5107,6 +5190,96 @@ export default function App() {
                 {isClearingOperationalData
                   ? (isEnglish ? "Clearing..." : "Limpiando...")
                   : (isEnglish ? "Clear Operational Data" : "Limpiar Datos Operativos")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {passwordTargetUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-blue-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-blue-100 bg-blue-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-lg bg-white p-2 text-primary-blue shadow-sm">
+                  <KeyRound className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    {isEnglish ? "Change User Password" : "Cambiar password de usuario"}
+                  </h4>
+                  <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
+                    {passwordTargetUser.email}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeAdminPasswordModal}
+                disabled={isChangingUserPassword}
+                className="rounded-full p-1 text-slate-500 hover:bg-white disabled:opacity-50"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 p-5 text-xs">
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                <p className="font-bold">
+                  {isEnglish ? "Admin password reset" : "Cambio de password por admin"}
+                </p>
+                <p className="mt-1 leading-relaxed">
+                  {isEnglish
+                    ? "The new password is sent directly to Firebase Auth and is not stored in Google Sheets. The action is logged without exposing the password."
+                    : "El nuevo password se envía directamente a Firebase Auth y no se guarda en Google Sheets. La acción queda registrada sin exponer el password."}
+                </p>
+              </div>
+
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {isEnglish ? "New password" : "Nuevo password"}
+                </span>
+                <input
+                  type="password"
+                  value={adminNewPassword}
+                  onChange={event => setAdminNewPassword(event.target.value)}
+                  disabled={isChangingUserPassword}
+                  autoComplete="new-password"
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-xs outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                />
+              </label>
+
+              <label className="block">
+                <span className="mb-1 block text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                  {isEnglish ? "Confirm new password" : "Confirmar nuevo password"}
+                </span>
+                <input
+                  type="password"
+                  value={adminConfirmPassword}
+                  onChange={event => setAdminConfirmPassword(event.target.value)}
+                  disabled={isChangingUserPassword}
+                  autoComplete="new-password"
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-xs outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100"
+                />
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={closeAdminPasswordModal}
+                disabled={isChangingUserPassword}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+              >
+                {isEnglish ? "Cancel" : "Cancelar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleAdminChangeUserPassword()}
+                disabled={isChangingUserPassword || adminNewPassword.length < 8 || adminNewPassword !== adminConfirmPassword}
+                className="rounded-lg bg-primary-blue px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-dark-blue disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isChangingUserPassword ? (isEnglish ? "Changing..." : "Cambiando...") : (isEnglish ? "Change Password" : "Cambiar password")}
               </button>
             </div>
           </div>

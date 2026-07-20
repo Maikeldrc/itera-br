@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from "react";
-import { CheckCircle2, RefreshCw, UserCheck, ShieldAlert, LogOut } from "lucide-react";
+import { CheckCircle2, RefreshCw, UserCheck, ShieldAlert, LogOut, KeyRound } from "lucide-react";
 import { User, UserRole } from "../types";
 import { useLanguage } from "./LanguageProvider";
 
@@ -23,6 +23,7 @@ interface HeaderProps {
   isSyncing: boolean;
   isAuthEnabled?: boolean;
   onSignOut?: () => Promise<void>;
+  onChangePassword?: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 export function Header({
@@ -33,11 +34,52 @@ export function Header({
   onSync,
   isSyncing,
   isAuthEnabled = false,
-  onSignOut
+  onSignOut,
+  onChangePassword
 }: HeaderProps) {
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isPasswordFormOpen, setIsPasswordFormOpen] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
   const { language } = useLanguage();
   const isEnglish = language === "en";
+
+  const resetPasswordForm = () => {
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setPasswordError("");
+    setIsPasswordFormOpen(false);
+  };
+
+  const submitPasswordChange = async () => {
+    setPasswordError("");
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setPasswordError(isEnglish ? "Complete all password fields." : "Complete todos los campos de password.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setPasswordError(isEnglish ? "New password must be at least 8 characters." : "El nuevo password debe tener al menos 8 caracteres.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError(isEnglish ? "New password and confirmation do not match." : "El nuevo password y la confirmación no coinciden.");
+      return;
+    }
+    try {
+      setIsChangingPassword(true);
+      await onChangePassword?.(currentPassword, newPassword);
+      resetPasswordForm();
+      setIsUserMenuOpen(false);
+    } catch (err: any) {
+      setPasswordError(err.message || (isEnglish ? "Unable to change password." : "No se pudo cambiar el password."));
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
 
   return (
     <header className="bg-white border-b border-slate-200 h-16 px-6 flex items-center justify-between sticky top-0 z-40">
@@ -115,16 +157,77 @@ export function Header({
                 </p>
               </div>
               {isAuthEnabled ? (
-                <button
-                  onClick={async () => {
-                    await onSignOut?.();
-                    setIsUserMenuOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between rounded p-2 text-left text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
-                >
-                  <span>{isEnglish ? "Sign out" : "Cerrar sesión"}</span>
-                  <LogOut className="h-4 w-4 text-slate-400" />
-                </button>
+                <div className="space-y-1">
+                  <button
+                    onClick={() => {
+                      setPasswordError("");
+                      setIsPasswordFormOpen(open => !open);
+                    }}
+                    className="flex w-full items-center justify-between rounded p-2 text-left text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                  >
+                    <span>{isEnglish ? "Change password" : "Cambiar password"}</span>
+                    <KeyRound className="h-4 w-4 text-slate-400" />
+                  </button>
+
+                  {isPasswordFormOpen && (
+                    <div className="space-y-2 rounded-lg border border-blue-100 bg-blue-50/40 p-2">
+                      <input
+                        type="password"
+                        value={currentPassword}
+                        onChange={event => setCurrentPassword(event.target.value)}
+                        placeholder={isEnglish ? "Current password" : "Password actual"}
+                        className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-primary-blue"
+                        autoComplete="current-password"
+                      />
+                      <input
+                        type="password"
+                        value={newPassword}
+                        onChange={event => setNewPassword(event.target.value)}
+                        placeholder={isEnglish ? "New password" : "Nuevo password"}
+                        className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-primary-blue"
+                        autoComplete="new-password"
+                      />
+                      <input
+                        type="password"
+                        value={confirmPassword}
+                        onChange={event => setConfirmPassword(event.target.value)}
+                        placeholder={isEnglish ? "Confirm new password" : "Confirmar nuevo password"}
+                        className="w-full rounded border border-slate-200 bg-white px-2 py-1.5 text-xs outline-none focus:border-primary-blue"
+                        autoComplete="new-password"
+                      />
+                      {passwordError && <p className="text-[10px] font-semibold text-rose-700">{passwordError}</p>}
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={resetPasswordForm}
+                          disabled={isChangingPassword}
+                          className="rounded border border-slate-200 bg-white px-2 py-1 text-[10px] font-bold text-slate-500 disabled:opacity-50"
+                        >
+                          {isEnglish ? "Cancel" : "Cancelar"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void submitPasswordChange()}
+                          disabled={isChangingPassword}
+                          className="rounded bg-primary-blue px-2 py-1 text-[10px] font-bold text-white disabled:opacity-50"
+                        >
+                          {isChangingPassword ? (isEnglish ? "Saving..." : "Guardando...") : (isEnglish ? "Save" : "Guardar")}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={async () => {
+                      await onSignOut?.();
+                      setIsUserMenuOpen(false);
+                    }}
+                    className="flex w-full items-center justify-between rounded p-2 text-left text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50"
+                  >
+                    <span>{isEnglish ? "Sign out" : "Cerrar sesión"}</span>
+                    <LogOut className="h-4 w-4 text-slate-400" />
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-0.5">
                   {allUsers.map((u) => (

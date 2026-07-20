@@ -1,11 +1,14 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { initializeApp, type FirebaseApp } from "firebase/app";
 import {
+  EmailAuthProvider,
   getAuth,
   onAuthStateChanged,
+  reauthenticateWithCredential,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
+  updatePassword,
   type User as FirebaseUser
 } from "firebase/auth";
 
@@ -30,6 +33,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
 
@@ -69,10 +73,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await sendPasswordResetEmail(auth, email);
   }, [auth]);
 
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    if (!auth) throw new Error("Firebase Auth is not configured.");
+    const currentUser = auth.currentUser;
+    if (!currentUser?.email) throw new Error("Authenticated user email is not available.");
+    const credential = EmailAuthProvider.credential(currentUser.email, currentPassword);
+    await reauthenticateWithCredential(currentUser, credential);
+    await updatePassword(currentUser, newPassword);
+  }, [auth]);
+
   const getIdToken = useCallback(async () => user ? user.getIdToken() : null, [user]);
 
   return (
-    <AuthContext.Provider value={{ isReady, isAuthEnabled: !!auth, user, signIn, signOut, sendPasswordReset, getIdToken }}>
+    <AuthContext.Provider value={{ isReady, isAuthEnabled: !!auth, user, signIn, signOut, sendPasswordReset, changePassword, getIdToken }}>
       {children}
     </AuthContext.Provider>
   );
