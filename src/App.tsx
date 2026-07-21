@@ -91,6 +91,8 @@ type NewClaimServiceLine = {
   id: string;
   serviceType: string;
   cpt: string;
+  dos: string;
+  useClaimDos: boolean;
   charge?: number;
 };
 
@@ -141,6 +143,8 @@ const createNewClaimServiceLine = (overrides: Partial<NewClaimServiceLine> = {})
   id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
   serviceType: "",
   cpt: "",
+  dos: "",
+  useClaimDos: true,
   ...overrides
 });
 
@@ -662,8 +666,9 @@ export default function App() {
   const getManualClaimLineCharge = (line: NewClaimServiceLine) => {
     const cpt = toText(line.cpt);
     const serviceType = normalizeServiceType(line.serviceType);
-    const year = Number(newDos.slice(0, 4)) || new Date().getFullYear();
-    const month = Number(newDos.slice(5, 7)) || 1;
+    const lineDos = toText(line.useClaimDos ? newDos : line.dos) || newDos;
+    const year = Number(lineDos.slice(0, 4)) || new Date().getFullYear();
+    const month = Number(lineDos.slice(5, 7)) || 1;
 
     const reportSchedule = reportFeeSchedules
       .filter(item =>
@@ -672,7 +677,7 @@ export default function App() {
         && normalizeServiceType(item.service_type) === serviceType
       )
       .sort((a, b) => toText(b.effective_date).localeCompare(toText(a.effective_date)))
-      .find(item => !item.effective_date || toText(item.effective_date) <= newDos);
+      .find(item => !item.effective_date || toText(item.effective_date) <= lineDos);
     if (reportSchedule) return Number(reportSchedule.unit_price || 0);
 
     const schedule = feeSchedules.find(item =>
@@ -687,7 +692,11 @@ export default function App() {
   };
 
   const getNormalizedNewClaimLines = () => newClaimLines
-    .map(line => ({ ...line, cpt: line.cpt.trim() }))
+    .map(line => ({
+      ...line,
+      cpt: line.cpt.trim(),
+      dos: toText(line.useClaimDos ? newDos : line.dos) || newDos
+    }))
     .filter(line => line.cpt);
 
   const newClaimLineCharges = getNormalizedNewClaimLines().map(line => ({
@@ -738,15 +747,21 @@ export default function App() {
       ? parsedLines.map(line => {
           const cpt = toText(line?.cpt || line?.cptCode || line?.cpt_code || line?.code);
           const importedService = line?.serviceType || line?.service_type || line?.service || line?.program || serviceTypeFromDescription(line?.description);
+          const lineDos = toText(line?.dos).slice(0, 10);
+          const claimDos = toText(claim.date_of_service_from).slice(0, 10);
           return createNewClaimServiceLine({
             serviceType: inferServiceTypeForCpt(cpt, importedService || claim.service_type),
             cpt,
+            dos: lineDos || claimDos,
+            useClaimDos: !lineDos || lineDos === claimDos,
             charge: Number(line?.charged ?? line?.charge ?? line?.billed ?? line?.amount ?? 0) || undefined
           });
         }).filter(line => line.cpt)
       : cptFallback.map(cpt => createNewClaimServiceLine({
           serviceType: inferServiceTypeForCpt(cpt, claim.service_type),
-          cpt
+          cpt,
+          dos: toText(claim.date_of_service_from).slice(0, 10),
+          useClaimDos: true
         }));
     setNewClaimLines(lines.length > 0 ? lines : [createBlankClaimServiceLine()]);
     setIsCreateOpen(true);
@@ -791,6 +806,16 @@ export default function App() {
       await stopWithMessage(isEnglish ? "Add at least one CPT code to create the claim." : "Añade al menos un CPT code para crear el claim.", "warning");
       return;
     }
+    const missingLineDos = normalizedLines.filter(line => !line.dos);
+    if (missingLineDos.length > 0) {
+      await stopWithMessage(
+        isEnglish
+          ? "Every CPT service line must have a DOS. Use the claim DOS or set a custom line DOS."
+          : "Cada línea CPT debe tener un DOS. Use el DOS general del claim o defina un DOS específico.",
+        "warning"
+      );
+      return;
+    }
     const duplicatePatientProviderErrors = validateUniquePatientProvider(
       {
         patient_id: newPatientId,
@@ -823,7 +848,7 @@ export default function App() {
       {
         patient_id: newPatientId.trim(),
         date_of_service_from: newDos,
-        service_lines_json: JSON.stringify(normalizedLines.map(line => ({ cpt: line.cpt, dos: newDos, units: 1 })))
+        service_lines_json: JSON.stringify(normalizedLines.map(line => ({ cpt: line.cpt, dos: line.dos, units: 1 })))
       },
       feeSchedules,
       claims,
@@ -860,9 +885,12 @@ export default function App() {
         !usedExistingLineIndexes.has(index)
         && toText(existing?.cpt) === line.cpt
         && normalizeServiceType(existing?.serviceType || existing?.service_type) === normalizeServiceType(line.serviceType)
+        && toText(existing?.dos || newDos).slice(0, 10) === line.dos
       );
       const fallbackIndex = exactIndex >= 0 ? exactIndex : existingServiceLines.findIndex((existing, index) =>
-        !usedExistingLineIndexes.has(index) && toText(existing?.cpt) === line.cpt
+        !usedExistingLineIndexes.has(index)
+        && toText(existing?.cpt) === line.cpt
+        && toText(existing?.dos || newDos).slice(0, 10) === line.dos
       );
       if (fallbackIndex >= 0) usedExistingLineIndexes.add(fallbackIndex);
       return fallbackIndex >= 0 ? existingServiceLines[fallbackIndex] : null;
@@ -878,7 +906,7 @@ export default function App() {
       return {
         ...(existingLine || {}),
         cpt: line.cpt,
-        dos: existingLine?.dos || newDos,
+        dos: line.dos,
         serviceType: line.serviceType,
         charged: line.charge,
         allowed,
@@ -4788,7 +4816,11 @@ export default function App() {
                     type="date"
                     required
                     value={newDos}
-                    onChange={(e) => setNewDos(e.target.value)}
+                    onChange={(e) => {
+                      const dos = e.target.value;
+                      setNewDos(dos);
+                      setNewClaimLines(prev => prev.map(line => line.useClaimDos ? { ...line, dos } : line));
+                    }}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 font-mono text-slate-700"
                   />
                 </div>
@@ -4811,22 +4843,42 @@ export default function App() {
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <div>
                     <h5 className="text-[11px] font-bold text-slate-900">CPT / Service Lines</h5>
-                    <p className="text-[9px] text-slate-500">{isEnglish ? "Add multiple CPTs to the same claim, even when they belong to different services." : "Añade varios CPT en el mismo claim, incluso si pertenecen a servicios diferentes."}</p>
+                    <p className="text-[9px] text-slate-500">{isEnglish ? "Add multiple CPTs to the same claim, even when they belong to different services. Each line can use the claim DOS or a custom DOS." : "Añade varios CPT en el mismo claim, incluso si pertenecen a servicios diferentes. Cada línea puede usar el DOS general o uno específico."}</p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setNewClaimLines(prev => [...prev, createBlankClaimServiceLine()])}
-                    disabled={isSavingClaim}
-                    className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100 disabled:cursor-wait disabled:opacity-50"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {isEnglish ? "Add CPT" : "Añadir CPT"}
-                  </button>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={newClaimLines.length > 0 && newClaimLines.every(line => line.useClaimDos)}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setNewClaimLines(prev => prev.map(line => ({
+                            ...line,
+                            useClaimDos: checked,
+                            dos: checked ? newDos : (line.dos || newDos)
+                          })));
+                        }}
+                        disabled={isSavingClaim}
+                        className="h-3.5 w-3.5 rounded border-slate-300 text-primary-blue"
+                      />
+                      {isEnglish ? "Use claim DOS for all" : "Usar DOS general en todos"}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setNewClaimLines(prev => [...prev, createNewClaimServiceLine({ dos: newDos, useClaimDos: true })])}
+                      disabled={isSavingClaim}
+                      className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-100 disabled:cursor-wait disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {isEnglish ? "Add CPT" : "Añadir CPT"}
+                    </button>
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="grid grid-cols-[112px_minmax(0,1fr)_120px_34px] gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  <div className="grid grid-cols-[112px_minmax(0,1fr)_148px_112px_34px] gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
                     <span>{isEnglish ? "Service" : "Servicio"}</span>
                     <span>CPT Code</span>
+                    <span>Line DOS</span>
                     <span>Charge</span>
                     <span></span>
                   </div>
@@ -4837,8 +4889,9 @@ export default function App() {
                     const visibleCptOptions = line.cpt && !hasSelectedCpt
                       ? [{ cpt: line.cpt, serviceType: line.serviceType || inferServiceTypeForCpt(line.cpt), description: `${line.serviceType || "Imported"} - ${line.cpt}` }, ...cptOptions]
                       : cptOptions;
+                    const effectiveLineDos = line.useClaimDos ? newDos : line.dos;
                     return (
-                      <div key={line.id} className="grid grid-cols-[112px_minmax(0,1fr)_120px_34px] gap-2">
+                      <div key={line.id} className="grid grid-cols-[112px_minmax(0,1fr)_148px_112px_34px] gap-2">
                         <select
                           value={line.serviceType}
                           onChange={(e) => {
@@ -4880,6 +4933,33 @@ export default function App() {
                             </option>
                           ))}
                         </select>
+                        <div className="space-y-1">
+                          <input
+                            type="date"
+                            required
+                            value={effectiveLineDos}
+                            onChange={(e) => setNewClaimLines(prev => prev.map(item => item.id === line.id ? { ...item, dos: e.target.value, useClaimDos: false } : item))}
+                            disabled={line.useClaimDos || isSavingClaim}
+                            className="w-full rounded-lg border border-slate-200 bg-white p-2 font-mono text-[11px] text-slate-700 disabled:bg-slate-100 disabled:text-slate-500"
+                          />
+                          <label className="inline-flex items-center gap-1 text-[9px] font-semibold text-slate-500">
+                            <input
+                              type="checkbox"
+                              checked={line.useClaimDos}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                setNewClaimLines(prev => prev.map(item => item.id === line.id ? {
+                                  ...item,
+                                  useClaimDos: checked,
+                                  dos: checked ? newDos : (item.dos || newDos)
+                                } : item));
+                              }}
+                              disabled={isSavingClaim}
+                              className="h-3 w-3 rounded border-slate-300 text-primary-blue"
+                            />
+                            {isEnglish ? "Use claim DOS" : "Usar DOS general"}
+                          </label>
+                        </div>
                         <div className={`flex items-center rounded-lg border px-2 py-1.5 font-mono text-[11px] font-bold ${line.cpt && charge > 0 ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-slate-200 bg-white text-slate-400"}`}>
                           {line.cpt ? `$${charge.toFixed(2)}` : "--"}
                         </div>
