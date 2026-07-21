@@ -4705,7 +4705,7 @@ export default function App() {
       {/* MODAL: CREATE MANUAL CLAIM */}
       {isCreateOpen && (
         <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full shadow-2xl border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-2xl max-w-6xl w-full shadow-2xl border border-slate-200 overflow-hidden">
             <div className="bg-dark-blue p-5 text-white flex items-center justify-between">
               <h4 className="font-bold font-display text-sm">
                 {editingClaim
@@ -4875,7 +4875,7 @@ export default function App() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <div className="grid grid-cols-[112px_minmax(0,1fr)_148px_112px_34px] gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+                  <div className="grid grid-cols-[128px_minmax(360px,1fr)_168px_128px_34px] gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-slate-400">
                     <span>{isEnglish ? "Service" : "Servicio"}</span>
                     <span>CPT Code</span>
                     <span>Line DOS</span>
@@ -4891,7 +4891,7 @@ export default function App() {
                       : cptOptions;
                     const effectiveLineDos = line.useClaimDos ? newDos : line.dos;
                     return (
-                      <div key={line.id} className="grid grid-cols-[112px_minmax(0,1fr)_148px_112px_34px] gap-2">
+                      <div key={line.id} className="grid grid-cols-[128px_minmax(360px,1fr)_168px_128px_34px] gap-2">
                         <select
                           value={line.serviceType}
                           onChange={(e) => {
