@@ -600,6 +600,44 @@ export class GoogleSheetsService {
     return updatedClaims;
   }
 
+  public async hardDeleteImportedClaimsBulk(claimIds: string[]): Promise<{
+    deletedClaims: Claim[];
+    deletedPayments: Payment[];
+    deletedNotes: Note[];
+    deletedAuditLogs: AuditLog[];
+  }> {
+    const uniqueIds = Array.from(new Set(claimIds.map(id => String(id || "").trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) {
+      return { deletedClaims: [], deletedPayments: [], deletedNotes: [], deletedAuditLogs: [] };
+    }
+
+    const claimIdSet = new Set(uniqueIds);
+    const deletedClaims = this.claims.filter(claim => claimIdSet.has(claim.claim_id));
+    if (deletedClaims.length !== uniqueIds.length) {
+      const foundIds = new Set(deletedClaims.map(claim => claim.claim_id));
+      const missing = uniqueIds.filter(claimId => !foundIds.has(claimId));
+      throw new Error(`Claim(s) not found for rollback: ${missing.join(", ")}`);
+    }
+
+    const deletedPayments = this.payments.filter(payment => claimIdSet.has(payment.claim_id));
+    const deletedNotes = this.notes.filter(note => claimIdSet.has(note.claim_id));
+    const deletedAuditLogs = this.auditLogs.filter(log => claimIdSet.has(log.claim_id));
+
+    this.claims = this.claims.filter(claim => !claimIdSet.has(claim.claim_id));
+    this.payments = this.payments.filter(payment => !claimIdSet.has(payment.claim_id));
+    this.notes = this.notes.filter(note => !claimIdSet.has(note.claim_id));
+    this.auditLogs = this.auditLogs.filter(log => !claimIdSet.has(log.claim_id));
+
+    if (this.isConfigured) {
+      await this.overwriteTab("Claims", CLAIMS_HEADERS, this.claims.map(claim => mapObjectToRow("Claims", claim)));
+      await this.overwriteTab("Payments", PAYMENTS_HEADERS, this.payments.map(payment => mapObjectToRow("Payments", payment)));
+      await this.overwriteTab("Notes", NOTES_HEADERS, this.notes.map(note => mapObjectToRow("Notes", note)));
+      await this.overwriteTab("Audit_Log", AUDIT_LOGS_HEADERS, this.auditLogs.map(log => mapObjectToRow("Audit_Log", log)));
+    }
+
+    return { deletedClaims, deletedPayments, deletedNotes, deletedAuditLogs };
+  }
+
   public async bulkUpdateClaims(claimIds: string[], updates: Partial<Claim>, operatorEmail: string): Promise<number> {
     let updatedCount = 0;
     

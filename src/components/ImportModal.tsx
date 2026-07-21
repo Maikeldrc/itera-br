@@ -387,7 +387,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       await new Promise(resolve => window.setTimeout(resolve, 200));
       setRollbackProgress({
         percent: 38,
-        label: isEnglish ? "Requesting soft-delete for this import batch..." : "Solicitando eliminación lógica de este lote importado..."
+        label: isEnglish ? "Deleting this import batch from operational sheets..." : "Eliminando este lote de las hojas operativas..."
       });
       const result = await onRollback(claimIds, file?.name || filePayload?.fileName || "");
       setRollbackProgress({
@@ -417,8 +417,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       } : previous);
       notify(
         isEnglish
-          ? `Import reverted: ${Number(result.revertedClaims || 0)} claim(s) were removed from active operations.`
-          : `Importación revertida: ${Number(result.revertedClaims || 0)} claim(s) fueron retirados de las operaciones activas.`,
+          ? `Import reverted: ${Number(result.revertedClaims || 0)} claim(s) were completely removed.`
+          : `Importación revertida: ${Number(result.revertedClaims || 0)} claim(s) fueron eliminados completamente.`,
         "success"
       );
       setIsRollbackConfirmOpen(false);
@@ -719,8 +719,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   </h4>
                   <p className="mt-1 text-xs text-slate-600">
                     {isEnglish
-                      ? `${importResult.rollbackSummary?.revertedClaims || 0} of ${importResult.rollbackSummary?.requestedClaims || 0} imported claim(s) were removed from active operations. Audit history was preserved.`
-                      : `${importResult.rollbackSummary?.revertedClaims || 0} de ${importResult.rollbackSummary?.requestedClaims || 0} claim(s) importados fueron retirados de las operaciones activas. Se preservó el historial de auditoría.`}
+                      ? `${importResult.rollbackSummary?.revertedClaims || 0} of ${importResult.rollbackSummary?.requestedClaims || 0} imported claim(s) were completely removed from Claims and related operational rows.`
+                      : `${importResult.rollbackSummary?.revertedClaims || 0} de ${importResult.rollbackSummary?.requestedClaims || 0} claim(s) importados fueron eliminados completamente de Claims y filas operativas relacionadas.`}
                   </p>
                 </div>
               </div>
@@ -738,8 +738,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     </h4>
                     <p className="mt-1 text-xs leading-relaxed text-amber-800">
                       {isEnglish
-                        ? `${importResult.importedClaimIds?.length || 0} claim(s) were imported in this batch. If you want the file to be imported only when every row is valid, revert this import, correct the rejected rows, and import again.`
-                        : `${importResult.importedClaimIds?.length || 0} claim(s) fueron importados en este lote. Si desea que el archivo se importe solo cuando todas las filas sean válidas, revierta esta importación, corrija las filas rechazadas y vuelva a importar.`}
+                        ? `${importResult.importedClaimIds?.length || 0} claim(s) were imported in this batch. If you want the file to be imported only when every row is valid, revert this import to completely remove the batch, correct the rejected rows, and import again.`
+                        : `${importResult.importedClaimIds?.length || 0} claim(s) fueron importados en este lote. Si desea que el archivo se importe solo cuando todas las filas sean válidas, revierta esta importación para eliminar completamente el lote, corrija las filas rechazadas y vuelva a importar.`}
                     </p>
                   </div>
                 </div>

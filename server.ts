@@ -2252,16 +2252,15 @@ async function startServer() {
         return res.status(423).json({ error: `Period ${claimPeriod(closed[0])} is closed. Reopen the period before rolling back this import.` });
       }
 
-      const deleted = await sheetsService.softDeleteClaimsBulk(
-        uniqueClaimIds,
-        operatorEmail,
-        `Rollback of claim import requested by ${operatorEmail}.`
-      );
+      const deleted = await sheetsService.hardDeleteImportedClaimsBulk(uniqueClaimIds);
       const summary = {
         requestedClaims: uniqueClaimIds.length,
-        revertedClaims: deleted.length,
-        skippedAlreadyDeleted: uniqueClaimIds.length - deleted.length,
-        claimIds: deleted.map(claim => claim.claim_id)
+        revertedClaims: deleted.deletedClaims.length,
+        removedPayments: deleted.deletedPayments.length,
+        removedNotes: deleted.deletedNotes.length,
+        removedAuditLogs: deleted.deletedAuditLogs.length,
+        skippedAlreadyDeleted: 0,
+        claimIds: deleted.deletedClaims.map(claim => claim.claim_id)
       };
       await sheetsService.createImportHistory({
         import_type: "Claims rollback",
@@ -2273,11 +2272,11 @@ async function startServer() {
         review_rows: 0,
         total_amount: 0,
         summary_json: JSON.stringify(summary),
-        status: "Rolled back"
+        status: "Hard rolled back"
       });
       await sheetsService.addUserActivityLog({
         user_email: operatorEmail,
-        action: "Rollback claim import",
+        action: "Hard rollback claim import",
         entity_type: "Import",
         entity_id: textValue(req.body?.fileName) || "Claims import",
         metadata_json: JSON.stringify(summary)
