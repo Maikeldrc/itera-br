@@ -387,29 +387,25 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
 
   const downloadRejectedRowsCsv = () => {
     if (!importResult || importResult.errors.length === 0) return;
-    if (filePayload || parsedRows.length === 0) {
-      notify(
-        isEnglish
-          ? "For XLSX imports, correct the source workbook and upload it again."
-          : "Para importaciones XLSX, corrija el workbook original y vuelva a cargarlo.",
-        "warning"
-      );
-      return;
-    }
 
     const rejectedByRow = new Map<number, string>();
     importResult.errors.forEach(err => {
       rejectedByRow.set(Number(err.row), (err.errors || []).join("; "));
     });
-    const rejectedRows = parsedRows
-      .map((row, index) => ({ rowNumber: index + 1, row }))
-      .filter(item => rejectedByRow.has(item.rowNumber));
+    const rejectedRowsFromResponse = importResult.errors
+      .map(err => ({ rowNumber: Number(err.row), row: err.sourceRow || null }))
+      .filter((item): item is { rowNumber: number; row: Record<string, unknown> } => Number.isFinite(item.rowNumber) && !!item.row);
+    const rejectedRows = rejectedRowsFromResponse.length > 0
+      ? rejectedRowsFromResponse
+      : parsedRows
+        .map((row, index) => ({ rowNumber: Number(row.__source_row) || index + 1, row }))
+        .filter(item => rejectedByRow.has(item.rowNumber));
     if (rejectedRows.length === 0) {
       notify(isEnglish ? "No rejected source rows are available to export." : "No hay filas rechazadas disponibles para exportar.", "warning");
       return;
     }
 
-    const headers = Array.from(new Set<string>(rejectedRows.flatMap(item => Object.keys(item.row))));
+    const headers = Array.from(new Set<string>(rejectedRows.flatMap(item => Object.keys(item.row).filter(header => header !== "__source_row"))));
     const csv = [
       ["source_row", "import_errors", ...headers].map(escapeCsvValue).join(","),
       ...rejectedRows.map(item => [

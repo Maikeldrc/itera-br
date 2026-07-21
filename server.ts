@@ -46,12 +46,21 @@ function textValue(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function normalizeImportKey(value: unknown) {
+  return String(value ?? "")
+    .replace(/^\uFEFF/, "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
 function importField(row: Record<string, unknown>, names: string[]) {
   const normalized = new Map(
-    Object.entries(row).map(([key, value]) => [key.trim().toLowerCase(), value])
+    Object.entries(row).map(([key, value]) => [normalizeImportKey(key), value])
   );
   for (const name of names) {
-    const value = normalized.get(name.trim().toLowerCase());
+    const value = normalized.get(normalizeImportKey(name));
     if (value !== undefined && value !== null && String(value).trim() !== "") {
       return String(value).trim();
     }
@@ -157,16 +166,20 @@ function parseWorkbookRows(fileBase64: string): Record<string, string>[] {
   const firstSheetName = workbook.SheetNames[0];
   if (!firstSheetName) throw new Error("Invalid Excel file: no worksheet found.");
   const sheet = workbook.Sheets[firstSheetName];
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: "" });
-  const nonEmptyRows = rows.filter(row => row.some(value => String(value ?? "").trim() !== ""));
-  const headers = (nonEmptyRows[0] || []).map(header => String(header ?? "").trim());
-  return nonEmptyRows.slice(1).map(row => {
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: false, defval: "" });
+  const headerIndex = rows.findIndex(row => row.some(value => String(value ?? "").trim() !== ""));
+  if (headerIndex === -1) return [];
+  const headers = (rows[headerIndex] || []).map(header => String(header ?? "").replace(/^\uFEFF/, "").replace(/\u00A0/g, " ").replace(/\s+/g, " ").trim());
+  return rows.slice(headerIndex + 1).flatMap((row, offset) => {
+    const sourceRow = headerIndex + offset + 2;
+    if (!row.some(value => String(value ?? "").trim() !== "")) return [];
     const record: Record<string, string> = {};
     headers.forEach((header, index) => {
       if (!header) return;
       record[header] = String(row[index] ?? "").trim();
     });
-    return record;
+    record.__source_row = String(sourceRow);
+    return [record];
   });
 }
 
@@ -1867,9 +1880,9 @@ async function startServer() {
       const retryRowSet = Array.isArray(retryRows)
         ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
         : null;
-      const parsedRows = fileBase64 ? parseXlsxRows(fileBase64) : rows;
+      const parsedRows = fileBase64 ? parseWorkbookRows(fileBase64) : rows;
       const importRows = retryRowSet
-        ? parsedRows?.filter((_: unknown, index: number) => retryRowSet.has(index + 1))
+        ? parsedRows?.filter((row: Record<string, unknown>, index: number) => retryRowSet.has(Number(row.__source_row) || index + 1))
         : parsedRows;
 
       if (!importRows || !Array.isArray(importRows)) {
@@ -1884,10 +1897,11 @@ async function startServer() {
       const existingClaims = await sheetsService.getClaims();
 
       const claimsToImport: Claim[] = [];
-      const errors: { row: number; claimId?: string; errors: string[] }[] = [];
+      const errors: { row: number; claimId?: string; errors: string[]; sourceRow?: Record<string, unknown> }[] = [];
 
       for (let i = 0; i < importRows.length; i++) {
         const row = importRows[i];
+        const sourceRowNumber = Number(row.__source_row) || i + 1;
         const rowErrors: string[] = [];
         const isBillingWorklist = !!(
           importField(row, ["MRN"]) ||
@@ -1921,12 +1935,12 @@ async function startServer() {
 
           if (!mrn) rowErrors.push("MRN is required.");
           if (!providerNpi) rowErrors.push("Provider NPI is required.");
-          if (!provider) rowErrors.push(`Provider NPI ${providerNpi || "(blank)"} is not registered in Settings.`);
+          if (providerNpi && !provider) rowErrors.push(`Provider NPI ${providerNpi} is not registered in Settings.`);
           if (provider && !canUserAccessProvider(req.appUser || {}, provider.provider_id, provider.npi)) {
             rowErrors.push(`Current user does not have access to provider ${provider.provider_name}.`);
           }
           if (!payerCode) rowErrors.push("Primary Insurance Code is required.");
-          if (!payer) rowErrors.push(`Primary Insurance Code ${payerCode || "(blank)"} is not registered in Settings.`);
+          if (payerCode && !payer) rowErrors.push(`Primary Insurance Code ${payerCode} is not registered in Settings.`);
           if (!serviceTo) rowErrors.push("Month Of is required.");
           if (codes.length === 0) rowErrors.push("At least one CPT code is required.");
 
@@ -1974,7 +1988,7 @@ async function startServer() {
           }).filter(Boolean) as any[];
 
           if (rowErrors.length > 0) {
-            errors.push({ row: i + 1, claimId: mrn ? `MRN ${mrn}` : undefined, errors: rowErrors });
+            errors.push({ row: sourceRowNumber, claimId: mrn ? `MRN ${mrn}` : undefined, errors: rowErrors, sourceRow: row });
             continue;
           }
 
@@ -2044,7 +2058,7 @@ async function startServer() {
             [...existingClaims, ...claimsToImport]
           ));
           if (validationErrors.length > 0) {
-            errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
+            errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
           } else {
             claimsToImport.push(calculated);
           }
@@ -2120,7 +2134,7 @@ async function startServer() {
           [...existingClaims, ...claimsToImport]
         ));
         if (validationErrors.length > 0) {
-          errors.push({ row: i + 1, claimId: calculated.claim_id, errors: validationErrors });
+          errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
         } else {
           claimsToImport.push(calculated);
         }
