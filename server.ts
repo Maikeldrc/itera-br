@@ -242,10 +242,6 @@ function excelSerialToIsoDate(value: string) {
   return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString().slice(0, 10);
 }
 
-function firstDayOfMonth(dateIso: string) {
-  return dateIso ? `${dateIso.slice(0, 7)}-01` : new Date().toISOString().slice(0, 10);
-}
-
 function parseMoney(value: unknown) {
   const text = String(value ?? "").trim();
   if (!text) return 0;
@@ -1939,9 +1935,9 @@ async function startServer() {
           const mrn = importField(row, ["MRN"]);
           const providerNpi = importField(row, ["Provider NPI"]);
           const payerCode = importField(row, ["Primary Insurance Code", "Primary Insurance", "Insurance Code", "Payer ID"]);
-          const monthDate = excelSerialToIsoDate(importField(row, ["Month Of"]));
-          const serviceFrom = firstDayOfMonth(monthDate);
-          const serviceTo = monthDate || serviceFrom;
+          const serviceDate = excelSerialToIsoDate(importField(row, ["Month Of"]));
+          const serviceFrom = serviceDate;
+          const serviceTo = serviceDate;
           const year = Number((serviceTo || serviceFrom).slice(0, 4));
           const month = Number((serviceTo || serviceFrom).slice(5, 7));
           const isSemester2 = month >= 7;
@@ -1966,7 +1962,7 @@ async function startServer() {
           }
           if (!payerCode) rowErrors.push("Primary Insurance Code is required.");
           if (payerCode && !payer) rowErrors.push(`Primary Insurance Code ${payerCode} is not registered in Settings.`);
-          if (!serviceTo) rowErrors.push("Month Of is required.");
+          if (!serviceDate) rowErrors.push("Month Of is required.");
           if (codes.length === 0) rowErrors.push("At least one CPT code is required.");
 
           const feeFallbackNotes: string[] = [];
