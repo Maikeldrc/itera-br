@@ -13,6 +13,7 @@ interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImport: (payload: ImportPayload) => Promise<ImportResult>;
+  onRollback: (claimIds: string[], fileName?: string) => Promise<{ revertedClaims?: number; requestedClaims?: number }>;
 }
 
 type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[] };
@@ -39,10 +40,17 @@ type ImportResult = {
   importedCount: number;
   errorCount: number;
   errors: any[];
+  importedClaimIds?: string[];
+  rollbackAvailable?: boolean;
+  rollbackCompleted?: boolean;
+  rollbackSummary?: {
+    revertedClaims: number;
+    requestedClaims: number;
+  };
   summary?: ImportSummary;
 };
 
-export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
+export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportModalProps) {
   const { notify } = useFeedback();
   const { language } = useLanguage();
   const isEnglish = language === "en";
@@ -53,6 +61,9 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [isRollbackConfirmOpen, setIsRollbackConfirmOpen] = useState(false);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [rollbackProgress, setRollbackProgress] = useState<{ percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const correctedFileInputRef = useRef<HTMLInputElement>(null);
   const importResultRef = useRef<HTMLDivElement>(null);
@@ -75,6 +86,9 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
     setIsProcessing(false);
     setImportProgress(null);
     setImportResult(null);
+    setIsRollbackConfirmOpen(false);
+    setIsRollingBack(false);
+    setRollbackProgress(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -90,6 +104,8 @@ export function ImportModal({ isOpen, onClose, onImport }: ImportModalProps) {
     setValidationResults([]);
     setImportResult(null);
     setImportProgress(null);
+    setIsRollbackConfirmOpen(false);
+    setRollbackProgress(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -335,6 +351,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         label: isEnglish ? "Import completed." : "Importación completada."
       });
       setImportResult(normalizeImportResult(res));
+      setIsRollbackConfirmOpen(false);
+      setRollbackProgress(null);
     } catch (err) {
       console.error(err);
       clearProgressTimer();
@@ -356,12 +374,74 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     }
   };
 
+  const handleRollbackImport = async () => {
+    const claimIds = importResult?.importedClaimIds || [];
+    if (claimIds.length === 0 || isRollingBack) return;
+
+    setIsRollingBack(true);
+    setRollbackProgress({
+      percent: 12,
+      label: isEnglish ? "Preparing rollback for imported claims..." : "Preparando reversión de claims importados..."
+    });
+    try {
+      await new Promise(resolve => window.setTimeout(resolve, 200));
+      setRollbackProgress({
+        percent: 38,
+        label: isEnglish ? "Requesting soft-delete for this import batch..." : "Solicitando eliminación lógica de este lote importado..."
+      });
+      const result = await onRollback(claimIds, file?.name || filePayload?.fileName || "");
+      setRollbackProgress({
+        percent: 82,
+        label: isEnglish ? "Refreshing worklist after rollback..." : "Actualizando worklist después de revertir..."
+      });
+      await new Promise(resolve => window.setTimeout(resolve, 300));
+      setRollbackProgress({
+        percent: 100,
+        label: isEnglish ? "Rollback completed." : "Reversión completada."
+      });
+      setImportResult(previous => previous ? {
+        ...previous,
+        importedCount: 0,
+        rollbackAvailable: false,
+        rollbackCompleted: true,
+        rollbackSummary: {
+          revertedClaims: Number(result.revertedClaims || 0),
+          requestedClaims: Number(result.requestedClaims || claimIds.length)
+        },
+        summary: previous.summary ? {
+          ...previous.summary,
+          importedRows: 0,
+          accountedRows: previous.summary.rejectedRows,
+          totalBilledChargeImported: 0
+        } : previous.summary
+      } : previous);
+      notify(
+        isEnglish
+          ? `Import reverted: ${Number(result.revertedClaims || 0)} claim(s) were removed from active operations.`
+          : `Importación revertida: ${Number(result.revertedClaims || 0)} claim(s) fueron retirados de las operaciones activas.`,
+        "success"
+      );
+      setIsRollbackConfirmOpen(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : (isEnglish ? "Rollback failed." : "Falló la reversión.");
+      setRollbackProgress({
+        percent: 100,
+        label: isEnglish ? "Rollback failed." : "Falló la reversión."
+      });
+      notify(`${isEnglish ? "Rollback error" : "Error al revertir"}: ${message}`, "error");
+    } finally {
+      setIsRollingBack(false);
+    }
+  };
+
   const triggerSelectFile = () => {
     fileInputRef.current?.click();
   };
 
   const displayedSummary = importResult?.summary || null;
+  const rollbackAvailable = Boolean(importResult?.rollbackAvailable && (importResult.importedClaimIds || []).length > 0 && !importResult.rollbackCompleted);
   const importCompletedSuccessfully = Boolean(importResult?.success && Number(importResult.importedCount || 0) > 0 && Number(importResult.errorCount || 0) === 0);
+  const importAlreadyFinalized = Number(importResult?.importedCount || 0) > 0 || Boolean(importResult?.rollbackCompleted);
   const rejectedSourceRows = new Set<number>(
     (importResult?.errors || [])
       .map(err => Number(err.row))
@@ -629,6 +709,87 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             </div>
           )}
 
+          {importResult?.rollbackCompleted && (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-start gap-3">
+                <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    {isEnglish ? "Import rolled back" : "Importación revertida"}
+                  </h4>
+                  <p className="mt-1 text-xs text-slate-600">
+                    {isEnglish
+                      ? `${importResult.rollbackSummary?.revertedClaims || 0} of ${importResult.rollbackSummary?.requestedClaims || 0} imported claim(s) were removed from active operations. Audit history was preserved.`
+                      : `${importResult.rollbackSummary?.revertedClaims || 0} de ${importResult.rollbackSummary?.requestedClaims || 0} claim(s) importados fueron retirados de las operaciones activas. Se preservó el historial de auditoría.`}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {rollbackAvailable && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-950">
+                      {isEnglish ? "All-or-nothing recovery" : "Recuperación todo o nada"}
+                    </h4>
+                    <p className="mt-1 text-xs leading-relaxed text-amber-800">
+                      {isEnglish
+                        ? `${importResult.importedClaimIds?.length || 0} claim(s) were imported in this batch. If you want the file to be imported only when every row is valid, revert this import, correct the rejected rows, and import again.`
+                        : `${importResult.importedClaimIds?.length || 0} claim(s) fueron importados en este lote. Si desea que el archivo se importe solo cuando todas las filas sean válidas, revierta esta importación, corrija las filas rechazadas y vuelva a importar.`}
+                    </p>
+                  </div>
+                </div>
+                {!isRollbackConfirmOpen ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsRollbackConfirmOpen(true)}
+                    disabled={isRollingBack}
+                    className="shrink-0 rounded-lg border border-amber-300 bg-white px-3 py-2 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {isEnglish ? "Revert imported claims" : "Revertir claims importados"}
+                  </button>
+                ) : (
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsRollbackConfirmOpen(false)}
+                      disabled={isRollingBack}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {isEnglish ? "Cancel" : "Cancelar"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRollbackImport}
+                      disabled={isRollingBack}
+                      className="rounded-lg bg-amber-700 px-3 py-2 text-[11px] font-bold text-white hover:bg-amber-800 disabled:cursor-wait disabled:opacity-60"
+                    >
+                      {isRollingBack ? (isEnglish ? "Reverting..." : "Revirtiendo...") : (isEnglish ? "Confirm rollback" : "Confirmar reversión")}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {rollbackProgress && (
+                <div className="mt-4 rounded-lg border border-amber-100 bg-white/70 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-semibold text-amber-900">{rollbackProgress.label}</p>
+                    <span className="font-mono text-[11px] font-bold text-amber-800">{Math.round(rollbackProgress.percent)}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-white ring-1 ring-amber-100">
+                    <div
+                      className="h-full rounded-full bg-amber-600 transition-all duration-300"
+                      style={{ width: `${rollbackProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {importErrorRows.length > 0 && (
             <div className="rounded-xl border border-rose-100 bg-white shadow-sm overflow-hidden">
               <div className="px-4 py-3 border-b border-rose-100 bg-rose-50/70 flex items-center justify-between gap-3">
@@ -818,13 +979,15 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           </button>
           <button
             onClick={handleImportClick}
-            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || importCompletedSuccessfully}
+            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized}
             className="bg-primary-blue hover:bg-secondary-blue disabled:bg-slate-300 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md"
-            title={importCompletedSuccessfully ? (isEnglish ? "This file has already been imported. Close this window to start a new import." : "Este archivo ya fue importado. Cierre esta ventana para iniciar una nueva importación.") : undefined}
+            title={importAlreadyFinalized ? (isEnglish ? "This import batch is finalized. Close this window to start a new import." : "Este lote de importación ya finalizó. Cierre esta ventana para iniciar una nueva importación.") : undefined}
           >
             {isProcessing
               ? (isEnglish ? "Processing..." : "Procesando...")
-              : importCompletedSuccessfully
+              : importResult?.rollbackCompleted
+                ? (isEnglish ? "Import Reverted" : "Importación revertida")
+                : importCompletedSuccessfully
                 ? (isEnglish ? "Import Completed" : "Importación completada")
                 : (filePayload ? (isEnglish ? "Import Excel" : "Importar Excel") : `${isEnglish ? "Import" : "Importar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>

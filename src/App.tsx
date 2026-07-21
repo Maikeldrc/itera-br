@@ -1208,6 +1208,23 @@ export default function App() {
     return data;
   };
 
+  const handleRollbackClaimImport = async (claimIds: string[], fileName?: string) => {
+    const res = await apiFetch("/api/import-csv/rollback", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-user-email": currentUser.email
+      },
+      body: JSON.stringify({ claimIds, fileName })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || "Import rollback failed");
+    }
+    await fetchAllData({ showInitialLoading: false });
+    return data;
+  };
+
   // Update Settings values
   const handleUpdateSetting = async (key: string, value: string) => {
     const res = await apiFetch("/api/settings", {
@@ -5049,6 +5066,7 @@ export default function App() {
         isOpen={isImportOpen}
         onClose={() => setIsImportOpen(false)}
         onImport={handleImportCSV}
+        onRollback={handleRollbackClaimImport}
       />
 
       {/* MODAL: RESTORE BACKUP CONFIRMATION */}

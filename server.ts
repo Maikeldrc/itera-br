@@ -2205,10 +2205,86 @@ async function startServer() {
         importedCount: importedClaims.length,
         errorCount: errors.length,
         errors: errors,
+        importedClaimIds: importedClaims.map(claim => claim.claim_id),
+        rollbackAvailable: importedClaims.length > 0,
         summary
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Import process failed" });
+    }
+  });
+
+  app.post("/api/import-csv/rollback", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const claimIds: string[] = Array.isArray(req.body?.claimIds)
+        ? req.body.claimIds.map((id: unknown) => textValue(id)).filter((id: string) => Boolean(id))
+        : [];
+      if (claimIds.length === 0) {
+        return res.status(400).json({ error: "No imported claim IDs were provided for rollback." });
+      }
+
+      const uniqueClaimIds: string[] = Array.from(new Set<string>(claimIds));
+      const claims = await sheetsService.getClaims(true);
+      const payments = await sheetsService.getPayments();
+      const paymentClaimIds = new Set<string>(payments.map(payment => textValue(payment.claim_id)).filter((id: string) => Boolean(id)));
+      const claimsToRollback = uniqueClaimIds.map(claimId => claims.find(claim => claim.claim_id === claimId));
+      const missing = uniqueClaimIds.filter((_, index) => !claimsToRollback[index]);
+      if (missing.length > 0) {
+        return res.status(404).json({ error: `Claims not found: ${missing.join(", ")}` });
+      }
+      const inaccessible = claimsToRollback
+        .filter((claim): claim is Claim => Boolean(claim))
+        .filter(claim => !canAccessClaim(req, claim));
+      if (inaccessible.length > 0) {
+        return res.status(403).json({ error: `Current user does not have access to claim ${inaccessible[0].claim_id}.` });
+      }
+      const withPayments = uniqueClaimIds.filter(claimId => paymentClaimIds.has(claimId));
+      if (withPayments.length > 0) {
+        return res.status(409).json({
+          error: `Rollback blocked because payment activity exists for claim(s): ${withPayments.join(", ")}. Review manually before deleting.`
+        });
+      }
+      const closed = claimsToRollback
+        .filter((claim): claim is Claim => Boolean(claim))
+        .filter(claim => !claim.deleted_flag && sheetsService.isPeriodClosed(claimPeriod(claim)));
+      if (closed.length > 0) {
+        return res.status(423).json({ error: `Period ${claimPeriod(closed[0])} is closed. Reopen the period before rolling back this import.` });
+      }
+
+      const deleted = await sheetsService.softDeleteClaimsBulk(
+        uniqueClaimIds,
+        operatorEmail,
+        `Rollback of claim import requested by ${operatorEmail}.`
+      );
+      const summary = {
+        requestedClaims: uniqueClaimIds.length,
+        revertedClaims: deleted.length,
+        skippedAlreadyDeleted: uniqueClaimIds.length - deleted.length,
+        claimIds: deleted.map(claim => claim.claim_id)
+      };
+      await sheetsService.createImportHistory({
+        import_type: "Claims rollback",
+        file_name: textValue(req.body?.fileName) || "Import rollback",
+        requested_by: operatorEmail,
+        total_rows: uniqueClaimIds.length,
+        imported_rows: 0,
+        rejected_rows: 0,
+        review_rows: 0,
+        total_amount: 0,
+        summary_json: JSON.stringify(summary),
+        status: "Rolled back"
+      });
+      await sheetsService.addUserActivityLog({
+        user_email: operatorEmail,
+        action: "Rollback claim import",
+        entity_type: "Import",
+        entity_id: textValue(req.body?.fileName) || "Claims import",
+        metadata_json: JSON.stringify(summary)
+      });
+      res.json({ success: true, ...summary });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to rollback import." });
     }
   });
 

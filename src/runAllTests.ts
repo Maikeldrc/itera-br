@@ -5,6 +5,7 @@ import { runReportsEngineTests } from "./reportsEngine.test";
 import { runSecurityHeadersTests } from "./securityHeaders.test";
 import { runGoogleSheetsServiceTests } from "./googleSheetsService.test";
 import { runAccessControlTests } from "./accessControl.test";
+import { runCptRepeatLimitTests } from "./cptRepeatLimits.test";
 
 const failures: string[] = [];
 
@@ -29,6 +30,10 @@ for (const failure of runSecurityHeadersTests()) {
 
 for (const failure of runAccessControlTests()) {
   failures.push(`Access control: ${failure}`);
+}
+
+for (const failure of runCptRepeatLimitTests()) {
+  failures.push(`CPT repeat limits: ${failure}`);
 }
 
 for (const failure of await runGoogleSheetsServiceTests()) {

@@ -548,6 +548,58 @@ export class GoogleSheetsService {
     return updated;
   }
 
+  public async softDeleteClaimsBulk(claimIds: string[], operatorEmail: string, reason: string): Promise<Claim[]> {
+    const uniqueIds = Array.from(new Set(claimIds.map(id => String(id || "").trim()).filter(Boolean)));
+    if (uniqueIds.length === 0) return [];
+
+    const deletedAt = new Date().toISOString();
+    const updatedClaims: Claim[] = [];
+    const auditRecords: AuditLog[] = [];
+
+    uniqueIds.forEach((claimId, index) => {
+      const claimIndex = this.claims.findIndex(c => c.claim_id === claimId);
+      if (claimIndex === -1) {
+        throw new Error(`Claim with ID ${claimId} not found.`);
+      }
+      const previous = this.claims[claimIndex];
+      if (previous.deleted_flag) {
+        return;
+      }
+
+      const updated = {
+        ...previous,
+        deleted_flag: true,
+        deleted_at: deletedAt,
+        deleted_by: operatorEmail,
+        delete_reason: reason,
+        updated_at: deletedAt,
+        updated_by: operatorEmail
+      } as Claim;
+
+      this.claims[claimIndex] = updated;
+      updatedClaims.push(updated);
+      auditRecords.push({
+        audit_id: `AUD-${Date.now()}-${index}-${Math.floor(Math.random() * 1000)}`,
+        claim_id: claimId,
+        action_type: "Delete",
+        field_name: "deleted_flag",
+        previous_value: "false",
+        new_value: "true",
+        reason: reason || "Import rollback requested by administrator",
+        changed_by: operatorEmail,
+        changed_at: deletedAt
+      });
+    });
+
+    if (this.isConfigured && updatedClaims.length > 0) {
+      await this.overwriteTab("Claims", CLAIMS_HEADERS, this.claims.map(c => mapObjectToRow("Claims", c)));
+      await this.appendRowsStrict("Audit_Log", auditRecords.map(record => mapObjectToRow("Audit_Log", record)));
+    }
+
+    this.auditLogs.unshift(...auditRecords);
+    return updatedClaims;
+  }
+
   public async bulkUpdateClaims(claimIds: string[], updates: Partial<Claim>, operatorEmail: string): Promise<number> {
     let updatedCount = 0;
     

@@ -7,6 +7,8 @@ export type CptRepeatLine = {
 };
 
 const DEFAULT_MAX_PER_DOS = 1;
+const MIN_DAYS_BETWEEN_DOS = 30;
+const MIN_DAYS_BETWEEN_DOS_CPTS = new Set(["99454", "99445"]);
 
 function normalizedCpt(value: unknown) {
   return String(value ?? "").trim();
@@ -15,6 +17,40 @@ function normalizedCpt(value: unknown) {
 function yearFromDos(dos?: string) {
   const year = Number(String(dos || "").slice(0, 4));
   return Number.isFinite(year) && year > 0 ? year : undefined;
+}
+
+function normalizeDos(value: unknown) {
+  return normalizedCpt(value).slice(0, 10);
+}
+
+function isMinimumSpacingCpt(cpt: string) {
+  return MIN_DAYS_BETWEEN_DOS_CPTS.has(normalizedCpt(cpt));
+}
+
+function parseDosTime(dos?: string) {
+  const normalized = normalizeDos(dos);
+  if (!normalized || !/^\d{4}-\d{2}-\d{2}$/.test(normalized)) return undefined;
+  const time = new Date(`${normalized}T00:00:00Z`).getTime();
+  return Number.isFinite(time) ? time : undefined;
+}
+
+function daysBetween(leftDos?: string, rightDos?: string) {
+  const left = parseDosTime(leftDos);
+  const right = parseDosTime(rightDos);
+  if (left === undefined || right === undefined) return undefined;
+  return Math.abs(Math.round((right - left) / 86400000));
+}
+
+function lineUnitCount(line: CptRepeatLine) {
+  const units = Number(line.units);
+  return Number.isFinite(units) && units > 0 ? Math.floor(units) : 1;
+}
+
+function expandLineOccurrences(line: CptRepeatLine, fallbackDos?: string) {
+  const cpt = normalizedCpt(line.cpt);
+  const dos = normalizeDos(line.dos || fallbackDos);
+  if (!cpt || !dos) return [];
+  return Array.from({ length: lineUnitCount(line) }, () => ({ cpt, dos }));
 }
 
 export function getCptMaxPerDos(cpt: string, feeSchedules: FeeSchedule[], dos?: string) {
@@ -33,7 +69,7 @@ export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedul
   const lineDos = (line: CptRepeatLine) => normalizeDos(line.dos || dos);
   lines.forEach(line => {
     const cpt = normalizedCpt(line.cpt);
-    if (!cpt) return;
+    if (!cpt || isMinimumSpacingCpt(cpt)) return;
     const key = `${cpt}|${lineDos(line)}`;
     counts.set(key, (counts.get(key) || 0) + lineUnitCount(line));
   });
@@ -41,7 +77,7 @@ export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedul
   const errors: Record<number, string[]> = {};
   lines.forEach((line, index) => {
     const cpt = normalizedCpt(line.cpt);
-    if (!cpt) return;
+    if (!cpt || isMinimumSpacingCpt(cpt)) return;
     const dosForLine = lineDos(line);
     const count = counts.get(`${cpt}|${dosForLine}`) || 0;
     const max = getCptMaxPerDos(cpt, feeSchedules, dosForLine || dos);
@@ -53,12 +89,26 @@ export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedul
     }
   });
 
-  return errors;
-}
+  const spacingOccurrences = lines.flatMap((line, index) =>
+    expandLineOccurrences(line, dos)
+      .filter(item => isMinimumSpacingCpt(item.cpt))
+      .map(item => ({ ...item, index }))
+  );
+  spacingOccurrences.forEach((left, leftIndex) => {
+    spacingOccurrences.slice(leftIndex + 1).forEach(right => {
+      if (left.cpt !== right.cpt) return;
+      const gap = daysBetween(left.dos, right.dos);
+      if (gap === undefined || gap >= MIN_DAYS_BETWEEN_DOS) return;
+      [left.index, right.index].forEach(index => {
+        errors[index] = [
+          ...(errors[index] || []),
+          `CPT ${left.cpt} requires at least ${MIN_DAYS_BETWEEN_DOS} days between DOS dates. ${left.dos} and ${right.dos} are ${gap} day(s) apart.`
+        ];
+      });
+    });
+  });
 
-function lineUnitCount(line: CptRepeatLine) {
-  const units = Number(line.units);
-  return Number.isFinite(units) && units > 0 ? Math.floor(units) : 1;
+  return errors;
 }
 
 export function validateCptRepeatLimits(lines: CptRepeatLine[], feeSchedules: FeeSchedule[], dos?: string) {
@@ -98,10 +148,6 @@ export function validateClaimCptRepeatLimits(claim: Partial<Claim>, feeSchedules
   );
 }
 
-function normalizeDos(value: unknown) {
-  return normalizedCpt(value).slice(0, 10);
-}
-
 export function validateClaimCptRepeatLimitsAgainstExisting(
   claim: Partial<Claim>,
   feeSchedules: FeeSchedule[],
@@ -118,29 +164,56 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
   const counts = new Map<string, number>();
   const addLine = (line: CptRepeatLine) => {
     const cpt = normalizedCpt(line.cpt);
-    if (!cpt) return;
+    if (!cpt || isMinimumSpacingCpt(cpt)) return;
     const dos = normalizeDos(line.dos || claimDos);
     if (!dos) return;
     const key = `${cpt}|${dos}`;
     counts.set(key, (counts.get(key) || 0) + lineUnitCount(line));
   };
 
-  existingClaims
+  const otherPatientClaims = existingClaims
     .filter(existing => !existing.deleted_flag)
     .filter(existing => !currentClaimId || normalizedCpt(existing.claim_id) !== normalizedCpt(currentClaimId))
-    .filter(existing => normalizedCpt(existing.patient_id) === patientId)
+    .filter(existing => normalizedCpt(existing.patient_id) === patientId);
+
+  otherPatientClaims
     .flatMap(existing => extractClaimCptRepeatLines(existing))
     .forEach(addLine);
 
   candidateLines.forEach(addLine);
+
+  const existingSpacingOccurrences = otherPatientClaims
+    .flatMap(existing => extractClaimCptRepeatLines(existing))
+    .flatMap(line => expandLineOccurrences(line, claimDos))
+    .filter(line => isMinimumSpacingCpt(line.cpt));
+  const candidateSpacingOccurrences = candidateLines
+    .flatMap(line => expandLineOccurrences(line, claimDos))
+    .filter(line => isMinimumSpacingCpt(line.cpt));
+  const spacingErrors = candidateSpacingOccurrences.flatMap((candidate, candidateIndex) => {
+    const comparisons = [
+      ...existingSpacingOccurrences,
+      ...candidateSpacingOccurrences.filter((_, index) => index !== candidateIndex)
+    ];
+    const conflict = comparisons.find(other => {
+      if (other.cpt !== candidate.cpt) return false;
+      const gap = daysBetween(other.dos, candidate.dos);
+      return gap !== undefined && gap < MIN_DAYS_BETWEEN_DOS;
+    });
+    if (!conflict) return [];
+    const gap = daysBetween(conflict.dos, candidate.dos) ?? 0;
+    return [
+      `CPT ${candidate.cpt} requires at least ${MIN_DAYS_BETWEEN_DOS} days between DOS dates for patient ${patientId}. Existing/current DOS ${conflict.dos} and ${candidate.dos} are ${gap} day(s) apart.`
+    ];
+  });
 
   const uniqueCandidateKeys = Array.from(new Set(candidateLines.map(line => {
     const cpt = normalizedCpt(line.cpt);
     const dos = normalizeDos(line.dos || claimDos);
     return cpt && dos ? `${cpt}|${dos}` : "";
   }).filter(Boolean)));
-  return uniqueCandidateKeys.flatMap(key => {
+  const maxPerDosErrors = uniqueCandidateKeys.flatMap(key => {
     const [cpt, dos] = key.split("|");
+    if (isMinimumSpacingCpt(cpt)) return [];
     const totalCount = counts.get(key) || 0;
     const max = getCptMaxPerDos(cpt, feeSchedules, dos);
     if (totalCount <= max) return [];
@@ -148,4 +221,6 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
       `CPT ${cpt} exceeds Max/DOS for patient ${patientId} on ${dos}. Max allowed: ${max}; existing plus current total: ${totalCount}.`
     ];
   });
+
+  return [...spacingErrors, ...maxPerDosErrors];
 }
