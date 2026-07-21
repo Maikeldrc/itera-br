@@ -71,6 +71,7 @@ export function AgingBadge({ bucket }: { bucket: AgingBucket | "" }) {
 
 const TAB_LABELS: Record<ReportView, string> = {
   "billing-summary": "Billing Summary",
+  "insurance-analysis": "Insurance Analysis",
   "provider-vs-itera": "ITERA vs Provider",
   collections: "Collections",
   denials: "Denials",

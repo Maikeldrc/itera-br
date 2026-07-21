@@ -8,6 +8,7 @@ import {
 
 export type ReportView =
   | "billing-summary"
+  | "insurance-analysis"
   | "provider-vs-itera"
   | "collections"
   | "denials"

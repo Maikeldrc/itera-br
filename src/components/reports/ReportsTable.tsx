@@ -36,6 +36,7 @@ export function ReportsTable({ rows, view }: { rows: ReportRow[]; view: ReportVi
         <thead className="sticky top-0 z-10 bg-slate-50 text-[9px] font-bold uppercase tracking-wider text-slate-500">
           <tr className="border-b border-slate-200">
             <th className="p-3">{header("DOS", "date")}</th>
+            <th className="p-3">{header("Payer", "payer")}</th>
             <th className="p-3">{header("Practice", "practice")}</th>
             <th className="p-3">{header("Service", "serviceType")}</th>
             <th className="p-3">{header("CPT", "cptCode")}</th>
@@ -69,6 +70,7 @@ export function ReportsTable({ rows, view }: { rows: ReportRow[]; view: ReportVi
           {sorted.map(row => (
             <tr key={row.key} className={`hover:bg-blue-50/30 ${view === "pending" && row.agingBucket === "91+ days" ? "bg-rose-50/30" : ""}`}>
               <td className="p-3 font-mono">{row.date}</td>
+              <td className="p-3 font-semibold text-slate-900">{row.payer}</td>
               <td className="p-3 font-semibold">{row.practice}</td>
               <td className="p-3">{row.serviceType}</td>
               <td className="p-3 font-mono font-bold text-primary-blue">{row.cptCode}</td>
@@ -99,7 +101,7 @@ export function ReportsTable({ rows, view }: { rows: ReportRow[]; view: ReportVi
             </tr>
           ))}
           {sorted.length === 0 && (
-            <tr><td colSpan={28} className="p-12 text-center text-sm text-slate-400">No report data matches the selected filters.</td></tr>
+            <tr><td colSpan={29} className="p-12 text-center text-sm text-slate-400">No report data matches the selected filters.</td></tr>
           )}
         </tbody>
       </table>
