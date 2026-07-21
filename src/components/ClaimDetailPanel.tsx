@@ -204,6 +204,7 @@ type ServiceLineStatus =
 
 interface ServiceLine {
   cpt: string;
+  dos: string;
   charged: number;
   allowed: number;
   adj: number;
@@ -839,6 +840,7 @@ export function ClaimDetailPanel({
       if (existing) {
         result.push({
           cpt: existing.cpt,
+          dos: existing.dos || c.date_of_service_from || c.date_of_service_to || "",
           charged: existing.charged !== undefined ? existing.charged : 0,
           allowed: existing.allowed !== undefined ? existing.allowed : 0,
           adj: existing.adj !== undefined ? existing.adj : 0,
@@ -877,6 +879,7 @@ export function ClaimDetailPanel({
 
         result.push({
           cpt: cptCode,
+          dos: c.date_of_service_from || c.date_of_service_to || "",
           charged: Number(charged.toFixed(2)),
           allowed: Number(allowed.toFixed(2)),
           adj: Number(adj.toFixed(2)),
@@ -973,7 +976,7 @@ export function ClaimDetailPanel({
       
       if (field === "codes") {
         line.codes = value;
-      } else if (field === "status" || field === "nextAction" || field === "secondaryPayerId") {
+      } else if (field === "status" || field === "nextAction" || field === "secondaryPayerId" || field === "dos" || field === "eftNumber" || field === "paymentDate") {
         line[field] = value;
       } else if (field === "notes") {
         line.notes = value;
@@ -1311,6 +1314,7 @@ export function ClaimDetailPanel({
     claim_status: isEnglish ? "Claim Status" : "Estado del Claim",
     claim_classification: isEnglish ? "Classification" : "Clasificación",
     claim_label: "Label",
+    dos: "DOS",
     billed_by: isEnglish ? "Billed by" : "Facturado por",
     payment_received_by: isEnglish ? "Payment received by" : "Pago recibido por",
     billed_charge: isEnglish ? "Billed Charge" : "Charge Facturado",
@@ -1388,6 +1392,9 @@ export function ClaimDetailPanel({
       }
     };
     const formatAuditValue = (field: string, value: any) => {
+      if (field === "dos") {
+        return value || "Claim DOS";
+      }
       if (field === "paid" || field === "secondaryPaid" || field === "allowed" || field === "patResp" || field === "balance") {
         return formatUSD(Number(value) || 0);
       }
@@ -1413,6 +1420,7 @@ export function ClaimDetailPanel({
 
       const watchedFields = [
         ["status", "status"],
+        ["dos", "DOS"],
         ["paid", "primary paid"],
         ["secondaryPaid", "secondary paid"],
         ["secondaryPayerId", "secondary payer"],
@@ -1751,10 +1759,11 @@ export function ClaimDetailPanel({
               </div>
 
               <div className="w-full overflow-x-auto rounded-lg border border-slate-200">
-                <table className="w-full min-w-[1680px] text-left border-collapse text-[10px] font-sans">
+                <table className="w-full min-w-[1800px] text-left border-collapse text-[10px] font-sans">
                   <thead>
                     <tr className="border-b border-slate-200 text-slate-600 font-bold bg-slate-50 text-[9px] uppercase tracking-wider select-none">
                       <th className="px-3 py-3 w-44">CPT Code</th>
+                      <th className="px-3 py-3 w-32">DOS</th>
                       <th className="px-3 py-3 w-36">Status</th>
                       <th className="px-3 py-3 w-24 text-right">Charged</th>
                       <th className="px-3 py-3 w-24 text-right">Allowed</th>
@@ -1781,6 +1790,17 @@ export function ClaimDetailPanel({
                             <td className="px-3 py-3">
                               <span className="font-mono font-bold text-dark-blue text-[12px] block">{line.cpt}</span>
                               <span className="text-[9px] text-slate-400 block max-w-[160px] truncate mt-0.5" title={desc}>{desc}</span>
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <input
+                                disabled={isReadOnly}
+                                type="date"
+                                value={line.dos || claim.date_of_service_from || ""}
+                                onChange={(e) => handleUpdateServiceLine(idx, "dos", e.target.value)}
+                                className="w-full border border-slate-200 rounded-lg py-1.5 px-2 font-mono text-[10px] bg-white focus:border-primary-blue disabled:opacity-50"
+                                aria-label={`${isEnglish ? "Date of service CPT" : "Fecha DOS CPT"} ${line.cpt}`}
+                                title={isEnglish ? "Date of service for this CPT line" : "Fecha de servicio para este CPT"}
+                              />
                             </td>
                             <td className="px-3 py-3">
                               <select
@@ -1939,7 +1959,7 @@ export function ClaimDetailPanel({
                           </tr>
                           {lineValidationErrors.length > 0 && (
                             <tr className="bg-amber-50/70">
-                              <td colSpan={11} className="px-4 py-2">
+                              <td colSpan={14} className="px-4 py-2">
                                 <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-semibold text-amber-800">
                                   <AlertOctagon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
                                   <div className="flex flex-wrap gap-x-4 gap-y-1">
@@ -2401,6 +2421,7 @@ export function ClaimDetailPanel({
                   <thead>
                     <tr className="border-b border-slate-200 text-slate-400 font-bold uppercase tracking-wider bg-slate-50 text-[9px]">
                       <th className="p-2">CPT Code</th>
+                      <th className="p-2 w-28">DOS</th>
                       <th className="p-2 w-28">Status</th>
                       <th className="p-2 text-right w-24">{isEnglish ? "Billed" : "Facturado (Billed)"}</th>
                       <th className="p-2 text-right w-24">Permitido (Allowed)</th>
@@ -2429,6 +2450,19 @@ export function ClaimDetailPanel({
                             <span className="text-[9px] text-slate-400 block max-w-[140px] truncate" title={desc}>
                               {desc}
                             </span>
+                          </td>
+                          <td className="p-2">
+                            {isReadOnly ? (
+                              <span className="font-mono text-slate-600 text-[10px]">{line.dos || claim.date_of_service_from || "—"}</span>
+                            ) : (
+                              <input
+                                type="date"
+                                value={line.dos || claim.date_of_service_from || ""}
+                                onChange={(e) => handleUpdateServiceLine(idx, "dos", e.target.value)}
+                                className="w-full border border-slate-200 rounded p-1 font-mono text-[10px] bg-white focus:border-primary-blue"
+                                title={isEnglish ? "Date of service for this CPT line" : "Fecha de servicio para este CPT"}
+                              />
+                            )}
                           </td>
                           <td className="p-2">
                             <select
@@ -2622,7 +2656,7 @@ export function ClaimDetailPanel({
                         </tr>
                         {lineValidationErrors.length > 0 && (
                           <tr className="bg-amber-50/70">
-                            <td colSpan={13} className="px-3 py-2">
+                            <td colSpan={14} className="px-3 py-2">
                               <div className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[10px] font-semibold text-amber-800">
                                 <AlertOctagon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
                                 <div className="flex flex-wrap gap-x-4 gap-y-1">

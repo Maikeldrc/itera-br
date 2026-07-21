@@ -119,6 +119,7 @@ interface ReportLine {
   cptCode: string;
   cptDescription: string;
   serviceType: string;
+  dos: string;
   units: number;
   billed: number;
   allowed: number;
@@ -235,7 +236,9 @@ export function expandClaimsToReportLines(
 
     return cpts.map(cptCode => {
       const serviceLine = parsedLines.find(line => line.cpt === cptCode);
-      const fee = feeScheduleFor(claim, cptCode, feeSchedules, reportFeeSchedules);
+      const lineDos = dateText(serviceLine?.dos) || dateText(claim.date_of_service_from);
+      const feeClaim = lineDos ? { ...claim, date_of_service_from: lineDos } : claim;
+      const fee = feeScheduleFor(feeClaim, cptCode, feeSchedules, reportFeeSchedules);
       const units = number(serviceLine?.units) || (count === 1 ? number(claim.units) || 1 : 1);
       const billed = serviceLine?.charged !== undefined
         ? number(serviceLine.charged)
@@ -258,6 +261,7 @@ export function expandClaimsToReportLines(
         cptCode,
         cptDescription: fee.description || `CPT ${cptCode}`,
         serviceType: serviceLine?.serviceType || claim.service_type,
+        dos: lineDos,
         units,
         billed,
         allowed,
@@ -275,7 +279,7 @@ export function expandClaimsToReportLines(
 
 function matchesFilters(line: ReportLine, filters: ReportFiltersState) {
   const claim = line.claim;
-  const serviceDate = dateText(claim.date_of_service_from);
+  const serviceDate = dateText(line.dos || claim.date_of_service_from);
   const submissionDate = dateText(claim.submission_date) || dateText(claim.created_at);
   const paymentDate = dateText(claim.payment_date);
   const search = filters.search.trim().toLowerCase();
@@ -291,7 +295,7 @@ function matchesFilters(line: ReportLine, filters: ReportFiltersState) {
   ].some(value => String(value || "").toLowerCase().includes(search))) return false;
   if (filters.startDate && serviceDate < filters.startDate) return false;
   if (filters.endDate && serviceDate > filters.endDate) return false;
-  if (filters.month && textValue(claim.month_of_service) !== filters.month) return false;
+  if (filters.month && (dateText(line.dos).slice(0, 7) || textValue(claim.month_of_service)) !== filters.month) return false;
   if (filters.practiceId && textValue(claim.practice_id) !== filters.practiceId) return false;
   if (filters.providerId && textValue(claim.provider_id) !== filters.providerId) return false;
   if (filters.serviceType && textValue(line.serviceType) !== filters.serviceType) return false;
@@ -489,8 +493,8 @@ export function buildSettlementMatrix(claims: Claim[], filters: ReportFiltersSta
 function groupValue(line: ReportLine, groupBy: ReportGroupBy) {
   const claim = line.claim;
   const values: Record<ReportGroupBy, string> = {
-    month: textValue(claim.month_of_service),
-    date: dateText(claim.date_of_service_from),
+    month: dateText(line.dos).slice(0, 7) || textValue(claim.month_of_service),
+    date: dateText(line.dos || claim.date_of_service_from),
     practice: textValue(claim.practice_name),
     provider: textValue(claim.provider_name),
     serviceType: textValue(line.serviceType),
@@ -583,7 +587,7 @@ export function aggregateReports(
       deniedClaimIds: deniedClaims.map(claim => claim.claim_id),
       billablePatientIds: coverageStats.billablePatientIds,
       coverageEntries: coverageStats.coverageEntries,
-      date: filters.groupBy.includes("month") ? textValue(first.claim.month_of_service) : dateText(first.claim.date_of_service_from),
+      date: filters.groupBy.includes("month") ? (dateText(first.dos).slice(0, 7) || textValue(first.claim.month_of_service)) : dateText(first.dos || first.claim.date_of_service_from),
       practice: filters.groupBy.includes("practice") ? textValue(first.claim.practice_name) : "All practices",
       provider: filters.groupBy.includes("provider") ? textValue(first.claim.provider_name) : "All providers",
       serviceType: filters.groupBy.includes("serviceType") ? textValue(first.serviceType) : "All services",

@@ -3,6 +3,7 @@ import { Claim, FeeSchedule } from "./types";
 export type CptRepeatLine = {
   cpt?: string;
   units?: number;
+  dos?: string;
 };
 
 const DEFAULT_MAX_PER_DOS = 1;
@@ -29,22 +30,25 @@ export function getCptMaxPerDos(cpt: string, feeSchedules: FeeSchedule[], dos?: 
 
 export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedules: FeeSchedule[], dos?: string) {
   const counts = new Map<string, number>();
+  const lineDos = (line: CptRepeatLine) => normalizeDos(line.dos || dos);
   lines.forEach(line => {
     const cpt = normalizedCpt(line.cpt);
     if (!cpt) return;
-    counts.set(cpt, (counts.get(cpt) || 0) + lineUnitCount(line));
+    const key = `${cpt}|${lineDos(line)}`;
+    counts.set(key, (counts.get(key) || 0) + lineUnitCount(line));
   });
 
   const errors: Record<number, string[]> = {};
   lines.forEach((line, index) => {
     const cpt = normalizedCpt(line.cpt);
     if (!cpt) return;
-    const count = counts.get(cpt) || 0;
-    const max = getCptMaxPerDos(cpt, feeSchedules, dos);
+    const dosForLine = lineDos(line);
+    const count = counts.get(`${cpt}|${dosForLine}`) || 0;
+    const max = getCptMaxPerDos(cpt, feeSchedules, dosForLine || dos);
     if (count > max) {
       errors[index] = [
         ...(errors[index] || []),
-        `CPT ${cpt} can be used ${max} ${max === 1 ? "time" : "times"} per DOS. Current DOS has ${count}.`
+        `CPT ${cpt} can be used ${max} ${max === 1 ? "time" : "times"} per DOS. DOS ${dosForLine || dos || "blank"} has ${count}.`
       ];
     }
   });
@@ -70,6 +74,7 @@ export function extractClaimCptRepeatLines(claim: Partial<Claim>): CptRepeatLine
         return parsed
           .map(line => ({
             cpt: normalizedCpt(line?.cpt),
+            dos: normalizeDos(line?.dos || claim.date_of_service_from),
             units: lineUnitCount({ units: line?.units })
           }))
           .filter(line => line.cpt);
@@ -81,7 +86,7 @@ export function extractClaimCptRepeatLines(claim: Partial<Claim>): CptRepeatLine
 
   return String(claim.cpt_hcpcs || "")
     .split(/[\s,]+/)
-    .map(cpt => ({ cpt: normalizedCpt(cpt) }))
+    .map(cpt => ({ cpt: normalizedCpt(cpt), dos: normalizeDos(claim.date_of_service_from) }))
     .filter(line => line.cpt);
 }
 
@@ -104,8 +109,8 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
   currentClaimId?: string
 ) {
   const patientId = normalizedCpt(claim.patient_id);
-  const dos = normalizeDos(claim.date_of_service_from);
-  if (!patientId || !dos) return [];
+  const claimDos = normalizeDos(claim.date_of_service_from);
+  if (!patientId || !claimDos) return [];
 
   const candidateLines = extractClaimCptRepeatLines(claim);
   if (candidateLines.length === 0) return [];
@@ -114,22 +119,29 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
   const addLine = (line: CptRepeatLine) => {
     const cpt = normalizedCpt(line.cpt);
     if (!cpt) return;
-    counts.set(cpt, (counts.get(cpt) || 0) + lineUnitCount(line));
+    const dos = normalizeDos(line.dos || claimDos);
+    if (!dos) return;
+    const key = `${cpt}|${dos}`;
+    counts.set(key, (counts.get(key) || 0) + lineUnitCount(line));
   };
 
   existingClaims
     .filter(existing => !existing.deleted_flag)
     .filter(existing => !currentClaimId || normalizedCpt(existing.claim_id) !== normalizedCpt(currentClaimId))
     .filter(existing => normalizedCpt(existing.patient_id) === patientId)
-    .filter(existing => normalizeDos(existing.date_of_service_from) === dos)
     .flatMap(existing => extractClaimCptRepeatLines(existing))
     .forEach(addLine);
 
   candidateLines.forEach(addLine);
 
-  const uniqueCandidateCpts = Array.from(new Set(candidateLines.map(line => normalizedCpt(line.cpt)).filter(Boolean)));
-  return uniqueCandidateCpts.flatMap(cpt => {
-    const totalCount = counts.get(cpt) || 0;
+  const uniqueCandidateKeys = Array.from(new Set(candidateLines.map(line => {
+    const cpt = normalizedCpt(line.cpt);
+    const dos = normalizeDos(line.dos || claimDos);
+    return cpt && dos ? `${cpt}|${dos}` : "";
+  }).filter(Boolean)));
+  return uniqueCandidateKeys.flatMap(key => {
+    const [cpt, dos] = key.split("|");
+    const totalCount = counts.get(key) || 0;
     const max = getCptMaxPerDos(cpt, feeSchedules, dos);
     if (totalCount <= max) return [];
     return [

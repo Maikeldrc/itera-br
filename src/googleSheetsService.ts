@@ -1694,6 +1694,7 @@ function normalizeAuditComparableValue(field: keyof Claim, value: unknown) {
     if (!Array.isArray(lines)) return "";
     return JSON.stringify(lines.map(line => ({
       cpt: String(line?.cpt ?? ""),
+      dos: String(line?.dos ?? ""),
       charged: Number(line?.charged || 0),
       allowed: Number(line?.allowed || 0),
       adj: Number(line?.adj || 0),
@@ -1830,6 +1831,7 @@ export function getClaimDifferences(prev: Claim, curr: Claim): { field: string, 
 
               ([
                 ["status", "status"],
+                ["dos", "DOS"],
                 ["paid", "primary paid"],
                 ["secondaryPaid", "secondary paid"],
                 ["secondaryPayerId", "secondary payer"],

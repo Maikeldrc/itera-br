@@ -823,7 +823,7 @@ export default function App() {
       {
         patient_id: newPatientId.trim(),
         date_of_service_from: newDos,
-        service_lines_json: JSON.stringify(normalizedLines.map(line => ({ cpt: line.cpt, units: 1 })))
+        service_lines_json: JSON.stringify(normalizedLines.map(line => ({ cpt: line.cpt, dos: newDos, units: 1 })))
       },
       feeSchedules,
       claims,
@@ -878,6 +878,7 @@ export default function App() {
       return {
         ...(existingLine || {}),
         cpt: line.cpt,
+        dos: existingLine?.dos || newDos,
         serviceType: line.serviceType,
         charged: line.charge,
         allowed,

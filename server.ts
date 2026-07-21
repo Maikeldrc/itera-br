@@ -289,6 +289,7 @@ function parseServiceLines(claim: Partial<Claim>) {
   const cpts = textValue(claim.cpt_hcpcs).split(/[,;/]+/).map(item => item.trim()).filter(Boolean);
   return cpts.map(cpt => ({
     cpt,
+    dos: textValue(claim.date_of_service_from).slice(0, 10),
     units: 1,
     charged: cpts.length ? Number(claim.billed_charge || 0) / cpts.length : Number(claim.billed_charge || 0),
     allowed: cpts.length ? Number(claim.allowed_amount || claim.billed_charge || 0) / cpts.length : Number(claim.allowed_amount || claim.billed_charge || 0),
@@ -306,6 +307,30 @@ function parseServiceLines(claim: Partial<Claim>) {
 
 function linePaymentTotal(line: any) {
   return Number(line?.paid || 0) + Number(line?.secondaryPaid || 0);
+}
+
+function serviceLineDos(line: any, claim: Partial<Claim>) {
+  return textValue(line?.dos || claim.date_of_service_from || claim.date_of_service_to).slice(0, 10);
+}
+
+function serviceLineMatchesDos(line: any, claim: Partial<Claim>, serviceDate: string) {
+  if (!serviceDate) return true;
+  const lineDos = serviceLineDos(line, claim);
+  const claimDosFrom = textValue(claim.date_of_service_from).slice(0, 10);
+  const claimDosTo = textValue(claim.date_of_service_to).slice(0, 10);
+  if (lineDos && lineDos !== claimDosFrom && lineDos !== claimDosTo) {
+    return lineDos === serviceDate;
+  }
+  const claimMonth = textValue(claim.month_of_service).slice(0, 7);
+  const rowMonth = serviceDate.slice(0, 7);
+  return Boolean(
+    lineDos === serviceDate ||
+    (!lineDos && (
+      claimDosFrom === serviceDate ||
+      claimDosTo === serviceDate
+    )) ||
+    (claimMonth && rowMonth && claimMonth === rowMonth)
+  );
 }
 
 const PAYMENT_IMPORT_FIELD_LABELS = {
@@ -1968,6 +1993,7 @@ async function startServer() {
             const charged = Number((rate * units).toFixed(2));
             return {
               cpt: code,
+              dos: serviceFrom,
               units,
               charged,
               allowed: charged,
@@ -2362,7 +2388,7 @@ async function startServer() {
 
         let candidates = claims.filter(claim => {
           const serviceLines = parseServiceLines(claim);
-          const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode);
+          const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode && serviceLineMatchesDos(line, claim, row.serviceDate));
           if (!hasCpt) return false;
 
           if (claimNo) {
@@ -2375,7 +2401,7 @@ async function startServer() {
         if (claimNo && candidates.length === 0) {
           candidates = claims.filter(claim => {
             const serviceLines = parseServiceLines(claim);
-            const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode);
+            const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode && serviceLineMatchesDos(line, claim, row.serviceDate));
             return hasCpt && matchesOperationalKeys(claim);
           });
           if (candidates.length > 0) {
@@ -2398,7 +2424,7 @@ async function startServer() {
         const sameCptLineIndexes = claim
           ? serviceLines
               .map((line, index) => ({ line, index }))
-              .filter(item => textValue(item.line?.cpt) === cptCode)
+              .filter(item => textValue(item.line?.cpt) === cptCode && serviceLineMatchesDos(item.line, claim, row.serviceDate))
               .map(item => item.index)
           : [];
         const unpaidLineIndex = sameCptLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
@@ -2508,7 +2534,7 @@ async function startServer() {
           for (const row of claimRows) {
             const sameCptIndexes = serviceLines
               .map((line, index) => ({ line, index }))
-              .filter(item => textValue(item.line?.cpt) === textValue(row.cptCode))
+              .filter(item => textValue(item.line?.cpt) === textValue(row.cptCode) && serviceLineMatchesDos(item.line, claim, row.serviceDate))
               .map(item => item.index);
             const targetIndex = sameCptIndexes.find(index =>
               !lineAllocations.has(index) && linePaymentTotal(serviceLines[index]) <= 0
@@ -2547,6 +2573,7 @@ async function startServer() {
               paid,
               balance,
               paymentDate: paymentDate || line?.paymentDate || "",
+              dos: line?.dos || matchingRows.map(row => row.serviceDate).filter(Boolean).sort().pop() || claim.date_of_service_from || "",
               eftNumber: checkNo || line?.eftNumber || "",
               status: balance <= 0 ? "Paid" : "Partially Paid",
               nextAction: balance <= 0 ? "No action" : (line?.nextAction || "Monitor payment"),

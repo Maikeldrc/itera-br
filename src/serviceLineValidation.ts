@@ -2,6 +2,7 @@ import { Claim, ClaimStatus } from "./types";
 
 export interface ServiceLineLike {
   cpt?: string;
+  dos?: string;
   charged?: number;
   allowed?: number;
   adj?: number;
@@ -37,6 +38,13 @@ function isMoney(value: unknown) {
     return true;
   }
   return Number.isFinite(Number(value));
+}
+
+function isIsoDate(value: unknown) {
+  const text = String(value ?? "").trim();
+  if (!text) return true;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false;
+  return !Number.isNaN(new Date(`${text}T00:00:00`).getTime());
 }
 
 function closeEnough(left: number, right: number) {
@@ -78,6 +86,9 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
 
     if (!line.cpt || line.cpt.trim() === "") {
       addLineError(index, "CPT code is required.");
+    }
+    if (!isIsoDate(line.dos)) {
+      addLineError(index, "DOS must be a valid YYYY-MM-DD date.");
     }
 
     ([
