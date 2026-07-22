@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, RefreshCw, Save, SlidersHorizontal, Upload, XCircle } from "lucide-react";
 import { apiFetch } from "../apiClient";
 import { useFeedback } from "./FeedbackProvider";
@@ -164,6 +164,16 @@ function money(value: number) {
 
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
 
+const SCHEMA_ANALYSIS_TIMEOUT_MS = 45_000;
+const TEMPLATE_SAVE_TIMEOUT_MS = 45_000;
+const PAYMENT_ANALYSIS_TIMEOUT_MS = 180_000;
+const PAYMENT_IMPORT_TIMEOUT_MS = 180_000;
+const REQUEST_ABORTED_MESSAGE = "__itera_request_aborted__";
+
+function requestTimeoutError(message: string) {
+  return new Error(message);
+}
+
 function statusBadge(status: PaymentImportRow["status"], isEnglish: boolean) {
   const labels = {
     ready: isEnglish ? "Ready" : "Lista",
@@ -185,6 +195,9 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const { language } = useLanguage();
   const isEnglish = language === "en";
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const schemaRequestRef = useRef<AbortController | null>(null);
+  const templateRequestRef = useRef<AbortController | null>(null);
+  const processRequestRef = useRef<AbortController | null>(null);
   const [fileName, setFileName] = useState("");
   const [payload, setPayload] = useState<ImportPayload | null>(null);
   const [schema, setSchema] = useState<PaymentImportSchema | null>(null);
@@ -200,7 +213,48 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
   const [result, setResult] = useState<PaymentImportResult | null>(null);
 
+  const abortRequests = () => {
+    schemaRequestRef.current?.abort();
+    templateRequestRef.current?.abort();
+    processRequestRef.current?.abort();
+    schemaRequestRef.current = null;
+    templateRequestRef.current = null;
+    processRequestRef.current = null;
+  };
+
+  useEffect(() => () => abortRequests(), []);
+
+  const fetchWithTimeout = async (
+    input: RequestInfo | URL,
+    init: RequestInit,
+    timeoutMs: number,
+    timeoutMessage: string,
+    requestRef: React.MutableRefObject<AbortController | null>
+  ) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
+    try {
+      return await apiFetch(input, { ...init, signal: controller.signal });
+    } catch (err: any) {
+      if (controller.signal.aborted) {
+        if (timedOut) throw requestTimeoutError(timeoutMessage);
+        throw requestTimeoutError(REQUEST_ABORTED_MESSAGE);
+      }
+      throw err;
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (requestRef.current === controller) requestRef.current = null;
+    }
+  };
+
   const reset = () => {
+    abortRequests();
     setFileName("");
     setPayload(null);
     setSchema(null);
@@ -229,11 +283,19 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     setMapping({});
     setSelectedTemplateId("");
     try {
-      const response = await apiFetch("/api/payment-reconciliation-import/analyze-schema", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nextPayload)
-      });
+      const response = await fetchWithTimeout(
+        "/api/payment-reconciliation-import/analyze-schema",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(nextPayload)
+        },
+        SCHEMA_ANALYSIS_TIMEOUT_MS,
+        isEnglish
+          ? "Column analysis is taking too long. Try again, or reduce the workbook to the payment sheet before importing."
+          : "El análisis de columnas está tardando demasiado. Intente nuevamente o deje solo la hoja de pagos antes de importar.",
+        schemaRequestRef
+      );
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not analyze payment file columns.");
       setSchema(data);
@@ -252,6 +314,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
         );
       }
     } catch (err: any) {
+      if (err.message === REQUEST_ABORTED_MESSAGE) return;
       notify(`${isEnglish ? "Column analysis error" : "Error analizando columnas"}: ${err.message}`, "error");
     } finally {
       setIsSchemaLoading(false);
@@ -285,16 +348,24 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     if (!schema || !mappingIssues.valid) return;
     setIsSavingTemplate(true);
     try {
-      const response = await apiFetch("/api/payment-reconciliation-import/templates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          templateName: templateName || `${fileName || "Payment report"} mapping`,
-          systemName,
-          headersSignature: schema.headersSignature,
-          mapping
-        })
-      });
+      const response = await fetchWithTimeout(
+        "/api/payment-reconciliation-import/templates",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            templateName: templateName || `${fileName || "Payment report"} mapping`,
+            systemName,
+            headersSignature: schema.headersSignature,
+            mapping
+          })
+        },
+        TEMPLATE_SAVE_TIMEOUT_MS,
+        isEnglish
+          ? "Template save is taking too long. Please try again."
+          : "Guardar la plantilla está tardando demasiado. Intente nuevamente.",
+        templateRequestRef
+      );
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Could not save mapping template.");
       const savedTemplate = data.template ? {
@@ -318,6 +389,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
       }
       notify(isEnglish ? "Payment import mapping template saved." : "Plantilla de mapeo guardada.", "success");
     } catch (err: any) {
+      if (err.message === REQUEST_ABORTED_MESSAGE) return;
       notify(`${isEnglish ? "Template save error" : "Error guardando plantilla"}: ${err.message}`, "error");
     } finally {
       setIsSavingTemplate(false);
@@ -369,11 +441,23 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     try {
       await wait(150);
       setStep(1, apply ? 24 : 36);
-      const response = await apiFetch("/api/payment-reconciliation-import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, apply, mapping: schema ? mapping : undefined })
-      });
+      const response = await fetchWithTimeout(
+        "/api/payment-reconciliation-import",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, apply, mapping: schema ? mapping : undefined })
+        },
+        apply ? PAYMENT_IMPORT_TIMEOUT_MS : PAYMENT_ANALYSIS_TIMEOUT_MS,
+        apply
+          ? (isEnglish
+            ? "Payment import is taking too long. No confirmation was received; refresh before retrying to avoid duplicate work."
+            : "La importación de pagos está tardando demasiado. No se recibió confirmación; refresque antes de reintentar para evitar duplicados.")
+          : (isEnglish
+            ? "Payment analysis is taking too long. Try again with a smaller file or saved mapping template."
+            : "El análisis de pagos está tardando demasiado. Intente nuevamente con un archivo más pequeño o una plantilla guardada."),
+        processRequestRef
+      );
       setStep(apply ? 2 : 2, apply ? 52 : 70);
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Payment import failed.");
@@ -404,6 +488,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
       }
       await wait(500);
     } catch (err: any) {
+      if (err.message === REQUEST_ABORTED_MESSAGE) return;
       setProgress(current => current ? {
         ...current,
         percent: 100,
