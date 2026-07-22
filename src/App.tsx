@@ -353,7 +353,7 @@ export default function App() {
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
 
   // Fee Schedule management UI states
-  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "operations" | "import-templates" | "backups" | "data-cleanup">("language");
+  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "operations" | "import-templates" | "backups" | "data-cleanup" | "audit-log">("language");
   const [backupConfig, setBackupConfig] = useState<BackupConfig | null>(null);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [operationsData, setOperationsData] = useState<any | null>(null);
@@ -2670,6 +2670,122 @@ export default function App() {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val);
   };
 
+  const renderAuditValue = (value: string, tone: "previous" | "new" | "neutral" = "neutral") => {
+    const text = toText(value);
+    const toneClass = tone === "previous"
+      ? "border-slate-200 bg-slate-50 text-slate-500 line-through"
+      : tone === "new"
+        ? "border-emerald-100 bg-emerald-50/60 text-slate-900"
+        : "border-slate-200 bg-white text-slate-600";
+    return (
+      <div
+        className={`max-h-24 min-w-0 overflow-auto rounded-lg border px-2.5 py-2 font-mono text-[10px] leading-relaxed break-words ${toneClass}`}
+        title={text || "-"}
+      >
+        {text || "-"}
+      </div>
+    );
+  };
+
+  const renderAuditLogSection = (settingsMode = false) => (
+    <div className="space-y-6">
+      {!settingsMode && (
+        <div>
+          <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
+            {isEnglish ? "HIPAA Security Audit Log" : "Log de Auditoría de Seguridad HIPAA"}
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            {isEnglish ? "Immutable access and claim modification log required for medical data compliance" : "Bitácora inalterable de acceso y modificaciones de claims requerida para el cumplimiento normativo de datos médicos"}
+          </p>
+        </div>
+      )}
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+        <div className="p-5 border-b border-slate-100 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Recorded Security Events" : "Registros de Seguridad Registrados"}</h4>
+            <p className="mt-0.5 text-[10px] text-slate-500">
+              {isEnglish ? "Long values are contained inside each cell. Hover for full text or scroll inside the cell." : "Los valores largos quedan contenidos dentro de cada celda. Pase el mouse o haga scroll dentro de la celda."}
+            </p>
+          </div>
+          <span className="shrink-0 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-500 font-mono">{auditLogs.length} {isEnglish ? "saved actions" : "acciones guardadas"}</span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1420px] table-fixed text-left text-xs border-collapse">
+            <colgroup>
+              <col className="w-[145px]" />
+              <col className="w-[150px]" />
+              <col className="w-[210px]" />
+              <col className="w-[170px]" />
+              <col className="w-[110px]" />
+              <col className="w-[180px]" />
+              <col className="w-[260px]" />
+              <col className="w-[260px]" />
+              <col className="w-[280px]" />
+            </colgroup>
+            <thead>
+              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
+                <th className="px-4 py-3">Log ID</th>
+                <th className="px-4 py-3">{isEnglish ? "Date / Time" : "Fecha / Hora"}</th>
+                <th className="px-4 py-3">{isEnglish ? "Audit User" : "Usuario Auditor"}</th>
+                <th className="px-4 py-3">Claim ID</th>
+                <th className="px-4 py-3">{isEnglish ? "Action" : "Acción"}</th>
+                <th className="px-4 py-3">{isEnglish ? "Changed Field" : "Campo Alterado"}</th>
+                <th className="px-4 py-3">{isEnglish ? "Previous Value" : "Valor Previo"}</th>
+                <th className="px-4 py-3">{isEnglish ? "New Value" : "Valor Nuevo"}</th>
+                <th className="px-4 py-3">{isEnglish ? "Reason / Justification" : "Motivo / Justificación"}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
+              {auditLogs.map((log) => (
+                <tr key={log.audit_id} className="align-top hover:bg-slate-50/70">
+                  <td className="px-4 py-4">
+                    <span className="block break-all font-mono text-[10px] font-bold leading-relaxed text-slate-400">{log.audit_id}</span>
+                  </td>
+                  <td className="px-4 py-4 font-mono text-[11px] leading-relaxed text-slate-500">{new Date(log.changed_at).toLocaleString(isEnglish ? "en-US" : "es-ES")}</td>
+                  <td className="px-4 py-4">
+                    <span className="block truncate font-bold text-slate-800" title={log.changed_by}>{log.changed_by}</span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className="block break-all font-mono text-[11px] font-bold text-primary-blue">{log.claim_id || "-"}</span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-[10px] font-bold ${
+                      log.action_type === "Lock" ? "bg-red-100 text-red-800" :
+                      log.action_type === "Unlock" ? "bg-emerald-100 text-emerald-800" :
+                      log.action_type === "Create" ? "bg-blue-100 text-blue-800" :
+                      log.action_type === "Delete" ? "bg-rose-100 text-rose-800" :
+                      "bg-slate-100 text-slate-700"
+                    }`}>
+                      {log.action_type}
+                    </span>
+                  </td>
+                  <td className="px-4 py-4">
+                    <span className="block break-words font-mono text-[11px] font-semibold text-slate-700">{log.field_name || "-"}</span>
+                  </td>
+                  <td className="px-4 py-4">{renderAuditValue(log.previous_value, "previous")}</td>
+                  <td className="px-4 py-4">{renderAuditValue(log.new_value, "new")}</td>
+                  <td className="px-4 py-4">
+                    <div className="max-h-24 overflow-auto rounded-lg border border-amber-100 bg-amber-50/40 px-2.5 py-2 text-[11px] leading-relaxed text-slate-700 break-words" title={log.reason || "-"}>
+                      {log.reason || "-"}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {auditLogs.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-10 text-center text-xs font-semibold text-slate-400">
+                    {isEnglish ? "No audit log records found." : "No hay registros de auditoría."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+
   // Export claims helper
   const handleExportClaimsCSV = () => {
     if (filteredClaims.length === 0) {
@@ -4132,64 +4248,7 @@ export default function App() {
 
           {/* VIEW: AUDIT LOG VIEW MODULE */}
           {currentView === "audit-log" && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-                  {isEnglish ? "HIPAA Security Audit Log" : "Log de Auditoría de Seguridad HIPAA"}
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  {isEnglish ? "Immutable access and claim modification log required for medical data compliance" : "Bitácora inalterable de acceso y modificaciones de claims requerida para el cumplimiento normativo de datos médicos"}
-                </p>
-              </div>
-
-              {/* Audit history */}
-              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                <div className="p-5 border-b border-slate-100 flex justify-between items-center">
-                  <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Recorded Security Events" : "Registros de Seguridad Registrados"}</h4>
-                  <span className="text-xs text-slate-400 font-mono">{auditLogs.length} {isEnglish ? "saved actions" : "acciones guardadas"}</span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">ID Log</th>
-                        <th className="p-3.5">{isEnglish ? "Date and Time" : "Fecha y Hora"}</th>
-                        <th className="p-3.5">{isEnglish ? "Audit User" : "Usuario Auditor"}</th>
-                        <th className="p-3.5">ID Claim</th>
-                        <th className="p-3.5 font-mono">{isEnglish ? "Action Type" : "Tipo Acción"}</th>
-                        <th className="p-3.5">{isEnglish ? "Changed Field" : "Campo Alterado"}</th>
-                        <th className="p-3.5">{isEnglish ? "Previous Value" : "Valor Previo"}</th>
-                        <th className="p-3.5">{isEnglish ? "New Value" : "Valor Nuevo"}</th>
-                        <th className="p-3.5">{isEnglish ? "Reason / Justification" : "Motivo / Justificación"}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
-                      {auditLogs.map((log) => (
-                        <tr key={log.audit_id} className="hover:bg-slate-50">
-                          <td className="p-3.5 font-mono font-bold text-slate-400">{log.audit_id}</td>
-                          <td className="p-3.5 font-mono text-slate-500">{new Date(log.changed_at).toLocaleString()}</td>
-                          <td className="p-3.5 font-bold text-slate-800">{log.changed_by}</td>
-                          <td className="p-3.5 font-bold text-primary-blue font-mono">{log.claim_id}</td>
-                          <td className="p-3.5 font-mono">
-                            <span className={`whitespace-nowrap px-2 py-0.5 rounded text-[10px] font-bold ${
-                              log.action_type === "Lock" ? "bg-red-100 text-red-800" :
-                              log.action_type === "Unlock" ? "bg-emerald-100 text-emerald-800" :
-                              log.action_type === "Create" ? "bg-blue-100 text-blue-800" : "bg-slate-100 text-slate-700"
-                            }`}>
-                              {log.action_type}
-                            </span>
-                          </td>
-                          <td className="p-3.5 font-mono font-semibold text-slate-600">{log.field_name}</td>
-                          <td className="p-3.5 font-mono text-slate-400 line-through max-w-xs truncate" title={log.previous_value}>{log.previous_value || "-"}</td>
-                          <td className="p-3.5 font-mono text-slate-800 font-semibold max-w-xs truncate" title={log.new_value}>{log.new_value}</td>
-                          <td className="p-3.5 text-slate-500 max-w-sm truncate" title={log.reason}>{log.reason}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+            renderAuditLogSection()
           )}
 
           {/* VIEW: REPORTS MODULE */}
@@ -4310,6 +4369,19 @@ export default function App() {
                   >
                     <Upload className="w-4 h-4" />
                     <span>{isEnglish ? "Import Templates" : "Templates de Import"}</span>
+                  </button>
+                )}
+                {currentUser.role === UserRole.Admin && (
+                  <button
+                    onClick={() => setSettingsTab("audit-log")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+                      settingsTab === "audit-log"
+                        ? "border-primary-blue text-primary-blue bg-blue-50/40 rounded-t-lg"
+                        : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg"
+                    }`}
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>{isEnglish ? "Audit Log (HIPAA)" : "Log Auditoría (HIPAA)"}</span>
                   </button>
                 )}
                 {currentUser.role === UserRole.Admin && (
@@ -4829,6 +4901,25 @@ export default function App() {
                       </table>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {settingsTab === "audit-log" && currentUser.role === UserRole.Admin && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-4">
+                    <div className="flex items-start gap-3">
+                      <ShieldAlert className="mt-0.5 h-5 w-5 text-primary-blue" />
+                      <div>
+                        <h3 className="text-sm font-bold text-slate-900">{isEnglish ? "Audit Log (HIPAA)" : "Log Auditoría (HIPAA)"}</h3>
+                        <p className="mt-1 text-xs text-slate-600">
+                          {isEnglish
+                            ? "Security and claim-change audit trail available from System Settings for admin review."
+                            : "Trazabilidad de seguridad y cambios de claims disponible desde System Settings para revisión administrativa."}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  {renderAuditLogSection(true)}
                 </div>
               )}
 
