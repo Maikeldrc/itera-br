@@ -2741,14 +2741,14 @@ async function startServer() {
           existingPaymentId: existingPayment?.payment_id || "",
           existingPaymentClaimId: existingPayment?.claim_id || "",
           lineIndex,
-          status: errors.length > 0 ? "rejected" : (hasExistingPayment || (payerMismatch && !payerAssociationAccepted) ? "needs_review" : "ready"),
+          status: errors.length > 0 ? "rejected" : (hasExistingPayment ? "payment_activity" : ((payerMismatch && !payerAssociationAccepted) ? "needs_review" : "ready")),
           errors,
           warnings
         };
       });
 
       const readyRows = analyzedRows.filter(row => row.status === "ready");
-      const reviewRows = analyzedRows.filter(row => row.status === "needs_review");
+      const paymentActivityRows = analyzedRows.filter(row => row.status === "payment_activity");
       const rejectedRows = analyzedRows.filter(row => row.status === "rejected");
       const importedPayments: Payment[] = [];
       const updatedClaims: Claim[] = [];
@@ -2943,6 +2943,7 @@ async function startServer() {
         readyToImport: readyRows.length,
         importedRows: apply ? resultRows.filter(row => row.status === "imported").length : 0,
         needsReviewRows: resultRows.filter(row => row.status === "needs_review").length,
+        paymentActivityRows: paymentActivityRows.length,
         rejectedRows: resultRows.filter(row => row.status === "rejected").length,
         matchedClaims: new Set(resultRows.map(row => row.claimId).filter(Boolean)).size,
         matchedCptCodes: new Set(resultRows.map(row => row.cptCode).filter(Boolean)).size,
@@ -2958,7 +2959,7 @@ async function startServer() {
         total_rows: summary.totalRowsRead,
         imported_rows: summary.importedRows,
         rejected_rows: summary.rejectedRows,
-        review_rows: summary.needsReviewRows,
+        review_rows: summary.needsReviewRows + summary.paymentActivityRows,
         total_amount: summary.totalPaymentInFile,
         summary_json: JSON.stringify(summary),
         status: apply ? "Applied" : "Analyzed"
@@ -2979,7 +2980,7 @@ async function startServer() {
         metadata_json: JSON.stringify({ fileName: textValue(fileName), summary })
       });
       if (apply) {
-        const reviewCandidates = resultRows.filter(row => row.status === "needs_review" || row.status === "rejected");
+        const reviewCandidates = resultRows.filter(row => row.status === "needs_review" || row.status === "payment_activity" || row.status === "rejected");
         for (const row of reviewCandidates.slice(0, 100)) {
           await sheetsService.createReviewTask({
             source: "Payment Import",
@@ -2995,7 +2996,7 @@ async function startServer() {
       }
 
       res.json({
-        success: summary.rejectedRows === 0 && summary.needsReviewRows === 0,
+        success: summary.rejectedRows === 0 && summary.needsReviewRows === 0 && summary.paymentActivityRows === 0,
         applied: Boolean(apply),
         importedCount: resultRows.filter(row => row.status === "imported").length,
         updatedClaims: updatedClaims.length,

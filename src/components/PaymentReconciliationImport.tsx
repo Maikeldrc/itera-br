@@ -39,6 +39,7 @@ type PaymentImportSummary = {
   readyToImport: number;
   importedRows: number;
   needsReviewRows: number;
+  paymentActivityRows?: number;
   rejectedRows: number;
   matchedClaims: number;
   matchedCptCodes: number;
@@ -48,7 +49,7 @@ type PaymentImportSummary = {
 
 type PaymentImportRow = {
   rowNumber: number;
-  status: "ready" | "imported" | "needs_review" | "rejected";
+  status: "ready" | "imported" | "needs_review" | "payment_activity" | "rejected";
   claimId: string;
   patientId: string;
   patientName: string;
@@ -188,12 +189,14 @@ function statusBadge(status: PaymentImportRow["status"], isEnglish: boolean) {
     ready: isEnglish ? "Ready" : "Lista",
     imported: isEnglish ? "Imported" : "Importada",
     needs_review: isEnglish ? "Needs Review" : "Requiere revisión",
+    payment_activity: isEnglish ? "Payment Activity" : "Actividad de pago",
     rejected: isEnglish ? "Rejected" : "Rechazada"
   };
   const classes = {
     ready: "border-blue-100 bg-blue-50 text-blue-700",
     imported: "border-emerald-100 bg-emerald-50 text-emerald-700",
     needs_review: "border-amber-100 bg-amber-50 text-amber-700",
+    payment_activity: "border-emerald-200 bg-emerald-50 text-emerald-800",
     rejected: "border-rose-100 bg-rose-50 text-rose-700"
   };
   return <span className={`rounded-md border px-2 py-1 text-[10px] font-bold ${classes[status]}`}>{labels[status]}</span>;
@@ -500,8 +503,8 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
         });
         notify(
           isEnglish
-            ? `Imported ${data.importedCount} payment row(s). ${data.summary.needsReviewRows} require review.`
-            : `Importadas ${data.importedCount} fila(s) de pago. ${data.summary.needsReviewRows} requieren revisión.`,
+            ? `Imported ${data.importedCount} payment row(s). ${(data.summary.needsReviewRows || 0) + (data.summary.paymentActivityRows || 0)} require review.`
+            : `Importadas ${data.importedCount} fila(s) de pago. ${(data.summary.needsReviewRows || 0) + (data.summary.paymentActivityRows || 0)} requieren revisión.`,
           data.importedCount > 0 ? "success" : "warning"
         );
       } else {
@@ -566,6 +569,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
             ...current.summary,
             readyToImport: rows.filter(item => item.status === "ready").length,
             needsReviewRows: rows.filter(item => item.status === "needs_review").length,
+            paymentActivityRows: rows.filter(item => item.status === "payment_activity").length,
             rejectedRows: rows.filter(item => item.status === "rejected").length
           },
           rows
@@ -625,6 +629,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
           ...current.summary,
           readyToImport: rows.filter(item => item.status === "ready").length,
           needsReviewRows: rows.filter(item => item.status === "needs_review").length,
+          paymentActivityRows: rows.filter(item => item.status === "payment_activity").length,
           rejectedRows: rows.filter(item => item.status === "rejected").length
         },
         rows
@@ -646,6 +651,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     if (resultIssueFilter === "errors" && row.errors.length === 0) return false;
     if (resultIssueFilter === "warnings" && row.warnings.length === 0) return false;
     if (resultIssueFilter === "payer_mismatch" && !row.payerMismatch) return false;
+    if (resultIssueFilter === "payment_activity" && row.status !== "payment_activity") return false;
     if (resultIssueFilter === "safe_match" && (row.errors.length > 0 || row.warnings.length > 0)) return false;
     if (!normalizedResultSearch) return true;
     return [
@@ -681,6 +687,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     { key: "ready", label: isEnglish ? "Ready" : "Listas", value: summary.readyToImport, status: "ready" },
     { key: "imported", label: isEnglish ? "Imported" : "Importadas", value: summary.importedRows, status: "imported" },
     { key: "review", label: isEnglish ? "Review" : "Revisión", value: summary.needsReviewRows, status: "needs_review" },
+    { key: "paymentActivity", label: isEnglish ? "Payment Activity" : "Actividad de pago", value: summary.paymentActivityRows || 0, status: "payment_activity" },
     { key: "rejected", label: isEnglish ? "Rejected" : "Rechazadas", value: summary.rejectedRows, status: "rejected" },
     { key: "claims", label: isEnglish ? "Claims" : "Claims", value: summary.matchedClaims },
     { key: "cpt", label: isEnglish ? "CPT" : "CPT", value: summary.matchedCptCodes },
@@ -1012,7 +1019,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
 
       {summary && (
         <div className="space-y-4">
-          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-9">
             {summaryCards.map(card => {
               const isFilterCard = Boolean(card.status);
               const isActive = isFilterCard && resultStatusFilter === card.status && resultIssueFilter === "all" && !normalizedResultSearch;
@@ -1089,6 +1096,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                     <option value="ready">{isEnglish ? "Ready" : "Lista"}</option>
                     <option value="imported">{isEnglish ? "Imported" : "Importada"}</option>
                     <option value="needs_review">{isEnglish ? "Needs Review" : "Requiere revisión"}</option>
+                    <option value="payment_activity">{isEnglish ? "Payment Activity" : "Actividad de pago"}</option>
                     <option value="rejected">{isEnglish ? "Rejected" : "Rechazada"}</option>
                   </select>
                 </label>
@@ -1103,6 +1111,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                     <option value="errors">{isEnglish ? "Errors only" : "Solo errores"}</option>
                     <option value="warnings">{isEnglish ? "Warnings only" : "Solo advertencias"}</option>
                     <option value="payer_mismatch">{isEnglish ? "Payer mismatch" : "Payer diferente"}</option>
+                    <option value="payment_activity">{isEnglish ? "Payment activity" : "Actividad de pago"}</option>
                     <option value="safe_match">{isEnglish ? "Safe matches" : "Coincidencias seguras"}</option>
                   </select>
                 </label>
