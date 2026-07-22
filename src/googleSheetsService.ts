@@ -1473,6 +1473,34 @@ export class GoogleSheetsService {
     return [...this.jobs].sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)));
   }
 
+  public async clearImportExceptionRecords(): Promise<{
+    jobs: number;
+    importHistory: number;
+    reviewTasks: number;
+    notifications: number;
+  }> {
+    const cleared = {
+      jobs: this.jobs.length,
+      importHistory: this.importHistory.length,
+      reviewTasks: this.reviewTasks.length,
+      notifications: this.notifications.length
+    };
+
+    this.jobs = [];
+    this.importHistory = [];
+    this.reviewTasks = [];
+    this.notifications = [];
+
+    if (this.isConfigured) {
+      await this.overwriteOperationalRecords("Jobs", this.jobs);
+      await this.overwriteOperationalRecords("Import_History", this.importHistory);
+      await this.overwriteOperationalRecords("Review_Tasks", this.reviewTasks);
+      await this.overwriteOperationalRecords("Notifications", this.notifications);
+    }
+
+    return cleared;
+  }
+
   public async createImportHistory(recordData: Partial<ImportHistoryRecord>): Promise<ImportHistoryRecord> {
     const record: ImportHistoryRecord = {
       import_id: recordData.import_id || `IMP-${Date.now()}-${Math.floor(Math.random() * 1000)}`,

@@ -29,7 +29,10 @@ import {
   DollarSign,
   Languages,
   UserRound,
-  KeyRound
+  KeyRound,
+  Eye,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 
 import { Claim, ClaimStatus, ClaimClassification, ErrorCategory, Payment, Note, AuditLog, Provider, Payer, User, Setting, UserRole, FeeSchedule, EligibilityCoverage, ReportFeeSchedule } from "./types";
@@ -319,6 +322,8 @@ export default function App() {
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [operationsData, setOperationsData] = useState<any | null>(null);
   const [isLoadingOperations, setIsLoadingOperations] = useState(false);
+  const [expandedImportExceptionId, setExpandedImportExceptionId] = useState("");
+  const [isClearingImportExceptions, setIsClearingImportExceptions] = useState(false);
   const [closingMonth, setClosingMonth] = useState(false);
   const [closeMonthPeriod, setCloseMonthPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const [isImportingBankDeposits, setIsImportingBankDeposits] = useState(false);
@@ -1363,6 +1368,69 @@ export default function App() {
     }
   };
 
+  const handleClearImportExceptionRecords = async () => {
+    if (currentUser.role !== UserRole.Admin || isClearingImportExceptions) return;
+    const confirmed = await confirmAction({
+      title: isEnglish ? "Clear import exception records" : "Borrar registros de excepciones",
+      message: isEnglish
+        ? "This will clear the current test records from Import Exceptions: jobs, import history, review tasks and notifications. Claims, payments, notes and catalogs will not be touched."
+        : "Esto borrará los registros actuales de prueba en Excepciones de Importación: procesos, historial de importación, tareas de revisión y notificaciones. No se tocarán claims, pagos, notas ni catálogos.",
+      confirmLabel: isEnglish ? "Clear records" : "Borrar registros",
+      tone: "danger"
+    });
+    if (!confirmed) return;
+
+    setIsClearingImportExceptions(true);
+    try {
+      const res = await apiFetch("/api/admin/operations/import-exceptions", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) throw new Error(data.error || "Failed to clear import exception records.");
+      setExpandedImportExceptionId("");
+      await loadOperationsCenter();
+      notify(
+        isEnglish
+          ? "Import exception test records were cleared."
+          : "Los registros de prueba de excepciones fueron borrados.",
+        "success"
+      );
+    } catch (err: any) {
+      notify(`${isEnglish ? "Clear records error" : "Error borrando registros"}: ${err.message}`, "error");
+    } finally {
+      setIsClearingImportExceptions(false);
+    }
+  };
+
+  const parseOperationJson = (value: unknown) => {
+    try {
+      const text = String(value ?? "").trim();
+      return text ? JSON.parse(text) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const operationDetailEntries = (value: unknown) => {
+    const flatten = (input: unknown, prefix = ""): Array<[string, unknown]> => {
+      if (input === null || input === undefined || input === "") return [];
+      if (Array.isArray(input)) {
+        if (input.length === 0) return [];
+        return [[prefix || "items", `${input.length} item(s)`]];
+      }
+      if (typeof input === "object") {
+        return Object.entries(input as Record<string, unknown>).flatMap(([key, nested]) => {
+          const label = prefix ? `${prefix}.${key}` : key;
+          if (nested && typeof nested === "object" && !Array.isArray(nested)) return flatten(nested, label);
+          return flatten(nested, label);
+        });
+      }
+      return [[prefix, input]];
+    };
+    return flatten(value).filter(([key]) => Boolean(key)).slice(0, 60);
+  };
+
   const handleUpdateImportTemplate = async (template: any, updates: Record<string, unknown>) => {
     if (!template?.template_id) return;
     setSavingTemplateId(template.template_id);
@@ -2373,15 +2441,30 @@ export default function App() {
                     {isEnglish ? "Centralized queue for rejected imports, rows requiring review and failed background jobs." : "Cola centralizada para imports rechazados, filas en revisión y procesos fallidos."}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void loadOperationsCenter()}
-                  disabled={isLoadingOperations}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
-                >
-                  <RefreshCw className={`h-4 w-4 ${isLoadingOperations ? "animate-spin" : ""}`} />
-                  {isEnglish ? "Refresh" : "Actualizar"}
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {currentUser.role === UserRole.Admin && (
+                    <button
+                      type="button"
+                      onClick={() => void handleClearImportExceptionRecords()}
+                      disabled={isLoadingOperations || isClearingImportExceptions}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-white px-4 py-2 text-xs font-bold text-rose-700 shadow-sm hover:bg-rose-50 disabled:opacity-60"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      {isClearingImportExceptions
+                        ? (isEnglish ? "Clearing..." : "Borrando...")
+                        : (isEnglish ? "Clear test records" : "Borrar registros prueba")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void loadOperationsCenter()}
+                    disabled={isLoadingOperations}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${isLoadingOperations ? "animate-spin" : ""}`} />
+                    {isEnglish ? "Refresh" : "Actualizar"}
+                  </button>
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-4">
                 {[
@@ -2413,48 +2496,101 @@ export default function App() {
                         <th className="px-3 py-2">Assigned</th>
                         <th className="px-3 py-2">Due</th>
                         <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2 text-right">Details</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {(operationsData?.importExceptions || []).slice(0, 100).map((item: any) => {
                         const task = (operationsData?.reviewTasks || []).find((candidate: any) => candidate.task_id === item.exception_id);
+                        const details = item.details || {};
+                        const summary = details.summary || parseOperationJson(details.importHistory?.summary_json || details.job?.summary_json);
+                        const detailEntries = operationDetailEntries({
+                          type: item.type,
+                          source: item.source,
+                          status: item.status,
+                          created_at: item.created_at,
+                          reason: item.reason,
+                          summary,
+                          record: details.importHistory || details.job || details.task || {}
+                        });
+                        const isExpanded = expandedImportExceptionId === item.exception_id;
                         return (
-                          <tr key={item.exception_id} className="hover:bg-slate-50">
-                            <td className="px-3 py-2 font-semibold text-slate-800">{item.type}</td>
-                            <td className="px-3 py-2 text-slate-600">{item.source || "-"}</td>
-                            <td className="px-3 py-2">
-                              <p className="font-mono font-bold text-dark-blue">{item.claim_id || "-"}</p>
-                              <p className="font-mono text-[10px] text-slate-400">{item.cpt_code || "-"}</p>
-                            </td>
-                            <td className="max-w-md px-3 py-2 text-slate-600">{item.reason || "-"}</td>
-                            <td className="px-3 py-2">
-                              <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${item.severity === "High" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>{item.severity || "-"}</span>
-                            </td>
-                            <td className="px-3 py-2">
-                              {task ? (
-                                <select value={task.assigned_to || ""} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { assigned_to: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold">
-                                  <option value="">{isEnglish ? "Unassigned" : "Sin asignar"}</option>
-                                  {users.filter(user => user.active).map(user => <option key={user.user_id} value={user.user_id}>{user.name || user.email}</option>)}
-                                </select>
-                              ) : item.assigned_to || "-"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {task ? <input type="date" value={task.due_date || ""} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { due_date: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold" /> : "-"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {task ? (
-                                <select value={task.status || "Open"} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { status: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold">
-                                  {["Open", "In Progress", "Resolved", "Dismissed"].map(value => <option key={value} value={value}>{value}</option>)}
-                                </select>
-                              ) : (
-                                <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">{item.status}</span>
-                              )}
-                            </td>
-                          </tr>
+                          <React.Fragment key={item.exception_id}>
+                            <tr className="hover:bg-slate-50">
+                              <td className="px-3 py-2 font-semibold text-slate-800">{item.type}</td>
+                              <td className="px-3 py-2 text-slate-600">{item.source || "-"}</td>
+                              <td className="px-3 py-2">
+                                <p className="font-mono font-bold text-dark-blue">{item.claim_id || "-"}</p>
+                                <p className="font-mono text-[10px] text-slate-400">{item.cpt_code || "-"}</p>
+                              </td>
+                              <td className="max-w-md px-3 py-2 text-slate-600">{item.reason || "-"}</td>
+                              <td className="px-3 py-2">
+                                <span className={`rounded-md px-2 py-1 text-[10px] font-bold ${item.severity === "High" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700"}`}>{item.severity || "-"}</span>
+                              </td>
+                              <td className="px-3 py-2">
+                                {task ? (
+                                  <select value={task.assigned_to || ""} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { assigned_to: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold">
+                                    <option value="">{isEnglish ? "Unassigned" : "Sin asignar"}</option>
+                                    {users.filter(user => user.active).map(user => <option key={user.user_id} value={user.user_id}>{user.name || user.email}</option>)}
+                                  </select>
+                                ) : item.assigned_to || "-"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {task ? <input type="date" value={task.due_date || ""} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { due_date: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold" /> : "-"}
+                              </td>
+                              <td className="px-3 py-2">
+                                {task ? (
+                                  <select value={task.status || "Open"} disabled={savingReviewTaskId === task.task_id} onChange={event => void handleUpdateReviewTask(task, { status: event.target.value })} className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-[11px] font-semibold">
+                                    {["Open", "In Progress", "Resolved", "Dismissed"].map(value => <option key={value} value={value}>{value}</option>)}
+                                  </select>
+                                ) : (
+                                  <span className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">{item.status}</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-right">
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedImportExceptionId(isExpanded ? "" : item.exception_id)}
+                                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50"
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                  {isExpanded ? (isEnglish ? "Hide" : "Ocultar") : (isEnglish ? "View" : "Ver")}
+                                  {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                </button>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr className="bg-slate-50/70">
+                                <td colSpan={9} className="px-4 py-4">
+                                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                                    <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+                                      <div>
+                                        <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Exception details" : "Detalles de la excepción"}</h4>
+                                        <p className="mt-0.5 font-mono text-[10px] text-slate-400">{item.exception_id}</p>
+                                      </div>
+                                      <span className="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">{item.type}</span>
+                                    </div>
+                                    <div className="grid gap-2 md:grid-cols-3">
+                                      {detailEntries.length > 0 ? detailEntries.map(([key, value]) => (
+                                        <div key={key} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                                          <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{key}</p>
+                                          <p className="mt-1 break-words font-mono text-[11px] font-semibold text-slate-700">{String(value)}</p>
+                                        </div>
+                                      )) : (
+                                        <div className="rounded-lg border border-slate-100 bg-slate-50 p-3 text-xs font-semibold text-slate-400">
+                                          {isEnglish ? "No additional details were saved for this record." : "No se guardaron detalles adicionales para este registro."}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         );
                       })}
                       {(!operationsData?.importExceptions || operationsData.importExceptions.length === 0) && (
-                        <tr><td colSpan={8} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">{isLoadingOperations ? (isEnglish ? "Loading..." : "Cargando...") : (isEnglish ? "No import exceptions." : "No hay excepciones de importación.")}</td></tr>
+                        <tr><td colSpan={9} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">{isLoadingOperations ? (isEnglish ? "Loading..." : "Cargando...") : (isEnglish ? "No import exceptions." : "No hay excepciones de importación.")}</td></tr>
                       )}
                     </tbody>
                   </table>

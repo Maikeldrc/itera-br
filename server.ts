@@ -46,6 +46,15 @@ function textValue(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function safeJsonParse(value: unknown, fallback: unknown = {}) {
+  try {
+    const text = textValue(value);
+    return text ? JSON.parse(text) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function normalizeImportKey(value: unknown) {
   return String(value ?? "")
     .replace(/^\uFEFF/, "")
@@ -923,7 +932,10 @@ async function startServer() {
             status: task.status,
             assigned_to: task.assigned_to,
             due_date: task.due_date,
-            created_at: task.created_at
+            created_at: task.created_at,
+            details: {
+              task
+            }
           })),
         ...importHistory
           .filter(item => Number(item.rejected_rows || 0) > 0 || Number(item.review_rows || 0) > 0)
@@ -938,7 +950,11 @@ async function startServer() {
             status: item.status,
             assigned_to: item.requested_by,
             due_date: "",
-            created_at: item.imported_at
+            created_at: item.imported_at,
+            details: {
+              importHistory: item,
+              summary: safeJsonParse(item.summary_json, {})
+            }
           })),
         ...jobs
           .filter(job => job.status === "failed")
@@ -953,7 +969,12 @@ async function startServer() {
             status: job.status,
             assigned_to: job.requested_by,
             due_date: "",
-            created_at: job.requested_at
+            created_at: job.requested_at,
+            details: {
+              job,
+              summary: safeJsonParse(job.summary_json, {}),
+              error: job.error_message || ""
+            }
           }))
       ].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
       res.json({
@@ -972,6 +993,23 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || "Failed to load operations center." });
+    }
+  });
+
+  app.delete("/api/admin/operations/import-exceptions", requireRoles(...API_ROLE_GROUPS.adminOnly), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const cleared = await sheetsService.clearImportExceptionRecords();
+      await sheetsService.addUserActivityLog({
+        user_email: operatorEmail,
+        action: "Clear import exception records",
+        entity_type: "Operations",
+        entity_id: "Import Exceptions",
+        metadata_json: JSON.stringify(cleared)
+      });
+      res.json({ success: true, cleared });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || "Failed to clear import exception records." });
     }
   });
 
