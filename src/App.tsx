@@ -1482,6 +1482,45 @@ export default function App() {
     URL.revokeObjectURL(url);
   };
 
+  const getExceptionCptSummary = (item: any) => {
+    const cptCounts = new Map<string, number>();
+    getExceptionRejectedRows(item).forEach((row: any) => {
+      const candidates = [
+        row.normalized?.cptCode,
+        row.sourceRow?.["CPT Code"],
+        row.sourceRow?.CPT,
+        row.sourceRow?.Code1,
+        row.sourceRow?.Code2,
+        row.sourceRow?.Code3,
+        row.sourceRow?.Code4,
+        row.sourceRow?.Code5,
+        row.sourceRow?.Code6
+      ].map(value => String(value ?? "").trim()).filter(Boolean);
+      const fromErrors = (Array.isArray(row.errors) ? row.errors : [row.errors])
+        .flatMap(error => Array.from(String(error || "").matchAll(/CPT\s+([A-Z0-9]+)/gi)).map(match => match[1]))
+        .filter(Boolean);
+      [...candidates, ...fromErrors].forEach(code => {
+        String(code)
+          .split(/[\s,;]+/)
+          .map(itemCode => itemCode.trim())
+          .filter(Boolean)
+          .forEach(itemCode => cptCounts.set(itemCode, (cptCounts.get(itemCode) || 0) + 1));
+      });
+    });
+    if (cptCounts.size === 0 && item?.cpt_code) {
+      String(item.cpt_code)
+        .split(/[\s,;]+/)
+        .map(code => code.trim())
+        .filter(Boolean)
+        .forEach(code => cptCounts.set(code, 1));
+    }
+    const entries = Array.from(cptCounts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    return {
+      total: entries.reduce((sum, [, count]) => sum + count, 0),
+      entries
+    };
+  };
+
   const handleUpdateImportTemplate = async (template: any, updates: Record<string, unknown>) => {
     if (!template?.template_id) return;
     setSavingTemplateId(template.template_id);
@@ -2585,7 +2624,7 @@ export default function App() {
                       <tr>
                         <th className="px-3 py-2">Type</th>
                         <th className="px-3 py-2">Source</th>
-                        <th className="px-3 py-2">Claim / CPT</th>
+                        <th className="px-3 py-2">CPT</th>
                         <th className="px-3 py-2">Reason</th>
                         <th className="px-3 py-2">Severity</th>
                         <th className="px-3 py-2">Assigned</th>
@@ -2609,6 +2648,7 @@ export default function App() {
                           record: details.importHistory || details.job || details.task || {}
                         });
                         const rejectedRows = getExceptionRejectedRows(item);
+                        const cptSummary = getExceptionCptSummary(item);
                         const isExpanded = expandedImportExceptionId === item.exception_id;
                         return (
                           <React.Fragment key={item.exception_id}>
@@ -2616,8 +2656,26 @@ export default function App() {
                               <td className="px-3 py-2 font-semibold text-slate-800">{item.type}</td>
                               <td className="px-3 py-2 text-slate-600">{item.source || "-"}</td>
                               <td className="px-3 py-2">
-                                <p className="font-mono font-bold text-dark-blue">{item.claim_id || "-"}</p>
-                                <p className="font-mono text-[10px] text-slate-400">{item.cpt_code || "-"}</p>
+                                {cptSummary.entries.length > 0 ? (
+                                  <div className="flex max-w-44 flex-wrap gap-1">
+                                    {cptSummary.entries.slice(0, 4).map(([code, count]) => (
+                                      <span key={code} className="inline-flex items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-dark-blue">
+                                        {code}
+                                        <span className="rounded bg-white px-1 text-[9px] text-blue-700">{count}</span>
+                                      </span>
+                                    ))}
+                                    {cptSummary.entries.length > 4 && (
+                                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] font-bold text-slate-500">+{cptSummary.entries.length - 4}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="font-mono text-[10px] text-slate-400">-</span>
+                                )}
+                                {cptSummary.total > 0 && (
+                                  <p className="mt-1 text-[10px] font-semibold text-slate-400">
+                                    {isEnglish ? "Total CPT" : "Total CPT"}: {cptSummary.total}
+                                  </p>
+                                )}
                               </td>
                               <td className="max-w-md px-3 py-2 text-slate-600">{item.reason || "-"}</td>
                               <td className="px-3 py-2">
