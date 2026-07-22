@@ -59,11 +59,20 @@ type PaymentImportRow = {
   claimPayerName?: string;
   reportPayerName?: string;
   payerMismatch?: boolean;
+  payerAssociationAccepted?: boolean;
   suggestedPayerId?: string;
   suggestedPayerName?: string;
   payment: number;
   errors: string[];
   warnings: string[];
+};
+
+type AcceptedPayerAssociation = {
+  rowNumber: number;
+  claimId: string;
+  cptCode: string;
+  serviceDate: string;
+  reportPayerName: string;
 };
 
 type PaymentImportResult = {
@@ -211,6 +220,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState<ImportProgressState | null>(null);
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
+  const [acceptedPayerAssociations, setAcceptedPayerAssociations] = useState<Record<string, AcceptedPayerAssociation>>({});
   const [result, setResult] = useState<PaymentImportResult | null>(null);
   const [resultSearch, setResultSearch] = useState("");
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
@@ -267,6 +277,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     setSystemName("");
     setSelectedTemplateId("");
     setResult(null);
+    setAcceptedPayerAssociations({});
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
@@ -330,6 +341,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const processFile = (file: File) => {
     setFileName(file.name);
     setResult(null);
+    setAcceptedPayerAssociations({});
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
@@ -455,7 +467,12 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...payload, apply, mapping: schema ? mapping : undefined })
+          body: JSON.stringify({
+            ...payload,
+            apply,
+            mapping: schema ? mapping : undefined,
+            acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
+          })
         },
         apply ? PAYMENT_IMPORT_TIMEOUT_MS : PAYMENT_ANALYSIS_TIMEOUT_MS,
         apply
@@ -570,6 +587,55 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
       });
       notify(`${isEnglish ? "Payer update error" : "Error actualizando seguro"}: ${err.message}`, "error");
     }
+  };
+
+  const associateReportPayer = (row: PaymentImportRow) => {
+    if (!row.claimId || !row.reportPayerName) return;
+    const key = rowKey(row);
+    setAcceptedPayerAssociations(current => ({
+      ...current,
+      [key]: {
+        rowNumber: row.rowNumber,
+        claimId: row.claimId,
+        cptCode: row.cptCode,
+        serviceDate: row.serviceDate,
+        reportPayerName: row.reportPayerName || ""
+      }
+    }));
+    setResult(current => {
+      if (!current) return current;
+      const rows = current.rows.map(item => {
+        if (rowKey(item) !== key) return item;
+        const warnings = item.warnings.filter(warning => !warning.toLowerCase().startsWith("payer mismatch:"));
+        const stillNeedsReview = warnings.some(warning => warning.toLowerCase().includes("already has payment activity"));
+        return {
+          ...item,
+          payerMismatch: false,
+          payerAssociationAccepted: true,
+          status: item.status === "needs_review" && !stillNeedsReview && item.errors.length === 0 ? "ready" : item.status,
+          warnings: [
+            ...warnings,
+            `Report payer "${item.reportPayerName}" associated to current claim payer "${item.claimPayerName || item.payerName}". Claim insurance will not be changed.`
+          ]
+        };
+      });
+      return {
+        ...current,
+        summary: {
+          ...current.summary,
+          readyToImport: rows.filter(item => item.status === "ready").length,
+          needsReviewRows: rows.filter(item => item.status === "needs_review").length,
+          rejectedRows: rows.filter(item => item.status === "rejected").length
+        },
+        rows
+      };
+    });
+    notify(
+      isEnglish
+        ? "Report payer associated to the current claim insurance for this import."
+        : "Payer del reporte asociado al seguro actual del claim para esta importación.",
+      "success"
+    );
   };
 
   const summary = result?.summary;
@@ -1091,20 +1157,34 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                                 <span className="font-bold">{isEnglish ? "Report" : "Reporte"}:</span> {row.reportPayerName || row.suggestedPayerName || "-"}
                               </p>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => void applyPayerChange(row)}
-                              disabled={payerChangeState[rowKey(row)] === "applying"}
-                              className="inline-flex items-center gap-1 rounded-md bg-dark-blue px-2 py-1 text-[10px] font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-50"
-                            >
-                              {payerChangeState[rowKey(row)] === "applying"
-                                ? (isEnglish ? "Applying..." : "Aplicando...")
-                                : (isEnglish ? "Apply report payer" : "Aplicar payer del reporte")}
-                            </button>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => associateReportPayer(row)}
+                                className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-bold text-amber-800 shadow-sm hover:bg-amber-100"
+                                title={isEnglish ? "Keep the current claim insurance and accept this report payer name as the same payer for this import." : "Mantiene el seguro actual del claim y acepta este nombre del reporte como el mismo payer para esta importación."}
+                              >
+                                {isEnglish ? "Associate" : "Asociar"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void applyPayerChange(row)}
+                                disabled={payerChangeState[rowKey(row)] === "applying"}
+                                className="inline-flex items-center gap-1 rounded-md bg-dark-blue px-2 py-1 text-[10px] font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-50"
+                                title={isEnglish ? "Change the claim insurance to the payer shown in the report." : "Cambia el seguro del claim al payer que viene en el reporte."}
+                              >
+                                {payerChangeState[rowKey(row)] === "applying"
+                                  ? (isEnglish ? "Changing..." : "Cambiando...")
+                                  : (isEnglish ? "Change insurance" : "Cambiar seguro")}
+                              </button>
+                            </div>
                           </div>
                         ) : (
                           <div>
                             <p>{row.payerName || "-"}</p>
+                            {row.payerAssociationAccepted && (
+                              <p className="mt-1 text-[10px] font-bold text-amber-700">{isEnglish ? "Report payer associated" : "Payer del reporte asociado"}</p>
+                            )}
                             {payerChangeState[rowKey(row)] === "applied" && (
                               <p className="mt-1 text-[10px] font-bold text-emerald-700">{isEnglish ? "Payer updated" : "Seguro actualizado"}</p>
                             )}

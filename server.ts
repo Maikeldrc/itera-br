@@ -535,6 +535,22 @@ function normalizePaymentImportRow(row: Record<string, unknown>, index: number, 
 
 type PaymentImportNormalizedRow = ReturnType<typeof normalizePaymentImportRow>;
 
+function paymentImportAssociationKey(input: {
+  rowNumber?: unknown;
+  claimId?: unknown;
+  cptCode?: unknown;
+  serviceDate?: unknown;
+  reportPayerName?: unknown;
+}) {
+  return [
+    textValue(input.rowNumber),
+    normalizeMatchText(input.claimId),
+    textValue(input.cptCode),
+    textValue(input.serviceDate).slice(0, 10),
+    normalizeMatchText(input.reportPayerName)
+  ].join("|");
+}
+
 function fillDownPaymentImportRows(rows: PaymentImportNormalizedRow[]) {
   const carryFields: Array<keyof PaymentImportNormalizedRow> = [
     "facilityName",
@@ -2559,7 +2575,7 @@ async function startServer() {
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, apply, fileName, mapping } = req.body;
+      const { rows, fileBase64, apply, fileName, mapping, acceptedPayerAssociations } = req.body;
       const importRows = fileBase64 ? parseUploadedTableRows(fileBase64, textValue(fileName)) : rows;
 
       if (!importRows || !Array.isArray(importRows)) {
@@ -2582,6 +2598,11 @@ async function startServer() {
         payments
           .map(payment => [textValue(payment.payment_id).toLowerCase(), payment] as const)
           .filter(([paymentId]) => Boolean(paymentId))
+      );
+      const acceptedPayerAssociationKeys = new Set(
+        Array.isArray(acceptedPayerAssociations)
+          ? acceptedPayerAssociations.map((item: any) => paymentImportAssociationKey(item))
+          : []
       );
 
       const normalizedRows = fillDownPaymentImportRows(
@@ -2683,9 +2704,18 @@ async function startServer() {
         const claimPayerName = claim?.payer_name || "";
         const reportPayerName = row.payerName || "";
         const payerMismatch = Boolean(claim && reportPayerName && claimPayerName && !entityNamesMatch(claimPayerName, reportPayerName));
+        const payerAssociationAccepted = payerMismatch && acceptedPayerAssociationKeys.has(paymentImportAssociationKey({
+          rowNumber: row.rowNumber,
+          claimId: claim?.claim_id || "",
+          cptCode,
+          serviceDate: row.serviceDate,
+          reportPayerName
+        }));
         const suggestedPayer = payerMismatch ? findMatchingPayer(payers, reportPayerName) : null;
-        if (payerMismatch) {
+        if (payerMismatch && !payerAssociationAccepted) {
           warnings.push(`Payer mismatch: claim has "${claimPayerName}", report has "${reportPayerName}".`);
+        } else if (payerAssociationAccepted) {
+          warnings.push(`Report payer "${reportPayerName}" was associated to current claim payer "${claimPayerName}" for this import. Claim insurance was not changed.`);
         }
 
         const hasExistingPayment = Boolean(
@@ -2705,12 +2735,13 @@ async function startServer() {
           claimPayerName,
           reportPayerName,
           payerMismatch,
+          payerAssociationAccepted,
           suggestedPayerId: suggestedPayer?.payer_id || "",
           suggestedPayerName: suggestedPayer?.payer_name || reportPayerName,
           existingPaymentId: existingPayment?.payment_id || "",
           existingPaymentClaimId: existingPayment?.claim_id || "",
           lineIndex,
-          status: errors.length > 0 ? "rejected" : (hasExistingPayment || payerMismatch ? "needs_review" : "ready"),
+          status: errors.length > 0 ? "rejected" : (hasExistingPayment || (payerMismatch && !payerAssociationAccepted) ? "needs_review" : "ready"),
           errors,
           warnings
         };
@@ -2869,7 +2900,7 @@ async function startServer() {
                 era_id: "",
                 eob_id: row.paymentDate ? `EOB-${row.paymentDate}` : "",
                 payment_source: "Payment Import",
-                notes: `Imported from payer payment report "${textValue(fileName) || "Unknown file"}" row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.`,
+                notes: `Imported from payer payment report "${textValue(fileName) || "Unknown file"}" row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.${row.payerAssociationAccepted ? ` Report payer "${row.reportPayerName}" was associated to current claim payer "${savedClaim.payer_name}" without changing claim insurance.` : ""}`,
                 created_at: "",
                 updated_at: ""
               };
