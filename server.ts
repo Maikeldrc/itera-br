@@ -2689,7 +2689,10 @@ async function startServer() {
         if (errors.length === 0 && candidates.length === 0) {
           errors.push(`No matching claim/CPT found for Patient Acct No ${row.patientAcctNo || "blank"}, CPT ${cptCode || "blank"} and DOS ${row.serviceDate || "blank"}.`);
         }
-        if (errors.length === 0 && candidates.length > 1) errors.push("Multiple matching claims found; requires human review.");
+        const hasMultipleCandidateReview = errors.length === 0 && candidates.length > 1;
+        if (hasMultipleCandidateReview) {
+          warnings.push("Multiple matching claims found; requires human review.");
+        }
         if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
         if (errors.length === 0 && claim && sheetsService.isPeriodClosed(claimPeriod(claim))) {
           errors.push(`Period ${claimPeriod(claim)} is closed. Reopen the period before importing payment activity.`);
@@ -2742,7 +2745,7 @@ async function startServer() {
           existingPaymentId: existingPayment?.payment_id || "",
           existingPaymentClaimId: existingPayment?.claim_id || "",
           lineIndex,
-          status: errors.length > 0 ? "rejected" : (hasExistingPayment ? "payment_activity" : ((payerMismatch && !payerAssociationAccepted) ? "needs_review" : "ready")),
+          status: errors.length > 0 ? "rejected" : (hasExistingPayment ? "payment_activity" : ((hasMultipleCandidateReview || (payerMismatch && !payerAssociationAccepted)) ? "needs_review" : "ready")),
           errors,
           warnings
         };
