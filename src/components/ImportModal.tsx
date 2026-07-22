@@ -599,8 +599,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl max-w-4xl w-full shadow-2xl border border-slate-200 overflow-hidden my-8 max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-slate-950/50 flex items-center justify-center z-50 p-3 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-[min(98vw,1800px)] shadow-2xl border border-slate-200 overflow-hidden my-4 max-h-[94vh] flex flex-col">
         {/* Header */}
         <div className="bg-dark-blue p-5 text-white flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -882,14 +882,14 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 </div>
               )}
               <div className="max-h-72 overflow-auto">
-                <table className="w-full text-left text-xs border-collapse">
+                <table className="w-full min-w-[1320px] table-fixed text-left text-xs border-collapse">
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wide">
                     <tr>
-                      <th className="p-3 w-20">{isEnglish ? "Row" : "Fila"}</th>
-                      <th className="p-3 w-56">Claim ID</th>
-                      <th className="p-3">{isEnglish ? "Issue" : "Problema"}</th>
-                      <th className="p-3 w-72">{isEnglish ? "Suggested correction" : "Corrección sugerida"}</th>
-                      <th className="p-3 w-40 text-right">{isEnglish ? "Action" : "Acción"}</th>
+                      <th className="p-3 w-24">{isEnglish ? "Row" : "Fila"}</th>
+                      <th className="p-3 w-72">Claim ID</th>
+                      <th className="p-3 w-[520px]">{isEnglish ? "Issue" : "Problema"}</th>
+                      <th className="p-3 w-[360px]">{isEnglish ? "Suggested correction" : "Corrección sugerida"}</th>
+                      <th className="p-3 w-44 text-right">{isEnglish ? "Action" : "Acción"}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -901,8 +901,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                         <tr key={item.key} className="hover:bg-slate-50/80">
                           <td className="p-3 font-mono font-bold text-slate-800">{item.row || "-"}</td>
                           <td className="p-3 font-mono text-slate-700">{item.claimId}</td>
-                          <td className="p-3 text-slate-800 leading-relaxed">{item.message}</td>
-                          <td className="p-3 text-slate-600">{item.action}</td>
+                          <td className="whitespace-normal p-3 text-slate-800 leading-relaxed">{item.message}</td>
+                          <td className="whitespace-normal p-3 text-slate-600">{item.action}</td>
                           <td className="p-3 text-right">
                             {canForceRow ? (
                               <button
