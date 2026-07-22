@@ -220,6 +220,10 @@ interface ServiceLine {
   nextAction: string;
   eftNumber: string;
   paymentDate: string;
+  importError?: boolean;
+  errorFlag?: boolean;
+  errorCategory?: string;
+  errorReason?: string;
 }
 
 interface ServiceLineNote {
@@ -865,7 +869,11 @@ export function ClaimDetailPanel({
               : [],
           nextAction: existing.nextAction || "No action",
           eftNumber: existing.eftNumber || "",
-          paymentDate: existing.paymentDate || ""
+          paymentDate: existing.paymentDate || "",
+          importError: Boolean(existing.importError || existing.errorFlag),
+          errorFlag: Boolean(existing.errorFlag || existing.importError),
+          errorCategory: existing.errorCategory || existing.error_category || "",
+          errorReason: existing.errorReason || existing.error_reason || ""
         });
       } else {
         const fsEntry = feeSchedules?.find(fs => fs.cpt_code === cptCode && fs.year === claimYear);
@@ -1249,6 +1257,23 @@ export function ClaimDetailPanel({
     paid_amount: Number(paidAmount)
   });
   const repeatLimitLineErrors = validateCptRepeatLimitsByLine(serviceLines, feeSchedules, claim.date_of_service_from);
+  const isTrackedImportRepeatError = (line: ServiceLine, message: string) => {
+    const isRepeatError = /requires at least 30 days between DOS dates|exceeds Max\/DOS|can be used .* per DOS/i.test(message);
+    if (!isRepeatError) return false;
+    return Boolean(
+      errorFlag &&
+      errorCategory &&
+      (line.importError || line.errorFlag) &&
+      (line.errorReason || line.notes.length > 0)
+    );
+  };
+  const blockingRepeatLimitLineErrors = Object.entries(repeatLimitLineErrors).reduce<Record<number, string[]>>((acc, [key, messages]) => {
+    const index = Number(key);
+    const line = serviceLines[index];
+    const blockingMessages = (messages || []).filter(message => !line || !isTrackedImportRepeatError(line, message));
+    if (blockingMessages.length > 0) acc[index] = blockingMessages;
+    return acc;
+  }, {});
   const financialTimeline = [
     ...serviceLines.flatMap((line, index) => {
       const cpt = String(line.cpt || cptCodes[index] || "-");
@@ -1291,19 +1316,19 @@ export function ClaimDetailPanel({
   ].sort((a, b) => String(b.at || "").localeCompare(String(a.at || ""))).slice(0, 12);
   const serviceLineErrors = Object.keys({
     ...serviceLineValidation.lineErrors,
-    ...repeatLimitLineErrors
+    ...blockingRepeatLimitLineErrors
   }).reduce<Record<number, string[]>>((acc, key) => {
     const index = Number(key);
     acc[index] = [
       ...(serviceLineValidation.lineErrors[index] || []),
-      ...(repeatLimitLineErrors[index] || [])
+      ...(blockingRepeatLimitLineErrors[index] || [])
     ];
     return acc;
   }, {});
   const claimValidationErrors = serviceLineValidation.claimErrors;
   const serviceLineValidationAllErrors = [
     ...serviceLineValidation.allErrors,
-    ...Object.values(repeatLimitLineErrors).flat()
+    ...Object.values(blockingRepeatLimitLineErrors).flat()
   ];
 
   const formatUSD = (val: number) => {

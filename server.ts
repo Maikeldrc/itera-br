@@ -669,6 +669,25 @@ function markClaimAsForcedImportError(claim: Claim, validationErrors: string[], 
   };
 }
 
+function hasTrackedImportRepeatError(claim: Partial<Claim>, message: string) {
+  if (!isForceImportEligibleError(message) || !claim.error_flag || !claim.error_category) return false;
+  const cptMatch = message.match(/CPT\s+([A-Z0-9]+)/i);
+  const affectedCpt = cptMatch?.[1] || "";
+  return serviceLinesFromClaim(claim).some(line => {
+    const lineCpt = textValue(line?.cpt);
+    const matchesCpt = !affectedCpt || lineCpt === affectedCpt;
+    return Boolean(
+      matchesCpt &&
+      (line?.importError || line?.errorFlag) &&
+      (line?.errorReason || (Array.isArray(line?.notes) && line.notes.length > 0))
+    );
+  });
+}
+
+function filterTrackedImportRepeatErrors(claim: Partial<Claim>, errors: string[]) {
+  return errors.filter(error => !hasTrackedImportRepeatError(claim, error));
+}
+
 function parseAllowedOrigins() {
   const configured = (process.env.ALLOWED_ORIGIN || process.env.ALLOWED_ORIGINS || "")
     .split(",")
@@ -1434,12 +1453,19 @@ async function startServer() {
       if (patientProviderFieldsChanged) {
         validationErrors.push(...validateUniquePatientProvider(calculated, claims, req.params.id));
       }
-      validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
-      validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+      const feeSchedules = await sheetsService.getFeeSchedules();
+      validationErrors.push(...filterTrackedImportRepeatErrors(
         calculated,
-        await sheetsService.getFeeSchedules(),
-        claims,
-        req.params.id
+        validateClaimCptRepeatLimits(calculated, feeSchedules)
+      ));
+      validationErrors.push(...filterTrackedImportRepeatErrors(
+        calculated,
+        validateClaimCptRepeatLimitsAgainstExisting(
+          calculated,
+          feeSchedules,
+          claims,
+          req.params.id
+        )
       ));
       if (validationErrors.length > 0) {
         return res.status(400).json({ error: "Validation failed", details: validationErrors });
