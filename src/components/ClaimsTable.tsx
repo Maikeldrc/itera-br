@@ -79,6 +79,8 @@ interface ServiceLineRow {
   status: string;
   locked?: boolean;
   lock_reason?: string;
+  importError?: boolean;
+  errorReason?: string;
 }
 
 const getCptRowStatus = (line: any, fallbackStatus: string = "Pending") => {
@@ -138,7 +140,9 @@ const getServiceLinesForClaim = (claim: Claim): ServiceLineRow[] => {
       balance: sl.balance !== undefined ? sl.balance : 0,
       status: getCptRowStatus(sl),
       locked: !!sl.locked,
-      lock_reason: sl.lock_reason || ""
+      lock_reason: sl.lock_reason || "",
+      importError: Boolean(sl.importError || sl.errorFlag),
+      errorReason: textValue(sl.errorReason || sl.error_category || sl.errorCategory || "")
     }));
   }
 
@@ -177,6 +181,8 @@ const getServiceLinesForClaim = (claim: Claim): ServiceLineRow[] => {
     };
   });
 };
+
+const getClaimServiceLineErrors = (claim: Claim) => getServiceLinesForClaim(claim).filter(line => line.importError);
 
 function applyPrimaryPaymentToServiceLine(line: any, inputAmount: number) {
   const normalized = normalizePaymentServiceLine(line);
@@ -1064,7 +1070,8 @@ export function ClaimsTable({
               ) : (
                 paginatedClaims.map((claim) => {
                   const isSelected = selectedClaimIds.includes(claim.claim_id);
-                  const hasError = claim.error_flag;
+                  const serviceLineErrors = getClaimServiceLineErrors(claim);
+                  const hasError = claim.error_flag || serviceLineErrors.length > 0;
                   const isLocked = claim.locked;
                   const noteCount = getClaimNoteCount(claim);
 
@@ -1104,6 +1111,15 @@ export function ClaimsTable({
                           )}
                           {hasError && !isLocked && (
                             <AlertOctagon className="w-3.5 h-3.5 text-accent-orange shrink-0 animate-pulse" title={`Blocked Error: ${claim.error_category}`} />
+                          )}
+                          {serviceLineErrors.length > 0 && (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold text-rose-700"
+                              title={serviceLineErrors.map(line => `${line.cpt}: ${line.errorReason || "Imported with service-line error"}`).join(" | ")}
+                            >
+                              <ShieldAlert className="h-3 w-3" />
+                              {serviceLineErrors.length}
+                            </span>
                           )}
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono">ID: {claim.patient_id}</div>
@@ -1352,7 +1368,8 @@ export function ClaimsTable({
                 paginatedServiceLines.map((slRow) => {
                   const claim = slRow.claim;
                   const isSelected = selectedClaimIds.includes(claim.claim_id);
-                  const hasError = claim.error_flag;
+                  const serviceLineErrors = getClaimServiceLineErrors(claim);
+                  const hasError = claim.error_flag || serviceLineErrors.length > 0;
                   const isLocked = claim.locked;
 
                   // Pro-rate Ending AP based on this service line's share of total billed, or divide equally
@@ -1387,6 +1404,15 @@ export function ClaimsTable({
                           {hasError && !isLocked && (
                             <AlertOctagon className="w-3.5 h-3.5 text-accent-orange shrink-0 animate-pulse" title={`Blocked Error: ${claim.error_category}`} />
                           )}
+                          {serviceLineErrors.length > 0 && (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[9px] font-bold text-rose-700"
+                              title={serviceLineErrors.map(line => `${line.cpt}: ${line.errorReason || "Imported with service-line error"}`).join(" | ")}
+                            >
+                              <ShieldAlert className="h-3 w-3" />
+                              {serviceLineErrors.length}
+                            </span>
+                          )}
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono">ID: {claim.patient_id}</div>
                       </td>
@@ -1406,6 +1432,9 @@ export function ClaimsTable({
                           <span>{slRow.cpt}</span>
                           {slRow.locked && (
                             <Lock className="w-3.5 h-3.5 text-rose-600 shrink-0" title={`Locked: ${slRow.lock_reason}`} />
+                          )}
+                          {slRow.importError && (
+                            <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-rose-600" title={slRow.errorReason || "Imported with service-line error"} />
                           )}
                         </div>
                       </td>

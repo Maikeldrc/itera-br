@@ -16,7 +16,7 @@ interface ImportModalProps {
   onRollback: (claimIds: string[], fileName?: string) => Promise<{ revertedClaims?: number; requestedClaims?: number }>;
 }
 
-type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[] };
+type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[] };
 
 type ImportSummary = {
   totalRowsRead: number;
@@ -63,6 +63,7 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [isRollbackConfirmOpen, setIsRollbackConfirmOpen] = useState(false);
   const [isRollingBack, setIsRollingBack] = useState(false);
+  const [isForceImporting, setIsForceImporting] = useState(false);
   const [rollbackProgress, setRollbackProgress] = useState<{ percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const correctedFileInputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +89,7 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
     setImportResult(null);
     setIsRollbackConfirmOpen(false);
     setIsRollingBack(false);
+    setIsForceImporting(false);
     setRollbackProgress(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -459,6 +461,17 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         : (isEnglish ? "Correct the source row and re-import it." : "Corrija la fila origen y vuelva a importarla.")
     }));
   });
+  const forcedImportEligibleRows = Array.from(new Set(
+    (importResult?.errors || [])
+      .filter(err => {
+        const messages = Array.isArray(err.errors) ? err.errors : [String(err.errors || "")].filter(Boolean);
+        return messages.length > 0 && messages.every(message =>
+          /requires at least 30 days between DOS dates|exceeds Max\/DOS|can be used .* per DOS/i.test(String(message))
+        );
+      })
+      .map(err => Number(err.row))
+      .filter((row): row is number => Number.isFinite(row) && row > 0)
+  ));
 
   const escapeCsvValue = (value: unknown) => {
     const text = String(value ?? "");
@@ -555,6 +568,28 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       await runImport(rowsToImport);
     };
     reader.readAsText(selectedFile);
+  };
+
+  const handleForceImportRejectedRows = async () => {
+    if (!filePayload || forcedImportEligibleRows.length === 0 || isProcessing || isForceImporting) return;
+    setIsForceImporting(true);
+    try {
+      await runImport({
+        ...filePayload,
+        retryRows: forcedImportEligibleRows,
+        forceImportRows: forcedImportEligibleRows
+      });
+      notify(
+        isEnglish
+          ? "Eligible rejected rows were imported and marked for service-line review."
+          : "Las filas rechazadas elegibles fueron importadas y marcadas para revisión de service line.",
+        "success"
+      );
+    } catch {
+      // runImport already surfaces the failure state.
+    } finally {
+      setIsForceImporting(false);
+    }
   };
 
   return (
@@ -818,8 +853,28 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     <RefreshCw className="w-3.5 h-3.5" />
                     {isEnglish ? "Upload corrected file" : "Cargar archivo corregido"}
                   </button>
+                  {filePayload && forcedImportEligibleRows.length > 0 && (
+                    <button
+                      onClick={handleForceImportRejectedRows}
+                      disabled={isProcessing || isForceImporting}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                      title={isEnglish
+                        ? "Import only rows with recoverable CPT/DOS rule conflicts and mark them for user review."
+                        : "Importa solo filas con conflictos recuperables de reglas CPT/DOS y las marca para revisión."}
+                    >
+                      {isForceImporting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                      {isEnglish ? "Import anyway" : "Importar de todos modos"}
+                    </button>
+                  )}
                 </div>
               </div>
+              {filePayload && forcedImportEligibleRows.length > 0 && (
+                <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-[11px] font-semibold text-amber-800">
+                  {isEnglish
+                    ? `${forcedImportEligibleRows.length} rejected row(s) can be imported anyway. The claim and affected service line will be marked as an error so users must resolve it in Claims Worklist.`
+                    : `${forcedImportEligibleRows.length} fila(s) rechazada(s) se pueden importar de todos modos. El claim y el service line afectado quedarán marcados como error para que el usuario lo resuelva en Claims Worklist.`}
+                </div>
+              )}
               <div className="max-h-72 overflow-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="sticky top-0 z-10 bg-slate-50 border-b border-slate-200 text-slate-500 uppercase tracking-wide">

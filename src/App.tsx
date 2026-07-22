@@ -32,7 +32,8 @@ import {
   KeyRound,
   Eye,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ShieldAlert
 } from "lucide-react";
 
 import { Claim, ClaimStatus, ClaimClassification, ErrorCategory, Payment, Note, AuditLog, Provider, Payer, User, Setting, UserRole, FeeSchedule, EligibilityCoverage, ReportFeeSchedule } from "./types";
@@ -2212,11 +2213,28 @@ export default function App() {
     // Error Flag
     if (filters.errorFlag) {
       const targetFlag = filters.errorFlag === "true";
-      if (claim.error_flag !== targetFlag) return false;
+      const hasServiceLineImportError = (() => {
+        try {
+          const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+          return Array.isArray(lines) && lines.some((line: any) => Boolean(line?.importError || line?.errorFlag));
+        } catch {
+          return false;
+        }
+      })();
+      if ((claim.error_flag || hasServiceLineImportError) !== targetFlag) return false;
     }
 
     return true;
   });
+
+  const serviceLineImportErrorClaimCount = visibleClaims.filter(claim => {
+    try {
+      const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+      return Array.isArray(lines) && lines.some((line: any) => Boolean(line?.importError || line?.errorFlag));
+    } catch {
+      return false;
+    }
+  }).length;
 
   // List of unique service types from claims for filters
   const availableServiceTypes = Array.from(new Set(visibleClaims.map((c) => toText(c.service_type)).filter(Boolean))) as string[];
@@ -2433,6 +2451,33 @@ export default function App() {
                 payers={payers}
                 availableServiceTypes={availableServiceTypes}
               />
+
+              {serviceLineImportErrorClaimCount > 0 && (
+                <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 shadow-xs md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-start gap-2">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div>
+                      <p className="font-bold">
+                        {isEnglish
+                          ? `${serviceLineImportErrorClaimCount} claim(s) have service-line import errors`
+                          : `${serviceLineImportErrorClaimCount} claim(s) tienen errores de importación en service lines`}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-rose-700">
+                        {isEnglish
+                          ? "These claims were imported anyway and require user follow-up before normal reconciliation."
+                          : "Estos claims fueron importados de todos modos y requieren acción del usuario antes de la conciliación normal."}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFilters({ ...INITIAL_FILTERS, errorFlag: "true" })}
+                    className="inline-flex items-center justify-center rounded-lg border border-rose-200 bg-white px-3 py-2 text-[11px] font-bold text-rose-700 hover:bg-rose-100"
+                  >
+                    {isEnglish ? "Show error claims" : "Ver claims con errores"}
+                  </button>
+                </div>
+              )}
 
               {/* Worklist Table */}
               <ClaimsTable

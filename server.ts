@@ -629,6 +629,46 @@ function summarizeImport(
   };
 }
 
+function isForceImportEligibleError(message: string) {
+  return /requires at least 30 days between DOS dates|exceeds Max\/DOS|can be used .* per DOS/i.test(message);
+}
+
+function markClaimAsForcedImportError(claim: Claim, validationErrors: string[], sourceRowNumber: number): Claim {
+  const affectedCpts = new Set<string>();
+  validationErrors.forEach(error => {
+    const match = error.match(/CPT\s+([A-Z0-9]+)/i);
+    if (match?.[1]) affectedCpts.add(match[1]);
+  });
+  const issueNote = `Forced import review required from source row ${sourceRowNumber}: ${validationErrors.join("; ")}`;
+  const serviceLines = serviceLinesFromClaim(claim).map(line => {
+    const lineCpt = textValue(line?.cpt);
+    const isAffected = affectedCpts.size === 0 || affectedCpts.has(lineCpt);
+    if (!isAffected) return line;
+    const notes = Array.isArray(line?.notes) ? [...line.notes] : [];
+    notes.push(issueNote);
+    return {
+      ...line,
+      importError: true,
+      errorFlag: true,
+      errorCategory: ErrorCategory.DuplicateBilling,
+      errorReason: validationErrors.join("; "),
+      nextAction: line?.nextAction && line.nextAction !== "No action" ? line.nextAction : "Correct coding",
+      status: line?.status || "Not Billed",
+      notes
+    };
+  });
+  return {
+    ...claim,
+    claim_status: ClaimStatus.BlockedByError,
+    claim_classification: ClaimClassification.BillingError,
+    error_flag: true,
+    error_category: ErrorCategory.DuplicateBilling,
+    correction_status: "Pending",
+    last_note: `${issueNote}. ${claim.last_note || ""}`.trim(),
+    service_lines_json: JSON.stringify(serviceLines)
+  };
+}
+
 function parseAllowedOrigins() {
   const configured = (process.env.ALLOWED_ORIGIN || process.env.ALLOWED_ORIGINS || "")
     .split(",")
@@ -1942,10 +1982,13 @@ async function startServer() {
   app.post("/api/import-csv", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, retryRows, fileName } = req.body;
+      const { rows, fileBase64, retryRows, fileName, forceImportRows } = req.body;
       const retryRowSet = Array.isArray(retryRows)
         ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
         : null;
+      const forceImportRowSet = Array.isArray(forceImportRows)
+        ? new Set(forceImportRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
+        : new Set<number>();
       const parsedRows = fileBase64 ? parseWorkbookRows(fileBase64) : rows;
       const importRows = retryRowSet
         ? parsedRows?.filter((row: Record<string, unknown>, index: number) => retryRowSet.has(Number(row.__source_row) || index + 1))
@@ -1963,6 +2006,7 @@ async function startServer() {
       const existingClaims = await sheetsService.getClaims();
 
       const claimsToImport: Claim[] = [];
+      const forcedImportClaims: Claim[] = [];
       const errors: { row: number; claimId?: string; errors: string[]; sourceRow?: Record<string, unknown> }[] = [];
 
       for (let i = 0; i < importRows.length; i++) {
@@ -2125,7 +2169,14 @@ async function startServer() {
             [...existingClaims, ...claimsToImport]
           ));
           if (validationErrors.length > 0) {
-            errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
+            const canForceImport = forceImportRowSet.has(sourceRowNumber) && validationErrors.every(isForceImportEligibleError);
+            if (canForceImport) {
+              const forcedClaim = markClaimAsForcedImportError(calculated, validationErrors, sourceRowNumber);
+              claimsToImport.push(forcedClaim);
+              forcedImportClaims.push(forcedClaim);
+            } else {
+              errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
+            }
           } else {
             claimsToImport.push(calculated);
           }
@@ -2201,7 +2252,14 @@ async function startServer() {
           [...existingClaims, ...claimsToImport]
         ));
         if (validationErrors.length > 0) {
-          errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
+          const canForceImport = forceImportRowSet.has(sourceRowNumber) && validationErrors.every(isForceImportEligibleError);
+          if (canForceImport) {
+            const forcedClaim = markClaimAsForcedImportError(calculated, validationErrors, sourceRowNumber);
+            claimsToImport.push(forcedClaim);
+            forcedImportClaims.push(forcedClaim);
+          } else {
+            errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
+          }
         } else {
           claimsToImport.push(calculated);
         }
@@ -2213,6 +2271,7 @@ async function startServer() {
       }
 
       const summary = summarizeImport(importRows, importedClaims, errors);
+      (summary as any).forcedImportedRows = forcedImportClaims.length;
       await sheetsService.createJob({
         job_type: retryRowSet ? "Claims corrected rows import" : "Claims import",
         status: errors.length > 0 ? "failed" : "completed",
@@ -2238,7 +2297,7 @@ async function startServer() {
         action: retryRowSet ? "Import corrected claim rows" : "Import claims",
         entity_type: "Import",
         entity_id: textValue(fileName),
-        metadata_json: JSON.stringify({ importedCount: importedClaims.length, errorCount: errors.length })
+        metadata_json: JSON.stringify({ importedCount: importedClaims.length, errorCount: errors.length, forcedImportedCount: forcedImportClaims.length })
       });
 
       res.json({
@@ -2247,6 +2306,7 @@ async function startServer() {
         errorCount: errors.length,
         errors: errors,
         importedClaimIds: importedClaims.map(claim => claim.claim_id),
+        forcedImportedCount: forcedImportClaims.length,
         rollbackAvailable: importedClaims.length > 0,
         summary
       });
