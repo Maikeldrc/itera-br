@@ -163,6 +163,11 @@ type ServiceCptOption = {
   description: string;
 };
 
+type TableSortState = {
+  field: string;
+  direction: "asc" | "desc";
+};
+
 const toText = (value: unknown) => String(value ?? "").trim();
 
 const normalizeServiceType = (value: unknown) => toText(value).toUpperCase();
@@ -309,6 +314,7 @@ export default function App() {
   const [paymentSourceFilter, setPaymentSourceFilter] = useState("");
   const [paymentPage, setPaymentPage] = useState(1);
   const [paymentRowsPerPage, setPaymentRowsPerPage] = useState(10);
+  const [paymentSort, setPaymentSort] = useState<TableSortState>({ field: "payment_date", direction: "desc" });
   const [claimsKpiExpanded, setClaimsKpiExpanded] = useState(false);
   const [denialSearch, setDenialSearch] = useState("");
   const [denialProviderFilter, setDenialProviderFilter] = useState("");
@@ -318,6 +324,7 @@ export default function App() {
   const [denialCorrectionFilter, setDenialCorrectionFilter] = useState("");
   const [denialPage, setDenialPage] = useState(1);
   const [denialRowsPerPage, setDenialRowsPerPage] = useState(10);
+  const [denialSort, setDenialSort] = useState<TableSortState>({ field: "patient", direction: "asc" });
   const [blockedClaimSearch, setBlockedClaimSearch] = useState("");
   const [blockedClaimProviderFilter, setBlockedClaimProviderFilter] = useState("");
   const [blockedClaimCategoryFilter, setBlockedClaimCategoryFilter] = useState("");
@@ -325,6 +332,7 @@ export default function App() {
   const [blockedClaimTypeFilter, setBlockedClaimTypeFilter] = useState("");
   const [blockedClaimPage, setBlockedClaimPage] = useState(1);
   const [blockedClaimRowsPerPage, setBlockedClaimRowsPerPage] = useState(10);
+  const [blockedClaimSort, setBlockedClaimSort] = useState<TableSortState>({ field: "claim_id", direction: "asc" });
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingClaim, setEditingClaim] = useState<Claim | null>(null);
@@ -356,6 +364,7 @@ export default function App() {
   const [importExceptionStatusFilter, setImportExceptionStatusFilter] = useState("");
   const [importExceptionPage, setImportExceptionPage] = useState(1);
   const [importExceptionRowsPerPage, setImportExceptionRowsPerPage] = useState(10);
+  const [importExceptionSort, setImportExceptionSort] = useState<TableSortState>({ field: "created_at", direction: "desc" });
   const [isClearingImportExceptions, setIsClearingImportExceptions] = useState(false);
   const [closingMonth, setClosingMonth] = useState(false);
   const [closeMonthPeriod, setCloseMonthPeriod] = useState(() => new Date().toISOString().slice(0, 7));
@@ -2255,6 +2264,48 @@ export default function App() {
     await fetchAllData();
   };
 
+  const compareTableValues = (a: unknown, b: unknown) => {
+    const aText = toText(a);
+    const bText = toText(b);
+    const aNum = Number(aText.replace(/[$,]/g, ""));
+    const bNum = Number(bText.replace(/[$,]/g, ""));
+    if (aText !== "" && bText !== "" && Number.isFinite(aNum) && Number.isFinite(bNum)) return aNum - bNum;
+    return aText.localeCompare(bText, undefined, { numeric: true, sensitivity: "base" });
+  };
+
+  const sortRows = <T,>(rows: T[], sort: TableSortState, getter: (row: T, field: string) => unknown) => {
+    return [...rows].sort((a, b) => {
+      const result = compareTableValues(getter(a, sort.field), getter(b, sort.field));
+      return sort.direction === "asc" ? result : -result;
+    });
+  };
+
+  const toggleTableSort = (sort: TableSortState, setSort: React.Dispatch<React.SetStateAction<TableSortState>>, field: string) => {
+    setSort({
+      field,
+      direction: sort.field === field && sort.direction === "asc" ? "desc" : "asc"
+    });
+  };
+
+  const renderSortableHeader = (
+    label: React.ReactNode,
+    field: string,
+    sort: TableSortState,
+    setSort: React.Dispatch<React.SetStateAction<TableSortState>>,
+    className = "px-3 py-2"
+  ) => (
+    <th
+      className={`${className} cursor-pointer select-none hover:bg-slate-100`}
+      onClick={() => toggleTableSort(sort, setSort, field)}
+      title={isEnglish ? "Sort column" : "Ordenar columna"}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sort.field === field && (sort.direction === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+      </span>
+    </th>
+  );
+
   // Filtering claims based on current FilterState
   const filteredClaims = visibleClaims.filter((claim) => {
     // Search
@@ -2401,9 +2452,21 @@ export default function App() {
     if (denialCorrectionFilter && toText(c.correction_status) !== denialCorrectionFilter) return false;
     return true;
   });
-  const denialTotalPages = Math.max(1, Math.ceil(filteredDenialClaims.length / denialRowsPerPage));
+  const sortedDenialClaims = sortRows(filteredDenialClaims, denialSort, (claim, field) => {
+    if (field === "patient") return claim.patient_display_name_masked;
+    if (field === "provider") return claim.provider_name;
+    if (field === "payer") return claim.payer_name;
+    if (field === "cpt") return claim.cpt_hcpcs;
+    if (field === "billed_charge") return claim.billed_charge;
+    if (field === "carc") return claim.carc_code;
+    if (field === "rarc") return claim.rarc_code;
+    if (field === "reason") return claim.denial_reason;
+    if (field === "correction") return claim.correction_status;
+    return claim.claim_id;
+  });
+  const denialTotalPages = Math.max(1, Math.ceil(sortedDenialClaims.length / denialRowsPerPage));
   const currentDenialPage = Math.min(denialPage, denialTotalPages);
-  const paginatedDenialClaims = filteredDenialClaims.slice(
+  const paginatedDenialClaims = sortedDenialClaims.slice(
     (currentDenialPage - 1) * denialRowsPerPage,
     currentDenialPage * denialRowsPerPage
   );
@@ -2445,9 +2508,19 @@ export default function App() {
     if (blockedClaimTypeFilter === "error" && !c.error_flag) return false;
     return true;
   });
-  const blockedClaimTotalPages = Math.max(1, Math.ceil(filteredBlockedClaims.length / blockedClaimRowsPerPage));
+  const sortedBlockedClaims = sortRows(filteredBlockedClaims, blockedClaimSort, (claim, field) => {
+    if (field === "patient") return claim.patient_display_name_masked;
+    if (field === "provider") return claim.provider_name;
+    if (field === "cpt") return claim.cpt_hcpcs;
+    if (field === "charge") return claim.billed_charge;
+    if (field === "category") return claim.error_category;
+    if (field === "reason") return claim.lock_reason;
+    if (field === "correction") return claim.correction_status;
+    return claim.claim_id;
+  });
+  const blockedClaimTotalPages = Math.max(1, Math.ceil(sortedBlockedClaims.length / blockedClaimRowsPerPage));
   const currentBlockedClaimPage = Math.min(blockedClaimPage, blockedClaimTotalPages);
-  const paginatedBlockedClaims = filteredBlockedClaims.slice(
+  const paginatedBlockedClaims = sortedBlockedClaims.slice(
     (currentBlockedClaimPage - 1) * blockedClaimRowsPerPage,
     currentBlockedClaimPage * blockedClaimRowsPerPage
   );
@@ -2488,9 +2561,21 @@ export default function App() {
     if (paymentSourceFilter && toText(payment.payment_source) !== paymentSourceFilter) return false;
     return true;
   });
-  const paymentTotalPages = Math.max(1, Math.ceil(filteredPayments.length / paymentRowsPerPage));
+  const sortedPayments = sortRows(filteredPayments, paymentSort, (payment, field) => {
+    if (field === "claim_id") return payment.claim_id;
+    if (field === "payment_date") return payment.payment_date;
+    if (field === "received_by") return payment.payment_received_by;
+    if (field === "payer") return payment.payer_name;
+    if (field === "amount") return payment.amount;
+    if (field === "eft") return payment.check_or_eft_number;
+    if (field === "era") return payment.era_id;
+    if (field === "eob") return payment.eob_id;
+    if (field === "comments") return payment.notes;
+    return payment.payment_id;
+  });
+  const paymentTotalPages = Math.max(1, Math.ceil(sortedPayments.length / paymentRowsPerPage));
   const currentPaymentPage = Math.min(paymentPage, paymentTotalPages);
-  const paginatedPayments = filteredPayments.slice(
+  const paginatedPayments = sortedPayments.slice(
     (currentPaymentPage - 1) * paymentRowsPerPage,
     currentPaymentPage * paymentRowsPerPage
   );
@@ -2541,9 +2626,22 @@ export default function App() {
     }
     return true;
   });
-  const importExceptionTotalPages = Math.max(1, Math.ceil(filteredImportExceptions.length / importExceptionRowsPerPage));
+  const sortedImportExceptions = sortRows(filteredImportExceptions, importExceptionSort, (item: any, field) => {
+    const task = (operationsData?.reviewTasks || []).find((candidate: any) => candidate.task_id === item.exception_id);
+    const cptSummary = getExceptionCptSummary(item);
+    if (field === "type") return item.type;
+    if (field === "source") return item.source;
+    if (field === "cpt") return cptSummary.total;
+    if (field === "reason") return item.reason;
+    if (field === "severity") return item.severity;
+    if (field === "assigned") return task?.assigned_to || item.assigned_to;
+    if (field === "due") return task?.due_date;
+    if (field === "status") return task?.status || item.status;
+    return item.created_at;
+  });
+  const importExceptionTotalPages = Math.max(1, Math.ceil(sortedImportExceptions.length / importExceptionRowsPerPage));
   const currentImportExceptionPage = Math.min(importExceptionPage, importExceptionTotalPages);
-  const paginatedImportExceptions = filteredImportExceptions.slice(
+  const paginatedImportExceptions = sortedImportExceptions.slice(
     (currentImportExceptionPage - 1) * importExceptionRowsPerPage,
     currentImportExceptionPage * importExceptionRowsPerPage
   );
@@ -3086,14 +3184,14 @@ export default function App() {
                   <table className="w-full min-w-[1180px] text-left text-xs">
                     <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
                       <tr>
-                        <th className="px-3 py-2">Type</th>
-                        <th className="px-3 py-2">Source</th>
-                        <th className="px-3 py-2">CPT</th>
-                        <th className="px-3 py-2">Reason</th>
-                        <th className="px-3 py-2">Severity</th>
-                        <th className="px-3 py-2">Assigned</th>
-                        <th className="px-3 py-2">Due</th>
-                        <th className="px-3 py-2">Status</th>
+                        {renderSortableHeader("Type", "type", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("Source", "source", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("CPT", "cpt", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("Reason", "reason", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("Severity", "severity", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("Assigned", "assigned", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("Due", "due", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("Status", "status", importExceptionSort, setImportExceptionSort)}
                         <th className="px-3 py-2 text-right">Details</th>
                       </tr>
                     </thead>
@@ -3540,15 +3638,15 @@ export default function App() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">ID Claim</th>
-                        <th className="p-3.5">{isEnglish ? "Date" : "Fecha"}</th>
-                        <th className="p-3.5">{isEnglish ? "Channel / Received By" : "Canal / Recibido por"}</th>
-                        <th className="p-3.5">{isEnglish ? "Insurance" : "Aseguradora"}</th>
-                        <th className="p-3.5 text-right">{isEnglish ? "Amount Collected" : "Monto Cobrado"}</th>
-                        <th className="p-3.5">Cheque / EFT #</th>
-                        <th className="p-3.5">ERA ID</th>
-                        <th className="p-3.5">EOB ID</th>
-                        <th className="p-3.5">{isEnglish ? "Comments" : "Comentarios"}</th>
+                        {renderSortableHeader("ID Claim", "claim_id", paymentSort, setPaymentSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Date" : "Fecha", "payment_date", paymentSort, setPaymentSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Channel / Received By" : "Canal / Recibido por", "received_by", paymentSort, setPaymentSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Insurance" : "Aseguradora", "payer", paymentSort, setPaymentSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Amount Collected" : "Monto Cobrado", "amount", paymentSort, setPaymentSort, "p-3.5 text-right")}
+                        {renderSortableHeader("Cheque / EFT #", "eft", paymentSort, setPaymentSort, "p-3.5")}
+                        {renderSortableHeader("ERA ID", "era", paymentSort, setPaymentSort, "p-3.5")}
+                        {renderSortableHeader("EOB ID", "eob", paymentSort, setPaymentSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Comments" : "Comentarios", "comments", paymentSort, setPaymentSort, "p-3.5")}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
@@ -3741,15 +3839,15 @@ export default function App() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">{isEnglish ? "Patient" : "Paciente"}</th>
-                        <th className="p-3.5">{isEnglish ? "Provider" : "Médico"}</th>
-                        <th className="p-3.5">{isEnglish ? "Insurance" : "Aseguradora"}</th>
-                        <th className="p-3.5">CPT</th>
-                        <th className="p-3.5 text-right font-mono">{isEnglish ? "Billed Charge" : "Monto Cargo"}</th>
-                        <th className="p-3.5 font-mono">CARC</th>
-                        <th className="p-3.5 font-mono">RARC</th>
-                        <th className="p-3.5">{isEnglish ? "Payer Reason / Cause" : "Motivo / Causa del Payer"}</th>
-                        <th className="p-3.5">{isEnglish ? "Correction Phase" : "Fase Corrección"}</th>
+                        {renderSortableHeader(isEnglish ? "Patient" : "Paciente", "patient", denialSort, setDenialSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Provider" : "Médico", "provider", denialSort, setDenialSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Insurance" : "Aseguradora", "payer", denialSort, setDenialSort, "p-3.5")}
+                        {renderSortableHeader("CPT", "cpt", denialSort, setDenialSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Billed Charge" : "Monto Cargo", "billed_charge", denialSort, setDenialSort, "p-3.5 text-right font-mono")}
+                        {renderSortableHeader("CARC", "carc", denialSort, setDenialSort, "p-3.5 font-mono")}
+                        {renderSortableHeader("RARC", "rarc", denialSort, setDenialSort, "p-3.5 font-mono")}
+                        {renderSortableHeader(isEnglish ? "Payer Reason / Cause" : "Motivo / Causa del Payer", "reason", denialSort, setDenialSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Correction Phase" : "Fase Corrección", "correction", denialSort, setDenialSort, "p-3.5")}
                         <th className="p-3.5 text-center">{isEnglish ? "Action" : "Acción"}</th>
                       </tr>
                     </thead>
@@ -3884,14 +3982,14 @@ export default function App() {
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">ID Claim</th>
-                        <th className="p-3.5">{isEnglish ? "Patient" : "Paciente"}</th>
-                        <th className="p-3.5">{isEnglish ? "Provider / Clinic" : "Médico / Clínica"}</th>
-                        <th className="p-3.5">CPT</th>
-                        <th className="p-3.5 font-mono text-right">{isEnglish ? "Charge" : "Cargo"}</th>
-                        <th className="p-3.5">{isEnglish ? "Error Category" : "Categoría de Error"}</th>
-                        <th className="p-3.5">{isEnglish ? "Block Detail / Lock Reason" : "Detalle del Bloqueo / Lock Reason"}</th>
-                        <th className="p-3.5">{isEnglish ? "Correction Phase" : "Fase de Corrección"}</th>
+                        {renderSortableHeader("ID Claim", "claim_id", blockedClaimSort, setBlockedClaimSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Patient" : "Paciente", "patient", blockedClaimSort, setBlockedClaimSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Provider / Clinic" : "Médico / Clínica", "provider", blockedClaimSort, setBlockedClaimSort, "p-3.5")}
+                        {renderSortableHeader("CPT", "cpt", blockedClaimSort, setBlockedClaimSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Charge" : "Cargo", "charge", blockedClaimSort, setBlockedClaimSort, "p-3.5 font-mono text-right")}
+                        {renderSortableHeader(isEnglish ? "Error Category" : "Categoría de Error", "category", blockedClaimSort, setBlockedClaimSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Block Detail / Lock Reason" : "Detalle del Bloqueo / Lock Reason", "reason", blockedClaimSort, setBlockedClaimSort, "p-3.5")}
+                        {renderSortableHeader(isEnglish ? "Correction Phase" : "Fase de Corrección", "correction", blockedClaimSort, setBlockedClaimSort, "p-3.5")}
                         <th className="p-3.5 text-center">{isEnglish ? "Action" : "Acción"}</th>
                       </tr>
                     </thead>

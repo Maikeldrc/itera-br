@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ArrowUpRight, CalendarClock, Filter, Search, UserRound } from "lucide-react";
+import { ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, Filter, Search, UserRound } from "lucide-react";
 import { Claim, User } from "../types";
 
 type QueueLine = {
@@ -87,6 +87,7 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
   const [providerFilter, setProviderFilter] = useState("");
   const [payerFilter, setPayerFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [sort, setSort] = useState<{ field: string; direction: "asc" | "desc" }>({ field: "dueDate", direction: "asc" });
   const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
 
   const rows = useMemo(() => claims.flatMap(parseLines), [claims]);
@@ -116,6 +117,42 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
     if (statusFilter && row.status !== statusFilter) return false;
     return true;
   });
+  const sortedRows = useMemo(() => {
+    const valueFor = (row: QueueLine) => {
+      if (sort.field === "patient") return row.claim.patient_display_name_masked || row.claim.patient_id;
+      if (sort.field === "claim") return row.claim.claim_id;
+      if (sort.field === "cpt") return row.cpt;
+      if (sort.field === "nextAction") return row.nextAction;
+      if (sort.field === "provider") return row.providerName;
+      if (sort.field === "payer") return row.payerName;
+      if (sort.field === "dos") return row.dos;
+      if (sort.field === "status") return row.status;
+      if (sort.field === "balance") return row.balance;
+      if (sort.field === "assignedTo") return users.find(user => user.user_id === row.assignedTo || user.email === row.assignedTo)?.name || row.assignedTo;
+      if (sort.field === "notes") return row.notes.length;
+      return row.dueDate || row.followUpDate;
+    };
+    return [...filteredRows].sort((a, b) => {
+      const aValue = valueFor(a);
+      const bValue = valueFor(b);
+      const result = typeof aValue === "number" && typeof bValue === "number"
+        ? aValue - bValue
+        : textValue(aValue).localeCompare(textValue(bValue), undefined, { numeric: true, sensitivity: "base" });
+      return sort.direction === "asc" ? result : -result;
+    });
+  }, [filteredRows, sort, users]);
+  const sortableHeader = (label: React.ReactNode, field: string, className = "px-3 py-3") => (
+    <th
+      className={`${className} cursor-pointer select-none hover:bg-slate-100`}
+      onClick={() => setSort(current => ({ field, direction: current.field === field && current.direction === "asc" ? "desc" : "asc" }))}
+      title={isEnglish ? "Sort column" : "Ordenar columna"}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sort.field === field && (sort.direction === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+      </span>
+    </th>
+  );
 
   const pendingEra = rows.filter(row => row.nextAction === "Pending ERA").length;
   const overdue = rows.filter(row => row.dueDate && row.dueDate < new Date().toISOString().slice(0, 10)).length;
@@ -211,16 +248,16 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
           <table className="w-full min-w-[1180px] border-collapse text-left text-xs">
             <thead className="bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500">
               <tr>
-                <th className="px-3 py-3">{isEnglish ? "Patient / Claim" : "Paciente / Claim"}</th>
-                <th className="px-3 py-3">CPT</th>
-                <th className="px-3 py-3">{isEnglish ? "Next Action" : "Próxima acción"}</th>
-                <th className="px-3 py-3">{isEnglish ? "Provider" : "Provider"}</th>
-                <th className="px-3 py-3">{isEnglish ? "Payer" : "Payer"}</th>
-                <th className="px-3 py-3">DOS</th>
-                <th className="px-3 py-3">{isEnglish ? "Status" : "Estado"}</th>
-                <th className="px-3 py-3 text-right">{isEnglish ? "Balance" : "Balance"}</th>
-                <th className="px-3 py-3">{isEnglish ? "Assignment" : "Asignación"}</th>
-                <th className="px-3 py-3">{isEnglish ? "Notes" : "Notas"}</th>
+                {sortableHeader(isEnglish ? "Patient / Claim" : "Paciente / Claim", "patient")}
+                {sortableHeader("CPT", "cpt")}
+                {sortableHeader(isEnglish ? "Next Action" : "Próxima acción", "nextAction")}
+                {sortableHeader(isEnglish ? "Provider" : "Provider", "provider")}
+                {sortableHeader(isEnglish ? "Payer" : "Payer", "payer")}
+                {sortableHeader("DOS", "dos")}
+                {sortableHeader(isEnglish ? "Status" : "Estado", "status")}
+                {sortableHeader(isEnglish ? "Balance" : "Balance", "balance", "px-3 py-3 text-right")}
+                {sortableHeader(isEnglish ? "Assignment" : "Asignación", "assignedTo")}
+                {sortableHeader(isEnglish ? "Notes" : "Notas", "notes")}
                 <th className="px-3 py-3 text-center">{isEnglish ? "Action" : "Acción"}</th>
               </tr>
             </thead>
@@ -232,7 +269,7 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
                   </td>
                 </tr>
               ) : (
-                filteredRows.map(row => {
+                sortedRows.map(row => {
                   const assignedUser = users.find(user => user.user_id === row.assignedTo || user.email === row.assignedTo);
                   const assignmentMeta = [
                     row.dueDate ? `${isEnglish ? "Due" : "Vence"}: ${shortDate(row.dueDate)}` : "",

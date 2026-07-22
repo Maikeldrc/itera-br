@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, FileSpreadsheet, RefreshCw, Save, SlidersHorizontal, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, FileSpreadsheet, RefreshCw, Save, SlidersHorizontal, Upload, XCircle } from "lucide-react";
 import { apiFetch } from "../apiClient";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
@@ -228,6 +228,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const [resultSearch, setResultSearch] = useState("");
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
   const [resultIssueFilter, setResultIssueFilter] = useState("all");
+  const [resultSort, setResultSort] = useState<{ field: string; direction: "asc" | "desc" }>({ field: "row", direction: "asc" });
 
   const abortRequests = () => {
     schemaRequestRef.current?.abort();
@@ -671,6 +672,38 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
       .map(value => String(value || "").toLowerCase())
       .some(value => value.includes(normalizedResultSearch));
   });
+  const sortedResultRows = [...filteredResultRows].sort((a, b) => {
+    const valueFor = (row: PaymentImportRow) => {
+      if (resultSort.field === "row") return row.rowNumber;
+      if (resultSort.field === "status") return row.status;
+      if (resultSort.field === "claim") return row.claimId;
+      if (resultSort.field === "patient") return `${row.patientName} ${row.patientId}`;
+      if (resultSort.field === "cpt") return row.cptCode;
+      if (resultSort.field === "dos") return row.serviceDate;
+      if (resultSort.field === "payer") return row.reportPayerName || row.payerName;
+      if (resultSort.field === "payment") return row.payment;
+      if (resultSort.field === "issue") return [...row.errors, ...row.warnings].join(" ");
+      return row.rowNumber;
+    };
+    const aValue = valueFor(a);
+    const bValue = valueFor(b);
+    const result = typeof aValue === "number" && typeof bValue === "number"
+      ? aValue - bValue
+      : String(aValue || "").localeCompare(String(bValue || ""), undefined, { numeric: true, sensitivity: "base" });
+    return resultSort.direction === "asc" ? result : -result;
+  });
+  const sortableResultHeader = (label: React.ReactNode, field: string, className = "px-3 py-3") => (
+    <th
+      className={`${className} cursor-pointer select-none hover:bg-slate-100`}
+      onClick={() => setResultSort(current => ({ field, direction: current.field === field && current.direction === "asc" ? "desc" : "asc" }))}
+      title={isEnglish ? "Sort column" : "Ordenar columna"}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {resultSort.field === field && (resultSort.direction === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+      </span>
+    </th>
+  );
   const hasResultFilters = Boolean(normalizedResultSearch || resultStatusFilter !== "all" || resultIssueFilter !== "all");
   const clearResultFilters = () => {
     setResultSearch("");
@@ -1131,19 +1164,19 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
               <table className="w-full min-w-[1180px] border-collapse text-left text-xs">
                 <thead className="sticky top-0 bg-slate-50 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                   <tr>
-                    <th className="px-3 py-3">Row</th>
-                    <th className="px-3 py-3">Status</th>
-                    <th className="px-3 py-3">Claim</th>
-                    <th className="px-3 py-3">Patient</th>
-                    <th className="px-3 py-3">CPT</th>
-                    <th className="px-3 py-3">DOS</th>
-                    <th className="px-3 py-3">Payer</th>
-                    <th className="px-3 py-3 text-right">Payment</th>
-                    <th className="px-3 py-3">Issue</th>
+                    {sortableResultHeader("Row", "row")}
+                    {sortableResultHeader("Status", "status")}
+                    {sortableResultHeader("Claim", "claim")}
+                    {sortableResultHeader("Patient", "patient")}
+                    {sortableResultHeader("CPT", "cpt")}
+                    {sortableResultHeader("DOS", "dos")}
+                    {sortableResultHeader("Payer", "payer")}
+                    {sortableResultHeader("Payment", "payment", "px-3 py-3 text-right")}
+                    {sortableResultHeader("Issue", "issue")}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredResultRows.map(row => (
+                  {sortedResultRows.map(row => (
                     <tr key={`${row.rowNumber}-${row.claimId}-${row.cptCode}`} className="hover:bg-slate-50">
                       <td className="px-3 py-3 font-mono text-slate-500">{row.rowNumber}</td>
                       <td className="px-3 py-3">{statusBadge(row.status, isEnglish)}</td>
