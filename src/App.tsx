@@ -333,6 +333,13 @@ export default function App() {
   const [operationsData, setOperationsData] = useState<any | null>(null);
   const [isLoadingOperations, setIsLoadingOperations] = useState(false);
   const [expandedImportExceptionId, setExpandedImportExceptionId] = useState("");
+  const [importExceptionSearch, setImportExceptionSearch] = useState("");
+  const [importExceptionTypeFilter, setImportExceptionTypeFilter] = useState("");
+  const [importExceptionSourceFilter, setImportExceptionSourceFilter] = useState("");
+  const [importExceptionSeverityFilter, setImportExceptionSeverityFilter] = useState("");
+  const [importExceptionStatusFilter, setImportExceptionStatusFilter] = useState("");
+  const [importExceptionPage, setImportExceptionPage] = useState(1);
+  const [importExceptionRowsPerPage, setImportExceptionRowsPerPage] = useState(10);
   const [isClearingImportExceptions, setIsClearingImportExceptions] = useState(false);
   const [closingMonth, setClosingMonth] = useState(false);
   const [closeMonthPeriod, setCloseMonthPeriod] = useState(() => new Date().toISOString().slice(0, 7));
@@ -2330,6 +2337,58 @@ export default function App() {
     setPaymentSourceFilter("");
     setPaymentPage(1);
   };
+  const importExceptions = operationsData?.importExceptions || [];
+  const importExceptionTypes = Array.from(new Set(importExceptions.map((item: any) => toText(item.type)).filter(Boolean))).sort();
+  const importExceptionSources = Array.from(new Set(importExceptions.map((item: any) => toText(item.source)).filter(Boolean))).sort();
+  const importExceptionSeverities = Array.from(new Set(importExceptions.map((item: any) => toText(item.severity)).filter(Boolean))).sort();
+  const importExceptionStatuses = Array.from(new Set([
+    ...importExceptions.map((item: any) => toText(item.status)).filter(Boolean),
+    ...(operationsData?.reviewTasks || []).map((task: any) => toText(task.status)).filter(Boolean)
+  ])).sort();
+  const filteredImportExceptions = importExceptions.filter((item: any) => {
+    const task = (operationsData?.reviewTasks || []).find((candidate: any) => candidate.task_id === item.exception_id);
+    const search = importExceptionSearch.trim().toLowerCase();
+    if (search) {
+      const matches = [
+        item.exception_id,
+        item.type,
+        item.source,
+        item.reason,
+        item.severity,
+        item.status,
+        item.created_at,
+        item.assigned_to,
+        task?.assigned_to,
+        task?.status,
+        task?.due_date
+      ].some(value => toText(value).toLowerCase().includes(search));
+      if (!matches) return false;
+    }
+    if (importExceptionTypeFilter && toText(item.type) !== importExceptionTypeFilter) return false;
+    if (importExceptionSourceFilter && toText(item.source) !== importExceptionSourceFilter) return false;
+    if (importExceptionSeverityFilter && toText(item.severity) !== importExceptionSeverityFilter) return false;
+    if (importExceptionStatusFilter) {
+      const status = task?.status || item.status;
+      if (toText(status) !== importExceptionStatusFilter) return false;
+    }
+    return true;
+  });
+  const importExceptionTotalPages = Math.max(1, Math.ceil(filteredImportExceptions.length / importExceptionRowsPerPage));
+  const currentImportExceptionPage = Math.min(importExceptionPage, importExceptionTotalPages);
+  const paginatedImportExceptions = filteredImportExceptions.slice(
+    (currentImportExceptionPage - 1) * importExceptionRowsPerPage,
+    currentImportExceptionPage * importExceptionRowsPerPage
+  );
+  const importExceptionPageStart = filteredImportExceptions.length === 0 ? 0 : (currentImportExceptionPage - 1) * importExceptionRowsPerPage + 1;
+  const importExceptionPageEnd = Math.min(currentImportExceptionPage * importExceptionRowsPerPage, filteredImportExceptions.length);
+  const resetImportExceptionFilters = () => {
+    setImportExceptionSearch("");
+    setImportExceptionTypeFilter("");
+    setImportExceptionSourceFilter("");
+    setImportExceptionSeverityFilter("");
+    setImportExceptionStatusFilter("");
+    setImportExceptionPage(1);
+  };
 
   // Clickable KPI card trigger helper
   const handleKPICardClick = (field: keyof FilterState, value: string) => {
@@ -2671,6 +2730,87 @@ export default function App() {
                   <h3 className="text-sm font-bold text-slate-900">{isEnglish ? "Exception Queue" : "Cola de Excepciones"}</h3>
                   <p className="mt-0.5 text-[10px] text-slate-500">{isEnglish ? "Review tasks can be assigned and resolved directly here." : "Las tareas de revisión se pueden asignar y resolver directamente aquí."}</p>
                 </div>
+                <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_170px_190px_160px_170px_auto]">
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Search" : "Buscar"}</span>
+                      <input
+                        value={importExceptionSearch}
+                        onChange={event => {
+                          setImportExceptionSearch(event.target.value);
+                          setImportExceptionPage(1);
+                        }}
+                        placeholder={isEnglish ? "Reason, source, task, status..." : "Razón, source, tarea, estado..."}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Type</span>
+                      <select
+                        value={importExceptionTypeFilter}
+                        onChange={event => {
+                          setImportExceptionTypeFilter(event.target.value);
+                          setImportExceptionPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">{isEnglish ? "All types" : "Todos"}</option>
+                        {importExceptionTypes.map(type => <option key={type} value={type}>{type}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Source</span>
+                      <select
+                        value={importExceptionSourceFilter}
+                        onChange={event => {
+                          setImportExceptionSourceFilter(event.target.value);
+                          setImportExceptionPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">{isEnglish ? "All sources" : "Todos"}</option>
+                        {importExceptionSources.map(source => <option key={source} value={source}>{source}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Severity</span>
+                      <select
+                        value={importExceptionSeverityFilter}
+                        onChange={event => {
+                          setImportExceptionSeverityFilter(event.target.value);
+                          setImportExceptionPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">{isEnglish ? "All severities" : "Todas"}</option>
+                        {importExceptionSeverities.map(severity => <option key={severity} value={severity}>{severity}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Status</span>
+                      <select
+                        value={importExceptionStatusFilter}
+                        onChange={event => {
+                          setImportExceptionStatusFilter(event.target.value);
+                          setImportExceptionPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">{isEnglish ? "All statuses" : "Todos"}</option>
+                        {importExceptionStatuses.map(status => <option key={status} value={status}>{status}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={resetImportExceptionFilters}
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100"
+                      >
+                        {isEnglish ? "Reset" : "Limpiar"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div className="overflow-auto">
                   <table className="w-full min-w-[1180px] text-left text-xs">
                     <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
@@ -2687,7 +2827,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {(operationsData?.importExceptions || []).slice(0, 100).map((item: any) => {
+                      {paginatedImportExceptions.map((item: any) => {
                         const task = (operationsData?.reviewTasks || []).find((candidate: any) => candidate.task_id === item.exception_id);
                         const details = item.details || {};
                         const summary = details.summary || parseOperationJson(details.importHistory?.summary_json || details.job?.summary_json);
@@ -2875,11 +3015,58 @@ export default function App() {
                           </React.Fragment>
                         );
                       })}
-                      {(!operationsData?.importExceptions || operationsData.importExceptions.length === 0) && (
-                        <tr><td colSpan={9} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">{isLoadingOperations ? (isEnglish ? "Loading..." : "Cargando...") : (isEnglish ? "No import exceptions." : "No hay excepciones de importación.")}</td></tr>
+                      {paginatedImportExceptions.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">
+                            {isLoadingOperations
+                              ? (isEnglish ? "Loading..." : "Cargando...")
+                              : filteredImportExceptions.length === 0 && importExceptions.length > 0
+                                ? (isEnglish ? "No import exceptions match the selected filters." : "No hay excepciones que coincidan con los filtros seleccionados.")
+                                : (isEnglish ? "No import exceptions." : "No hay excepciones de importación.")}
+                          </td>
+                        </tr>
                       )}
                     </tbody>
                   </table>
+                </div>
+                <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                  <div className="text-xs font-semibold text-slate-600">
+                    {isEnglish ? "Showing" : "Mostrando"} <span className="font-mono text-slate-900">{importExceptionPageStart}</span> {isEnglish ? "to" : "a"} <span className="font-mono text-slate-900">{importExceptionPageEnd}</span> {isEnglish ? "of" : "de"} <span className="font-mono text-slate-900">{filteredImportExceptions.length}</span> {isEnglish ? "exceptions" : "excepciones"}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                      {isEnglish ? "Rows" : "Filas"}
+                      <select
+                        value={importExceptionRowsPerPage}
+                        onChange={event => {
+                          setImportExceptionRowsPerPage(Number(event.target.value));
+                          setImportExceptionPage(1);
+                        }}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        {[10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setImportExceptionPage(page => Math.max(1, page - 1))}
+                      disabled={currentImportExceptionPage <= 1}
+                      className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      {isEnglish ? "Previous" : "Anterior"}
+                    </button>
+                    <span className="rounded-lg bg-primary-blue px-3 py-2 text-xs font-bold text-white">
+                      {currentImportExceptionPage} / {importExceptionTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setImportExceptionPage(page => Math.min(importExceptionTotalPages, page + 1))}
+                      disabled={currentImportExceptionPage >= importExceptionTotalPages}
+                      className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      {isEnglish ? "Next" : "Siguiente"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
