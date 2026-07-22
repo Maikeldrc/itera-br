@@ -186,6 +186,7 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
     const allPaid = statuses.every(status => status === "Paid");
     const allDenied = statuses.every(status => DENIAL_LINE_STATUSES.has(status));
     const hasMixedOutcome = new Set(statuses).size > 1 || statuses.some(status => status === "Partially Paid");
+    const isTrackedErrorClaim = claim.claim_status === ClaimStatus.BlockedByError && Boolean(claim.error_flag && claim.error_category);
 
     if (claim.claim_status === ClaimStatus.Paid && !allPaid) {
       claimErrors.push("Claim status Paid requires every CPT service line to be Paid.");
@@ -196,7 +197,7 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
     if (claim.claim_status === ClaimStatus.PartiallyPaid && !hasMixedOutcome && !(hasPaidLine && hasDeniedLine)) {
       claimErrors.push("Claim status Partially Paid requires mixed CPT outcomes or at least one partially paid line.");
     }
-    if (hasPaidLine && hasDeniedLine && claim.claim_status !== ClaimStatus.PartiallyPaid) {
+    if (hasPaidLine && hasDeniedLine && claim.claim_status !== ClaimStatus.PartiallyPaid && !isTrackedErrorClaim) {
       claimErrors.push("Claims with both paid and denied CPT lines must use claim status Partially Paid.");
     }
   }
