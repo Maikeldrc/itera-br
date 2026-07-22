@@ -212,6 +212,9 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const [progress, setProgress] = useState<ImportProgressState | null>(null);
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
   const [result, setResult] = useState<PaymentImportResult | null>(null);
+  const [resultSearch, setResultSearch] = useState("");
+  const [resultStatusFilter, setResultStatusFilter] = useState("all");
+  const [resultIssueFilter, setResultIssueFilter] = useState("all");
 
   const abortRequests = () => {
     schemaRequestRef.current?.abort();
@@ -264,6 +267,9 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     setSystemName("");
     setSelectedTemplateId("");
     setResult(null);
+    setResultSearch("");
+    setResultStatusFilter("all");
+    setResultIssueFilter("all");
     setProgress(null);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -324,6 +330,9 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const processFile = (file: File) => {
     setFileName(file.name);
     setResult(null);
+    setResultSearch("");
+    setResultStatusFilter("all");
+    setResultIssueFilter("all");
     setSchema(null);
     setMapping({});
     setSelectedTemplateId("");
@@ -564,6 +573,38 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   };
 
   const summary = result?.summary;
+  const resultRows = result?.rows || [];
+  const normalizedResultSearch = resultSearch.trim().toLowerCase();
+  const filteredResultRows = resultRows.filter(row => {
+    if (resultStatusFilter !== "all" && row.status !== resultStatusFilter) return false;
+    if (resultIssueFilter === "errors" && row.errors.length === 0) return false;
+    if (resultIssueFilter === "warnings" && row.warnings.length === 0) return false;
+    if (resultIssueFilter === "payer_mismatch" && !row.payerMismatch) return false;
+    if (resultIssueFilter === "safe_match" && (row.errors.length > 0 || row.warnings.length > 0)) return false;
+    if (!normalizedResultSearch) return true;
+    return [
+      row.rowNumber,
+      row.claimId,
+      row.patientId,
+      row.patientName,
+      row.cptCode,
+      row.serviceDate,
+      row.payerName,
+      row.claimPayerName,
+      row.reportPayerName,
+      row.payment,
+      ...row.errors,
+      ...row.warnings
+    ]
+      .map(value => String(value || "").toLowerCase())
+      .some(value => value.includes(normalizedResultSearch));
+  });
+  const hasResultFilters = Boolean(normalizedResultSearch || resultStatusFilter !== "all" || resultIssueFilter !== "all");
+  const clearResultFilters = () => {
+    setResultSearch("");
+    setResultStatusFilter("all");
+    setResultIssueFilter("all");
+  };
 
   return (
     <div className="space-y-5">
@@ -910,20 +951,76 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="border-b border-slate-100 px-4 py-3">
-              <h3 className="text-sm font-bold text-slate-800">
-                {result?.applied
-                  ? (isEnglish ? "Payment Import Result" : "Resultado de importación de pagos")
-                  : (isEnglish ? "Preflight Analysis" : "Análisis previo")}
-              </h3>
-              <p className="mt-0.5 text-xs text-slate-500">
-                {result?.applied
-                  ? (isEnglish
-                    ? "Rows marked Ready were imported. Needs Review rows were intentionally not overwritten."
-                    : "Las filas Ready se importaron. Las filas en revisión no se sobreescriben.")
-                  : (isEnglish
-                    ? "This is a dry-run validation. No claim or payment data has been written yet."
-                    : "Esta es una validación previa. Todavía no se ha escrito información de claims ni pagos.")}
-              </p>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">
+                    {result?.applied
+                      ? (isEnglish ? "Payment Import Result" : "Resultado de importación de pagos")
+                      : (isEnglish ? "Preflight Analysis" : "Análisis previo")}
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-500">
+                    {result?.applied
+                      ? (isEnglish
+                        ? "Rows marked Ready were imported. Needs Review rows were intentionally not overwritten."
+                        : "Las filas Ready se importaron. Las filas en revisión no se sobreescriben.")
+                      : (isEnglish
+                        ? "This is a dry-run validation. No claim or payment data has been written yet."
+                        : "Esta es una validación previa. Todavía no se ha escrito información de claims ni pagos.")}
+                  </p>
+                </div>
+                <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-600">
+                  {isEnglish ? "Showing" : "Mostrando"} {filteredResultRows.length} {isEnglish ? "of" : "de"} {resultRows.length}
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(260px,1.3fr)_180px_220px_auto]">
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Search result" : "Buscar resultado"}</span>
+                  <input
+                    value={resultSearch}
+                    onChange={event => setResultSearch(event.target.value)}
+                    placeholder={isEnglish ? "Row, claim, patient, CPT, payer, issue..." : "Fila, claim, paciente, CPT, payer, problema..."}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Status" : "Estado"}</span>
+                  <select
+                    value={resultStatusFilter}
+                    onChange={event => setResultStatusFilter(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  >
+                    <option value="all">{isEnglish ? "All statuses" : "Todos"}</option>
+                    <option value="ready">{isEnglish ? "Ready" : "Lista"}</option>
+                    <option value="imported">{isEnglish ? "Imported" : "Importada"}</option>
+                    <option value="needs_review">{isEnglish ? "Needs Review" : "Requiere revisión"}</option>
+                    <option value="rejected">{isEnglish ? "Rejected" : "Rechazada"}</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Issue type" : "Tipo de issue"}</span>
+                  <select
+                    value={resultIssueFilter}
+                    onChange={event => setResultIssueFilter(event.target.value)}
+                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
+                  >
+                    <option value="all">{isEnglish ? "All rows" : "Todas las filas"}</option>
+                    <option value="errors">{isEnglish ? "Errors only" : "Solo errores"}</option>
+                    <option value="warnings">{isEnglish ? "Warnings only" : "Solo advertencias"}</option>
+                    <option value="payer_mismatch">{isEnglish ? "Payer mismatch" : "Payer diferente"}</option>
+                    <option value="safe_match">{isEnglish ? "Safe matches" : "Coincidencias seguras"}</option>
+                  </select>
+                </label>
+                <div className="flex items-end">
+                  <button
+                    type="button"
+                    onClick={clearResultFilters}
+                    disabled={!hasResultFilters}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {isEnglish ? "Clear filters" : "Limpiar filtros"}
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="max-h-[520px] overflow-auto">
               <table className="w-full min-w-[1180px] border-collapse text-left text-xs">
@@ -941,7 +1038,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {result.rows.map(row => (
+                  {filteredResultRows.map(row => (
                     <tr key={`${row.rowNumber}-${row.claimId}-${row.cptCode}`} className="hover:bg-slate-50">
                       <td className="px-3 py-3 font-mono text-slate-500">{row.rowNumber}</td>
                       <td className="px-3 py-3">{statusBadge(row.status, isEnglish)}</td>
@@ -996,6 +1093,13 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                       </td>
                     </tr>
                   ))}
+                  {filteredResultRows.length === 0 && (
+                    <tr>
+                      <td colSpan={9} className="px-3 py-10 text-center text-xs font-semibold text-slate-500">
+                        {isEnglish ? "No rows match the selected filters." : "No hay filas que coincidan con los filtros seleccionados."}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
