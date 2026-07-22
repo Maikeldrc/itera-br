@@ -2869,7 +2869,7 @@ async function startServer() {
                 era_id: "",
                 eob_id: row.paymentDate ? `EOB-${row.paymentDate}` : "",
                 payment_source: "Payment Import",
-                notes: `Imported from payer payment report row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.`,
+                notes: `Imported from payer payment report "${textValue(fileName) || "Unknown file"}" row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.`,
                 created_at: "",
                 updated_at: ""
               };

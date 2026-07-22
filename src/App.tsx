@@ -300,6 +300,7 @@ export default function App() {
   const [filters, setFilters] = useState<FilterState>(INITIAL_FILTERS);
   const [selectedClaimIds, setSelectedClaimIds] = useState<string[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
+  const [selectedPaymentDetails, setSelectedPaymentDetails] = useState<Payment | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingClaim, setEditingClaim] = useState<Claim | null>(null);
@@ -2963,7 +2964,21 @@ export default function App() {
                           <td className="p-3.5 font-mono text-slate-500">{p.check_or_eft_number}</td>
                           <td className="p-3.5 font-mono text-slate-400">{p.era_id || "-"}</td>
                           <td className="p-3.5 font-mono text-slate-400">{p.eob_id || "-"}</td>
-                          <td className="p-3.5 text-slate-500 max-w-xs truncate" title={p.notes}>{p.notes}</td>
+                          <td className="p-3.5 text-slate-500 max-w-xs">
+                            <div className="flex items-center gap-2">
+                              <span className="min-w-0 flex-1 truncate" title={p.notes}>{p.notes || "-"}</span>
+                              {p.notes && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPaymentDetails(p)}
+                                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-[10px] font-bold text-primary-blue hover:bg-blue-100"
+                                >
+                                  <Eye className="h-3.5 w-3.5" />
+                                  {isEnglish ? "Details" : "Detalles"}
+                                </button>
+                              )}
+                            </div>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -5748,6 +5763,67 @@ export default function App() {
                 className="rounded-lg bg-primary-blue px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-dark-blue disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isChangingUserPassword ? (isEnglish ? "Changing..." : "Cambiando...") : (isEnglish ? "Change Password" : "Cambiar password")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: PAYMENT DETAILS */}
+      {selectedPaymentDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl bg-blue-50 p-2 text-primary-blue">
+                  <Coins className="h-5 w-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Payment Details" : "Detalles del Pago"}</h4>
+                  <p className="font-mono text-[11px] text-slate-500">{selectedPaymentDetails.payment_id}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentDetails(null)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-700"
+              >
+                <X className="h-4.5 w-4.5" />
+              </button>
+            </div>
+            <div className="space-y-4 p-5 text-xs">
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {[
+                  [isEnglish ? "Claim" : "Claim", selectedPaymentDetails.claim_id],
+                  [isEnglish ? "Date" : "Fecha", selectedPaymentDetails.payment_date],
+                  [isEnglish ? "Received by" : "Recibido por", selectedPaymentDetails.payment_received_by],
+                  [isEnglish ? "Insurance" : "Aseguradora", selectedPaymentDetails.payer_name],
+                  [isEnglish ? "Amount" : "Monto", formatUSD(selectedPaymentDetails.amount)],
+                  ["EFT / Check #", selectedPaymentDetails.check_or_eft_number || "-"],
+                  ["ERA ID", selectedPaymentDetails.era_id || "-"],
+                  ["EOB ID", selectedPaymentDetails.eob_id || "-"],
+                  [isEnglish ? "Source" : "Origen", selectedPaymentDetails.payment_source || "-"]
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+                    <p className="mt-1 break-words font-semibold text-slate-800">{value}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{isEnglish ? "Comments" : "Comentarios"}</p>
+                <p className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-700">
+                  {selectedPaymentDetails.notes || "-"}
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end border-t border-slate-100 bg-slate-50 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setSelectedPaymentDetails(null)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100"
+              >
+                {isEnglish ? "Close" : "Cerrar"}
               </button>
             </div>
           </div>
