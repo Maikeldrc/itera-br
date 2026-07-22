@@ -314,6 +314,34 @@ function linePaymentTotal(line: any) {
   return Number(line?.paid || 0) + Number(line?.secondaryPaid || 0);
 }
 
+function moneyText(value: unknown) {
+  return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function existingPaymentActivityMessage(claim: Partial<Claim>, line: any, cptCode: string, serviceDate: string) {
+  const paid = Number(line?.paid || 0);
+  const secondaryPaid = Number(line?.secondaryPaid || 0);
+  const patientResponsibility = Number(line?.patResp || 0);
+  const adjustment = Number(line?.adj || 0);
+  const balance = Number(line?.balance || 0);
+  const totalPaid = Number((paid + secondaryPaid).toFixed(2));
+  const lineDos = serviceLineDos(line, claim) || serviceDate || "";
+  const details = [
+    `status ${textValue(line?.status) || "N/A"}`,
+    `paid ${moneyText(totalPaid)}`,
+    `primary ${moneyText(paid)}`,
+    `secondary ${moneyText(secondaryPaid)}`,
+    `patient resp ${moneyText(patientResponsibility)}`,
+    `adj ${moneyText(adjustment)}`,
+    `balance ${moneyText(balance)}`
+  ];
+  const paymentDate = textValue(line?.paymentDate);
+  const eftNumber = textValue(line?.eftNumber);
+  if (paymentDate) details.push(`payment date ${paymentDate}`);
+  if (eftNumber) details.push(`EFT/check ${eftNumber}`);
+  return `Matched claim ${claim.claim_id || "unknown"} CPT ${cptCode || textValue(line?.cpt) || "unknown"}${lineDos ? ` DOS ${lineDos}` : ""} already has payment activity (${details.join(", ")}). It was not overwritten.`;
+}
+
 function serviceLineDos(line: any, claim: Partial<Claim>) {
   return textValue(line?.dos || claim.date_of_service_from || claim.date_of_service_to).slice(0, 10);
 }
@@ -2664,7 +2692,7 @@ async function startServer() {
           claim && linePaymentTotal(targetLine) > 0
         );
         if (errors.length === 0 && hasExistingPayment) {
-          warnings.push("Matched claim/CPT already has payment activity. It was not overwritten.");
+          warnings.push(existingPaymentActivityMessage(claim, targetLine, cptCode, row.serviceDate));
         }
 
         return {
