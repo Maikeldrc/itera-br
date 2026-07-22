@@ -301,6 +301,14 @@ export default function App() {
   const [selectedClaimIds, setSelectedClaimIds] = useState<string[]>([]);
   const [selectedClaim, setSelectedClaim] = useState<Claim | null>(null);
   const [selectedPaymentDetails, setSelectedPaymentDetails] = useState<Payment | null>(null);
+  const [paymentSearch, setPaymentSearch] = useState("");
+  const [paymentStartDate, setPaymentStartDate] = useState("");
+  const [paymentEndDate, setPaymentEndDate] = useState("");
+  const [paymentReceivedByFilter, setPaymentReceivedByFilter] = useState("");
+  const [paymentPayerFilter, setPaymentPayerFilter] = useState("");
+  const [paymentSourceFilter, setPaymentSourceFilter] = useState("");
+  const [paymentPage, setPaymentPage] = useState(1);
+  const [paymentRowsPerPage, setPaymentRowsPerPage] = useState(10);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingClaim, setEditingClaim] = useState<Claim | null>(null);
@@ -2278,6 +2286,50 @@ export default function App() {
 
   // List of unique service types from claims for filters
   const availableServiceTypes = Array.from(new Set(visibleClaims.map((c) => toText(c.service_type)).filter(Boolean))) as string[];
+  const paymentPayers = Array.from(new Set(payments.map(payment => toText(payment.payer_name)).filter(Boolean))).sort();
+  const paymentSources = Array.from(new Set(payments.map(payment => toText(payment.payment_source)).filter(Boolean))).sort();
+  const filteredPayments = payments.filter(payment => {
+    const search = paymentSearch.trim().toLowerCase();
+    if (search) {
+      const matches = [
+        payment.payment_id,
+        payment.claim_id,
+        payment.payment_date,
+        payment.payment_received_by,
+        payment.payer_name,
+        payment.amount,
+        payment.check_or_eft_number,
+        payment.era_id,
+        payment.eob_id,
+        payment.payment_source,
+        payment.notes
+      ].some(value => toText(value).toLowerCase().includes(search));
+      if (!matches) return false;
+    }
+    if (paymentStartDate && toText(payment.payment_date) < paymentStartDate) return false;
+    if (paymentEndDate && toText(payment.payment_date) > paymentEndDate) return false;
+    if (paymentReceivedByFilter && toText(payment.payment_received_by) !== paymentReceivedByFilter) return false;
+    if (paymentPayerFilter && toText(payment.payer_name) !== paymentPayerFilter) return false;
+    if (paymentSourceFilter && toText(payment.payment_source) !== paymentSourceFilter) return false;
+    return true;
+  });
+  const paymentTotalPages = Math.max(1, Math.ceil(filteredPayments.length / paymentRowsPerPage));
+  const currentPaymentPage = Math.min(paymentPage, paymentTotalPages);
+  const paginatedPayments = filteredPayments.slice(
+    (currentPaymentPage - 1) * paymentRowsPerPage,
+    currentPaymentPage * paymentRowsPerPage
+  );
+  const paymentPageStart = filteredPayments.length === 0 ? 0 : (currentPaymentPage - 1) * paymentRowsPerPage + 1;
+  const paymentPageEnd = Math.min(currentPaymentPage * paymentRowsPerPage, filteredPayments.length);
+  const resetPaymentFilters = () => {
+    setPaymentSearch("");
+    setPaymentStartDate("");
+    setPaymentEndDate("");
+    setPaymentReceivedByFilter("");
+    setPaymentPayerFilter("");
+    setPaymentSourceFilter("");
+    setPaymentPage(1);
+  };
 
   // Clickable KPI card trigger helper
   const handleKPICardClick = (field: keyof FilterState, value: string) => {
@@ -2930,13 +2982,106 @@ export default function App() {
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
                 <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                   <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Recorded Payment History" : "Cobros Históricos Registrados"}</h4>
-                  <span className="text-xs text-slate-500 font-mono">{isEnglish ? "Total collected" : "Total cobrado"}: {formatUSD(payments.reduce((acc, p) => acc + p.amount, 0))}</span>
+                  <span className="text-xs text-slate-500 font-mono">
+                    {isEnglish ? "Filtered collected" : "Cobrado filtrado"}: {formatUSD(filteredPayments.reduce((acc, p) => acc + p.amount, 0))}
+                  </span>
+                </div>
+                <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_160px_160px_170px_1fr_180px_auto]">
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Search" : "Buscar"}</span>
+                      <input
+                        value={paymentSearch}
+                        onChange={event => {
+                          setPaymentSearch(event.target.value);
+                          setPaymentPage(1);
+                        }}
+                        placeholder={isEnglish ? "Claim, payer, EFT, ERA, comment..." : "Claim, payer, EFT, ERA, comentario..."}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "From" : "Desde"}</span>
+                      <input
+                        type="date"
+                        value={paymentStartDate}
+                        onChange={event => {
+                          setPaymentStartDate(event.target.value);
+                          setPaymentPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "To" : "Hasta"}</span>
+                      <input
+                        type="date"
+                        value={paymentEndDate}
+                        onChange={event => {
+                          setPaymentEndDate(event.target.value);
+                          setPaymentPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Received by" : "Recibido por"}</span>
+                      <select
+                        value={paymentReceivedByFilter}
+                        onChange={event => {
+                          setPaymentReceivedByFilter(event.target.value);
+                          setPaymentPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">{isEnglish ? "All" : "Todos"}</option>
+                        <option value="ITERA">ITERA</option>
+                        <option value="Provider">Provider</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Insurance" : "Aseguradora"}</span>
+                      <select
+                        value={paymentPayerFilter}
+                        onChange={event => {
+                          setPaymentPayerFilter(event.target.value);
+                          setPaymentPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">{isEnglish ? "All payers" : "Todos los payers"}</option>
+                        {paymentPayers.map(payer => <option key={payer} value={payer}>{payer}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Source" : "Origen"}</span>
+                      <select
+                        value={paymentSourceFilter}
+                        onChange={event => {
+                          setPaymentSourceFilter(event.target.value);
+                          setPaymentPage(1);
+                        }}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      >
+                        <option value="">{isEnglish ? "All sources" : "Todos"}</option>
+                        {paymentSources.map(source => <option key={source} value={source}>{source}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex items-end">
+                      <button
+                        type="button"
+                        onClick={resetPaymentFilters}
+                        className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100"
+                      >
+                        {isEnglish ? "Reset" : "Limpiar"}
+                      </button>
+                    </div>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
                       <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                        <th className="p-3.5">{isEnglish ? "Deposit ID" : "ID Depósito"}</th>
                         <th className="p-3.5">ID Claim</th>
                         <th className="p-3.5">{isEnglish ? "Date" : "Fecha"}</th>
                         <th className="p-3.5">{isEnglish ? "Channel / Received By" : "Canal / Recibido por"}</th>
@@ -2949,9 +3094,8 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
-                      {payments.map((p) => (
+                      {paginatedPayments.map((p) => (
                         <tr key={p.payment_id} className="hover:bg-slate-50">
-                          <td className="p-3.5 font-bold text-slate-900 font-mono">{p.payment_id}</td>
                           <td className="p-3.5 font-bold text-primary-blue font-mono">{p.claim_id}</td>
                           <td className="p-3.5 font-mono text-slate-500">{p.payment_date}</td>
                           <td className="p-3.5">
@@ -2981,8 +3125,54 @@ export default function App() {
                           </td>
                         </tr>
                       ))}
+                      {paginatedPayments.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="p-8 text-center text-xs font-semibold text-slate-400">
+                            {isEnglish ? "No payments match the selected filters." : "No hay pagos que coincidan con los filtros seleccionados."}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
+                </div>
+                <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                  <div className="text-xs font-semibold text-slate-600">
+                    {isEnglish ? "Showing" : "Mostrando"} <span className="font-mono text-slate-900">{paymentPageStart}</span> {isEnglish ? "to" : "a"} <span className="font-mono text-slate-900">{paymentPageEnd}</span> {isEnglish ? "of" : "de"} <span className="font-mono text-slate-900">{filteredPayments.length}</span> {isEnglish ? "payments" : "pagos"}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                      {isEnglish ? "Rows" : "Filas"}
+                      <select
+                        value={paymentRowsPerPage}
+                        onChange={event => {
+                          setPaymentRowsPerPage(Number(event.target.value));
+                          setPaymentPage(1);
+                        }}
+                        className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700"
+                      >
+                        {[10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+                      </select>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentPage(page => Math.max(1, page - 1))}
+                      disabled={currentPaymentPage <= 1}
+                      className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      {isEnglish ? "Previous" : "Anterior"}
+                    </button>
+                    <span className="rounded-lg bg-primary-blue px-3 py-2 text-xs font-bold text-white">
+                      {currentPaymentPage} / {paymentTotalPages}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPaymentPage(page => Math.min(paymentTotalPages, page + 1))}
+                      disabled={currentPaymentPage >= paymentTotalPages}
+                      className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                    >
+                      {isEnglish ? "Next" : "Siguiente"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
