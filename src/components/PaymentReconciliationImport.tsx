@@ -605,6 +605,21 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     setResultStatusFilter("all");
     setResultIssueFilter("all");
   };
+  const applyResultStatusFilter = (status: string) => {
+    setResultSearch("");
+    setResultIssueFilter("all");
+    setResultStatusFilter(status);
+  };
+  const summaryCards = summary ? [
+    { key: "rows", label: isEnglish ? "Rows" : "Filas", value: summary.totalRowsRead, status: "all" },
+    { key: "ready", label: isEnglish ? "Ready" : "Listas", value: summary.readyToImport, status: "ready" },
+    { key: "imported", label: isEnglish ? "Imported" : "Importadas", value: summary.importedRows, status: "imported" },
+    { key: "review", label: isEnglish ? "Review" : "Revisión", value: summary.needsReviewRows, status: "needs_review" },
+    { key: "rejected", label: isEnglish ? "Rejected" : "Rechazadas", value: summary.rejectedRows, status: "rejected" },
+    { key: "claims", label: isEnglish ? "Claims" : "Claims", value: summary.matchedClaims },
+    { key: "cpt", label: isEnglish ? "CPT" : "CPT", value: summary.matchedCptCodes },
+    { key: "importedAmount", label: isEnglish ? "Imported $" : "$ importado", value: money(summary.totalPaymentImported) }
+  ] : [];
 
   return (
     <div className="space-y-5">
@@ -932,21 +947,36 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
       {summary && (
         <div className="space-y-4">
           <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
-            {[
-              [isEnglish ? "Rows" : "Filas", summary.totalRowsRead],
-              [isEnglish ? "Ready" : "Listas", summary.readyToImport],
-              [isEnglish ? "Imported" : "Importadas", summary.importedRows],
-              [isEnglish ? "Review" : "Revisión", summary.needsReviewRows],
-              [isEnglish ? "Rejected" : "Rechazadas", summary.rejectedRows],
-              [isEnglish ? "Claims" : "Claims", summary.matchedClaims],
-              [isEnglish ? "CPT" : "CPT", summary.matchedCptCodes],
-              [isEnglish ? "Imported $" : "$ importado", money(summary.totalPaymentImported)]
-            ].map(([label, value]) => (
-              <div key={String(label)} className="rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
-                <p className="mt-1 font-mono text-base font-bold text-slate-900">{value}</p>
-              </div>
-            ))}
+            {summaryCards.map(card => {
+              const isFilterCard = Boolean(card.status);
+              const isActive = isFilterCard && resultStatusFilter === card.status && resultIssueFilter === "all" && !normalizedResultSearch;
+              const className = `rounded-lg border px-3 py-2 text-left shadow-sm transition ${
+                isActive
+                  ? "border-primary-blue bg-blue-50 ring-2 ring-blue-100"
+                  : "border-slate-200 bg-white"
+              } ${isFilterCard ? "cursor-pointer hover:border-primary-blue hover:bg-blue-50" : ""}`;
+              const content = (
+                <>
+                  <p className={`text-[10px] font-bold uppercase tracking-wide ${isActive ? "text-primary-blue" : "text-slate-400"}`}>{card.label}</p>
+                  <p className="mt-1 font-mono text-base font-bold text-slate-900">{card.value}</p>
+                </>
+              );
+              return isFilterCard ? (
+                <button
+                  key={card.key}
+                  type="button"
+                  onClick={() => applyResultStatusFilter(card.status || "all")}
+                  className={className}
+                  title={isEnglish ? `Filter table by ${card.label}` : `Filtrar tabla por ${card.label}`}
+                >
+                  {content}
+                </button>
+              ) : (
+                <div key={card.key} className={className}>
+                  {content}
+                </div>
+              );
+            })}
           </div>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
