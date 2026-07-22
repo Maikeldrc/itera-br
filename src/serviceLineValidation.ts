@@ -1,4 +1,4 @@
-import { Claim, ClaimStatus } from "./types";
+import { Claim, ClaimClassification, ClaimStatus } from "./types";
 
 export interface ServiceLineLike {
   cpt?: string;
@@ -83,6 +83,7 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
     const status = line.status || "Pending";
     const codes = Array.isArray(line.codes) ? line.codes.filter(Boolean) : [];
     const isPendingEra = line.nextAction === PENDING_ERA_ACTION;
+    const isOverpaidClaim = claim?.claim_classification === ClaimClassification.Overpaid || claim?.claim_classification === "Overpaid";
 
     if (!line.cpt || line.cpt.trim() === "") {
       addLineError(index, "CPT code is required.");
@@ -128,11 +129,11 @@ export function validateServiceLineDetails(lines: ServiceLineLike[], claim?: Par
       }
     }
 
-    if (totalPaid > charged + MONEY_TOLERANCE) {
+    if (!isOverpaidClaim && totalPaid > charged + MONEY_TOLERANCE) {
       addLineError(index, "total paid (primary + secondary) cannot exceed the charged amount.");
     }
 
-    if (charged - totalPaid - money(line.adj) < -MONEY_TOLERANCE) {
+    if (!isOverpaidClaim && charged - totalPaid - money(line.adj) < -MONEY_TOLERANCE) {
       addLineError(index, "balance cannot be negative.");
     }
 

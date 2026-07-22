@@ -2820,7 +2820,8 @@ async function startServer() {
             const allowed = Number(Math.max(0, charged - adj).toFixed(2));
             const balance = Number(Math.max(0, charged - adj - paid - Number(line?.secondaryPaid || 0) - Number(line?.patResp || 0)).toFixed(2));
             const notes = Array.isArray(line?.notes) ? [...line.notes] : [];
-            notes.push(`Payment Import: payer ${payerPayment.toFixed(2)}, patient ${patientPayment.toFixed(2)}, contractual adjustment applied ${adj.toFixed(2)}${contractualAdjustment > adj ? ` (report adjustment ${contractualAdjustment.toFixed(2)} exceeded this CPT line capacity)` : ""}.`);
+            const overpaidAmount = Number(Math.max(0, paid + Number(line?.secondaryPaid || 0) - charged).toFixed(2));
+            notes.push(`Payment Import: payer ${payerPayment.toFixed(2)}, patient ${patientPayment.toFixed(2)}, contractual adjustment applied ${adj.toFixed(2)}${contractualAdjustment > adj ? ` (report adjustment ${contractualAdjustment.toFixed(2)} exceeded this CPT line capacity)` : ""}${overpaidAmount > 0 ? ` Overpaid by ${overpaidAmount.toFixed(2)}; review required.` : ""}.`);
             claimPaymentTotal = Number((claimPaymentTotal + totalPayment).toFixed(2));
             const paymentDate = matchingRows.map(row => row.paymentDate).filter(Boolean).sort().pop() || "";
             const checkNo = matchingRows.map(row => row.checkNo).filter(Boolean).pop() || "";
@@ -2837,7 +2838,7 @@ async function startServer() {
               dos: line?.dos || matchingRows.map(row => row.serviceDate).filter(Boolean).sort().pop() || claim.date_of_service_from || "",
               eftNumber: checkNo || line?.eftNumber || "",
               status: balance <= 0 ? "Paid" : "Partially Paid",
-              nextAction: balance <= 0 ? "No action" : (line?.nextAction || "Monitor payment"),
+              nextAction: overpaidAmount > 0 ? "Review overpayment" : (balance <= 0 ? "No action" : (line?.nextAction || "Monitor payment")),
               notes
             };
           });
@@ -2847,6 +2848,9 @@ async function startServer() {
           const totalLinePaid = Number(serviceLines.reduce((sum, line) => sum + Number(line.paid || 0) + Number(line.secondaryPaid || 0), 0).toFixed(2));
           const totalLineAdj = Number(serviceLines.reduce((sum, line) => sum + Number(line.adj || 0), 0).toFixed(2));
           const allLinesPaid = serviceLines.every(line => textValue(line.status) === "Paid");
+          const hasOverpaidLine = serviceLines.some(line =>
+            Number(line.paid || 0) + Number(line.secondaryPaid || 0) > Number(line.charged || 0) + 0.01
+          );
           const paymentReceivedBy = claim.billed_by === "Provider" ? "Provider" : "ITERA";
 
           const updated = calculateClaimFinancials({
@@ -2864,12 +2868,14 @@ async function startServer() {
               : Number(claim.provider_direct_collection || 0),
             payment_received_by: paymentReceivedBy,
             claim_status: allLinesPaid ? ClaimStatus.Paid : ClaimStatus.PartiallyPaid,
-            claim_classification: paymentReceivedBy === "ITERA" ? ClaimClassification.IteraCollected : ClaimClassification.ProviderCollected,
+            claim_classification: hasOverpaidLine
+              ? ClaimClassification.Overpaid
+              : (paymentReceivedBy === "ITERA" ? ClaimClassification.IteraCollected : ClaimClassification.ProviderCollected),
             era_received: "No",
             eob_received: claimRows.some(row => row.paymentDate) ? "Yes" : claim.eob_received,
             payment_date: latestPaymentDate || new Date().toISOString().slice(0, 10),
             check_or_eft_number: latestCheckNo,
-            last_note: `Payment Import applied ${claimRows.length} payment row(s). ${claim.last_note || ""}`.trim()
+            last_note: `${hasOverpaidLine ? "Payment Import detected overpayment; review required. " : ""}Payment Import applied ${claimRows.length} payment row(s). ${claim.last_note || ""}`.trim()
           }, reconciliationConfig);
 
           const validationErrors = validateClaim(updated);

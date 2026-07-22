@@ -295,6 +295,7 @@ const SERVICE_LINE_ACTIONS = [
   "File appeal",
   "Ready to rebill",
   "Monitor payment",
+  "Review overpayment",
   "Close line"
 ];
 
