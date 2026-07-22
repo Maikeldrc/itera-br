@@ -2052,7 +2052,8 @@ async function startServer() {
   app.post("/api/import-csv", requireRoles(...API_ROLE_GROUPS.billingAdmin), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, retryRows, fileName, forceImportRows } = req.body;
+      const { rows, fileBase64, retryRows, fileName, forceImportRows, importBilledBy } = req.body;
+      const batchBilledBy: "ITERA" | "Provider" = importBilledBy === "Provider" ? "Provider" : "ITERA";
       const retryRowSet = Array.isArray(retryRows)
         ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
         : null;
@@ -2197,7 +2198,7 @@ async function startServer() {
             date_of_service_from: serviceFrom,
             date_of_service_to: serviceTo,
             month_of_service: serviceTo.slice(0, 7),
-            billed_by: "ITERA",
+            billed_by: batchBilledBy,
             payment_received_by: "Unknown",
             claim_status: ClaimStatus.Draft,
             claim_classification: ClaimClassification.CleanClaim,
@@ -2226,7 +2227,7 @@ async function startServer() {
             correction_status: "",
             resubmission_date: "",
             corrected_claim_reference: "",
-            last_note: `Imported as Draft from billing worklist. Primary Insurance Code: ${payerCode || "N/A"}. Care Manager: ${importField(row, ["Care Manager"]) || "N/A"}. Sex: ${importField(row, ["Sex"]) || "N/A"}. DOB: ${excelSerialToIsoDate(importField(row, ["Date of Birth"])) || importField(row, ["Date of Birth"]) || "N/A"}.${feeFallbackNotes.length > 0 ? ` Fee fallback: ${feeFallbackNotes.join("; ")}.` : ""}`,
+            last_note: `Imported as Draft from billing worklist. Billed by: ${batchBilledBy}. Primary Insurance Code: ${payerCode || "N/A"}. Care Manager: ${importField(row, ["Care Manager"]) || "N/A"}. Sex: ${importField(row, ["Sex"]) || "N/A"}. DOB: ${excelSerialToIsoDate(importField(row, ["Date of Birth"])) || importField(row, ["Date of Birth"]) || "N/A"}.${feeFallbackNotes.length > 0 ? ` Fee fallback: ${feeFallbackNotes.join("; ")}.` : ""}`,
             service_lines_json: JSON.stringify(serviceLines)
           };
 
@@ -2272,7 +2273,7 @@ async function startServer() {
           date_of_service_from: row.date_of_service_from?.trim() || new Date().toISOString().split("T")[0],
           date_of_service_to: row.date_of_service_to?.trim() || new Date().toISOString().split("T")[0],
           month_of_service: row.month_of_service?.trim() || new Date().toISOString().slice(0, 7),
-          billed_by: (row.billed_by?.trim() === "Provider" ? "Provider" : "ITERA") as any,
+          billed_by: (row.billed_by?.trim() === "Provider" ? "Provider" : row.billed_by?.trim() === "ITERA" ? "ITERA" : batchBilledBy) as any,
           payment_received_by: (["ITERA", "Provider", "Split", "Unknown"].includes(row.payment_received_by) ? row.payment_received_by : "Unknown") as any,
           claim_status: (row.claim_status?.trim() || ClaimStatus.Submitted) as any,
           claim_classification: (row.claim_classification?.trim() || ClaimClassification.CleanClaim) as any,
