@@ -861,7 +861,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   </button>
                   {filePayload && forcedImportEligibleRows.length > 0 && (
                     <button
-                      onClick={handleForceImportRejectedRows}
+                      onClick={() => handleForceImportRejectedRows()}
                       disabled={isProcessing || isForceImporting || forceImportingRow !== null}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
                       title={isEnglish
