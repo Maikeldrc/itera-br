@@ -309,6 +309,21 @@ export default function App() {
   const [paymentSourceFilter, setPaymentSourceFilter] = useState("");
   const [paymentPage, setPaymentPage] = useState(1);
   const [paymentRowsPerPage, setPaymentRowsPerPage] = useState(10);
+  const [denialSearch, setDenialSearch] = useState("");
+  const [denialProviderFilter, setDenialProviderFilter] = useState("");
+  const [denialPayerFilter, setDenialPayerFilter] = useState("");
+  const [denialStatusFilter, setDenialStatusFilter] = useState("");
+  const [denialCarcFilter, setDenialCarcFilter] = useState("");
+  const [denialCorrectionFilter, setDenialCorrectionFilter] = useState("");
+  const [denialPage, setDenialPage] = useState(1);
+  const [denialRowsPerPage, setDenialRowsPerPage] = useState(10);
+  const [blockedClaimSearch, setBlockedClaimSearch] = useState("");
+  const [blockedClaimProviderFilter, setBlockedClaimProviderFilter] = useState("");
+  const [blockedClaimCategoryFilter, setBlockedClaimCategoryFilter] = useState("");
+  const [blockedClaimCorrectionFilter, setBlockedClaimCorrectionFilter] = useState("");
+  const [blockedClaimTypeFilter, setBlockedClaimTypeFilter] = useState("");
+  const [blockedClaimPage, setBlockedClaimPage] = useState(1);
+  const [blockedClaimRowsPerPage, setBlockedClaimRowsPerPage] = useState(10);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingClaim, setEditingClaim] = useState<Claim | null>(null);
@@ -2293,6 +2308,96 @@ export default function App() {
 
   // List of unique service types from claims for filters
   const availableServiceTypes = Array.from(new Set(visibleClaims.map((c) => toText(c.service_type)).filter(Boolean))) as string[];
+  const denialClaims = visibleClaims.filter(c => c.claim_status === ClaimStatus.Denied || c.claim_status === ClaimStatus.Rejected);
+  const denialProviders = Array.from(new Set(denialClaims.map(c => toText(c.provider_name)).filter(Boolean))).sort();
+  const denialPayers = Array.from(new Set(denialClaims.map(c => toText(c.payer_name)).filter(Boolean))).sort();
+  const denialStatuses = Array.from(new Set(denialClaims.map(c => toText(c.claim_status)).filter(Boolean))).sort();
+  const denialCarcs = Array.from(new Set(denialClaims.map(c => toText(c.carc_code)).filter(Boolean))).sort();
+  const denialCorrections = Array.from(new Set(denialClaims.map(c => toText(c.correction_status)).filter(Boolean))).sort();
+  const filteredDenialClaims = denialClaims.filter(c => {
+    const search = denialSearch.trim().toLowerCase();
+    if (search) {
+      const matches = [
+        c.claim_id,
+        c.patient_display_name_masked,
+        c.patient_id,
+        c.provider_name,
+        c.payer_name,
+        c.cpt_hcpcs,
+        c.carc_code,
+        c.rarc_code,
+        c.denial_reason,
+        c.correction_status
+      ].some(value => toText(value).toLowerCase().includes(search));
+      if (!matches) return false;
+    }
+    if (denialProviderFilter && toText(c.provider_name) !== denialProviderFilter) return false;
+    if (denialPayerFilter && toText(c.payer_name) !== denialPayerFilter) return false;
+    if (denialStatusFilter && toText(c.claim_status) !== denialStatusFilter) return false;
+    if (denialCarcFilter && toText(c.carc_code) !== denialCarcFilter) return false;
+    if (denialCorrectionFilter && toText(c.correction_status) !== denialCorrectionFilter) return false;
+    return true;
+  });
+  const denialTotalPages = Math.max(1, Math.ceil(filteredDenialClaims.length / denialRowsPerPage));
+  const currentDenialPage = Math.min(denialPage, denialTotalPages);
+  const paginatedDenialClaims = filteredDenialClaims.slice(
+    (currentDenialPage - 1) * denialRowsPerPage,
+    currentDenialPage * denialRowsPerPage
+  );
+  const denialPageStart = filteredDenialClaims.length === 0 ? 0 : (currentDenialPage - 1) * denialRowsPerPage + 1;
+  const denialPageEnd = Math.min(currentDenialPage * denialRowsPerPage, filteredDenialClaims.length);
+  const resetDenialFilters = () => {
+    setDenialSearch("");
+    setDenialProviderFilter("");
+    setDenialPayerFilter("");
+    setDenialStatusFilter("");
+    setDenialCarcFilter("");
+    setDenialCorrectionFilter("");
+    setDenialPage(1);
+  };
+  const blockedClaims = visibleClaims.filter(c => c.error_flag || c.locked);
+  const blockedClaimProviders = Array.from(new Set(blockedClaims.map(c => toText(c.provider_name)).filter(Boolean))).sort();
+  const blockedClaimCategories = Array.from(new Set(blockedClaims.map(c => toText(c.error_category)).filter(Boolean))).sort();
+  const blockedClaimCorrections = Array.from(new Set(blockedClaims.map(c => toText(c.correction_status)).filter(Boolean))).sort();
+  const filteredBlockedClaims = blockedClaims.filter(c => {
+    const search = blockedClaimSearch.trim().toLowerCase();
+    if (search) {
+      const matches = [
+        c.claim_id,
+        c.patient_display_name_masked,
+        c.patient_id,
+        c.provider_name,
+        c.payer_name,
+        c.cpt_hcpcs,
+        c.error_category,
+        c.lock_reason,
+        c.correction_status
+      ].some(value => toText(value).toLowerCase().includes(search));
+      if (!matches) return false;
+    }
+    if (blockedClaimProviderFilter && toText(c.provider_name) !== blockedClaimProviderFilter) return false;
+    if (blockedClaimCategoryFilter && toText(c.error_category) !== blockedClaimCategoryFilter) return false;
+    if (blockedClaimCorrectionFilter && toText(c.correction_status) !== blockedClaimCorrectionFilter) return false;
+    if (blockedClaimTypeFilter === "locked" && !c.locked) return false;
+    if (blockedClaimTypeFilter === "error" && !c.error_flag) return false;
+    return true;
+  });
+  const blockedClaimTotalPages = Math.max(1, Math.ceil(filteredBlockedClaims.length / blockedClaimRowsPerPage));
+  const currentBlockedClaimPage = Math.min(blockedClaimPage, blockedClaimTotalPages);
+  const paginatedBlockedClaims = filteredBlockedClaims.slice(
+    (currentBlockedClaimPage - 1) * blockedClaimRowsPerPage,
+    currentBlockedClaimPage * blockedClaimRowsPerPage
+  );
+  const blockedClaimPageStart = filteredBlockedClaims.length === 0 ? 0 : (currentBlockedClaimPage - 1) * blockedClaimRowsPerPage + 1;
+  const blockedClaimPageEnd = Math.min(currentBlockedClaimPage * blockedClaimRowsPerPage, filteredBlockedClaims.length);
+  const resetBlockedClaimFilters = () => {
+    setBlockedClaimSearch("");
+    setBlockedClaimProviderFilter("");
+    setBlockedClaimCategoryFilter("");
+    setBlockedClaimCorrectionFilter("");
+    setBlockedClaimTypeFilter("");
+    setBlockedClaimPage(1);
+  };
   const paymentPayers = Array.from(new Set(payments.map(payment => toText(payment.payer_name)).filter(Boolean))).sort();
   const paymentSources = Array.from(new Set(payments.map(payment => toText(payment.payment_source)).filter(Boolean))).sort();
   const filteredPayments = payments.filter(payment => {
@@ -3410,6 +3515,62 @@ export default function App() {
                 <div className="p-5 border-b border-slate-100">
                   <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Denied / Rejected Claims List" : "Listado de Claims Denegados / Rechazados"}</h4>
                 </div>
+                <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_190px_190px_150px_140px_170px_auto]">
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Search" : "Buscar"}</span>
+                      <input
+                        value={denialSearch}
+                        onChange={event => {
+                          setDenialSearch(event.target.value);
+                          setDenialPage(1);
+                        }}
+                        placeholder={isEnglish ? "Patient, claim, CPT, payer, reason..." : "Paciente, claim, CPT, payer, razón..."}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Provider" : "Provider"}</span>
+                      <select value={denialProviderFilter} onChange={event => { setDenialProviderFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All providers" : "Todos"}</option>
+                        {denialProviders.map(provider => <option key={provider} value={provider}>{provider}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Payer" : "Payer"}</span>
+                      <select value={denialPayerFilter} onChange={event => { setDenialPayerFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All payers" : "Todos"}</option>
+                        {denialPayers.map(payer => <option key={payer} value={payer}>{payer}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Status</span>
+                      <select value={denialStatusFilter} onChange={event => { setDenialStatusFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All statuses" : "Todos"}</option>
+                        {denialStatuses.map(status => <option key={status} value={status}>{status}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">CARC</span>
+                      <select value={denialCarcFilter} onChange={event => { setDenialCarcFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All CARC" : "Todos"}</option>
+                        {denialCarcs.map(carc => <option key={carc} value={carc}>{carc}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Correction" : "Corrección"}</span>
+                      <select value={denialCorrectionFilter} onChange={event => { setDenialCorrectionFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All phases" : "Todas"}</option>
+                        {denialCorrections.map(phase => <option key={phase} value={phase}>{phase}</option>)}
+                      </select>
+                    </label>
+                    <div className="flex items-end">
+                      <button type="button" onClick={resetDenialFilters} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100">
+                        {isEnglish ? "Reset" : "Limpiar"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
@@ -3427,7 +3588,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
-                      {visibleClaims.filter(c => c.claim_status === ClaimStatus.Denied || c.claim_status === ClaimStatus.Rejected).map((c) => (
+                      {paginatedDenialClaims.map((c) => (
                         <tr key={c.claim_id} className="hover:bg-slate-50">
                           <td className="p-3.5 font-bold text-slate-800">{c.patient_display_name_masked || (isEnglish ? "Unknown patient" : "Paciente desconocido")}</td>
                           <td className="p-3.5 font-semibold">{c.provider_name}</td>
@@ -3452,8 +3613,35 @@ export default function App() {
                           </td>
                         </tr>
                       ))}
+                      {paginatedDenialClaims.length === 0 && (
+                        <tr>
+                          <td colSpan={10} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">
+                            {isEnglish ? "No denial audit records match the selected filters." : "No hay registros de denegaciones que coincidan con los filtros."}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
+                </div>
+                <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                  <div className="text-xs font-semibold text-slate-600">
+                    {isEnglish ? "Showing" : "Mostrando"} <span className="font-mono text-slate-900">{denialPageStart}</span> {isEnglish ? "to" : "a"} <span className="font-mono text-slate-900">{denialPageEnd}</span> {isEnglish ? "of" : "de"} <span className="font-mono text-slate-900">{filteredDenialClaims.length}</span> {isEnglish ? "denial audits" : "denegaciones"}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                      {isEnglish ? "Rows" : "Filas"}
+                      <select value={denialRowsPerPage} onChange={event => { setDenialRowsPerPage(Number(event.target.value)); setDenialPage(1); }} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        {[10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" onClick={() => setDenialPage(page => Math.max(1, page - 1))} disabled={currentDenialPage <= 1} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      {isEnglish ? "Previous" : "Anterior"}
+                    </button>
+                    <span className="rounded-lg bg-primary-blue px-3 py-2 text-xs font-bold text-white">{currentDenialPage} / {denialTotalPages}</span>
+                    <button type="button" onClick={() => setDenialPage(page => Math.min(denialTotalPages, page + 1))} disabled={currentDenialPage >= denialTotalPages} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      {isEnglish ? "Next" : "Siguiente"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -3476,6 +3664,56 @@ export default function App() {
                 <div className="p-5 border-b border-slate-100">
                   <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Active Errors Queue" : "Bandeja de Errores Activos"}</h4>
                 </div>
+                <div className="border-b border-slate-100 bg-slate-50/70 p-4">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_210px_180px_180px_150px_auto]">
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Search" : "Buscar"}</span>
+                      <input
+                        value={blockedClaimSearch}
+                        onChange={event => {
+                          setBlockedClaimSearch(event.target.value);
+                          setBlockedClaimPage(1);
+                        }}
+                        placeholder={isEnglish ? "Patient, claim, CPT, lock reason..." : "Paciente, claim, CPT, razón de bloqueo..."}
+                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Provider" : "Provider"}</span>
+                      <select value={blockedClaimProviderFilter} onChange={event => { setBlockedClaimProviderFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All providers" : "Todos"}</option>
+                        {blockedClaimProviders.map(provider => <option key={provider} value={provider}>{provider}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Error category" : "Categoría"}</span>
+                      <select value={blockedClaimCategoryFilter} onChange={event => { setBlockedClaimCategoryFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All categories" : "Todas"}</option>
+                        {blockedClaimCategories.map(category => <option key={category} value={category}>{category}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Correction" : "Corrección"}</span>
+                      <select value={blockedClaimCorrectionFilter} onChange={event => { setBlockedClaimCorrectionFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All phases" : "Todas"}</option>
+                        {blockedClaimCorrections.map(phase => <option key={phase} value={phase}>{phase}</option>)}
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Hold type" : "Tipo"}</span>
+                      <select value={blockedClaimTypeFilter} onChange={event => { setBlockedClaimTypeFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        <option value="">{isEnglish ? "All holds" : "Todos"}</option>
+                        <option value="locked">{isEnglish ? "Locked" : "Bloqueado"}</option>
+                        <option value="error">{isEnglish ? "Error flag" : "Con error"}</option>
+                      </select>
+                    </label>
+                    <div className="flex items-end">
+                      <button type="button" onClick={resetBlockedClaimFilters} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100">
+                        {isEnglish ? "Reset" : "Limpiar"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
@@ -3492,7 +3730,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-sans">
-                      {visibleClaims.filter(c => c.error_flag || c.locked).map((c) => (
+                      {paginatedBlockedClaims.map((c) => (
                         <tr key={c.claim_id} className="hover:bg-slate-50 bg-rose-50/10">
                           <td className="p-3.5 font-bold text-slate-900 font-mono">
                             <div className="flex items-center gap-1">
@@ -3521,8 +3759,35 @@ export default function App() {
                           </td>
                         </tr>
                       ))}
+                      {paginatedBlockedClaims.length === 0 && (
+                        <tr>
+                          <td colSpan={9} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">
+                            {isEnglish ? "No claims in hold match the selected filters." : "No hay claims en hold que coincidan con los filtros."}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
+                </div>
+                <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-5 py-4 md:flex-row md:items-center md:justify-between">
+                  <div className="text-xs font-semibold text-slate-600">
+                    {isEnglish ? "Showing" : "Mostrando"} <span className="font-mono text-slate-900">{blockedClaimPageStart}</span> {isEnglish ? "to" : "a"} <span className="font-mono text-slate-900">{blockedClaimPageEnd}</span> {isEnglish ? "of" : "de"} <span className="font-mono text-slate-900">{filteredBlockedClaims.length}</span> {isEnglish ? "claims in hold" : "claims en hold"}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                      {isEnglish ? "Rows" : "Filas"}
+                      <select value={blockedClaimRowsPerPage} onChange={event => { setBlockedClaimRowsPerPage(Number(event.target.value)); setBlockedClaimPage(1); }} className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
+                        {[10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" onClick={() => setBlockedClaimPage(page => Math.max(1, page - 1))} disabled={currentBlockedClaimPage <= 1} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      {isEnglish ? "Previous" : "Anterior"}
+                    </button>
+                    <span className="rounded-lg bg-primary-blue px-3 py-2 text-xs font-bold text-white">{currentBlockedClaimPage} / {blockedClaimTotalPages}</span>
+                    <button type="button" onClick={() => setBlockedClaimPage(page => Math.min(blockedClaimTotalPages, page + 1))} disabled={currentBlockedClaimPage >= blockedClaimTotalPages} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-50">
+                      {isEnglish ? "Next" : "Siguiente"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
