@@ -1431,6 +1431,56 @@ export default function App() {
     return flatten(value).filter(([key]) => Boolean(key)).slice(0, 60);
   };
 
+  const getExceptionRejectedRows = (item: any) => {
+    const details = item?.details || {};
+    const summary = details.summary || parseOperationJson(details.importHistory?.summary_json || details.job?.summary_json);
+    const rows = summary?.rejectedRowDetails || summary?.rejectedRows || [];
+    return Array.isArray(rows) ? rows : [];
+  };
+
+  const escapeCsvValue = (value: unknown) => {
+    const text = String(value ?? "");
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  const downloadExceptionRejectedRows = (item: any) => {
+    const rejectedRows = getExceptionRejectedRows(item);
+    if (rejectedRows.length === 0) {
+      notify(
+        isEnglish
+          ? "This historical record does not include saved rejected-row details."
+          : "Este registro histórico no incluye detalles guardados de filas rechazadas.",
+        "warning"
+      );
+      return;
+    }
+    const sourceHeaders = Array.from(new Set<string>(
+      rejectedRows.flatMap((row: any) => Object.keys(row.sourceRow || {}).filter(header => header !== "__source_row"))
+    ));
+    const normalizedHeaders = Array.from(new Set<string>(
+      rejectedRows.flatMap((row: any) => Object.keys(row.normalized || {}))
+    ));
+    const csv = [
+      ["source_row", "claim_id", "errors", ...normalizedHeaders.map(header => `normalized_${header}`), ...sourceHeaders].map(escapeCsvValue).join(","),
+      ...rejectedRows.map((row: any) => [
+        row.row || "",
+        row.claimId || "",
+        Array.isArray(row.errors) ? row.errors.join("; ") : String(row.errors || ""),
+        ...normalizedHeaders.map(header => row.normalized?.[header] ?? ""),
+        ...sourceHeaders.map(header => row.sourceRow?.[header] ?? "")
+      ].map(escapeCsvValue).join(","))
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `ITERA_${String(item?.type || "Import").replace(/\s+/g, "_")}_Rejected_Rows_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleUpdateImportTemplate = async (template: any, updates: Record<string, unknown>) => {
     if (!template?.template_id) return;
     setSavingTemplateId(template.template_id);
@@ -2513,6 +2563,7 @@ export default function App() {
                           summary,
                           record: details.importHistory || details.job || details.task || {}
                         });
+                        const rejectedRows = getExceptionRejectedRows(item);
                         const isExpanded = expandedImportExceptionId === item.exception_id;
                         return (
                           <React.Fragment key={item.exception_id}>
@@ -2568,8 +2619,87 @@ export default function App() {
                                         <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Exception details" : "Detalles de la excepción"}</h4>
                                         <p className="mt-0.5 font-mono text-[10px] text-slate-400">{item.exception_id}</p>
                                       </div>
-                                      <span className="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">{item.type}</span>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        {rejectedRows.length > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => downloadExceptionRejectedRows(item)}
+                                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[10px] font-bold text-blue-700 hover:bg-blue-100"
+                                          >
+                                            <FileDown className="h-3.5 w-3.5" />
+                                            {isEnglish ? "Download rejected CSV" : "Descargar rechazadas CSV"}
+                                          </button>
+                                        )}
+                                        <span className="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">{item.type}</span>
+                                      </div>
                                     </div>
+                                    {rejectedRows.length > 0 ? (
+                                      <div className="mb-4 overflow-hidden rounded-xl border border-rose-100">
+                                        <div className="flex items-center justify-between gap-3 border-b border-rose-100 bg-rose-50 px-3 py-2">
+                                          <div>
+                                            <h5 className="text-xs font-bold text-rose-900">{isEnglish ? "Rejected rows" : "Filas rechazadas"}</h5>
+                                            <p className="mt-0.5 text-[10px] text-rose-700">
+                                              {isEnglish
+                                                ? "Same rejection details captured during import, including source row values."
+                                                : "Los mismos detalles capturados durante la importación, incluyendo valores de la fila origen."}
+                                            </p>
+                                          </div>
+                                          <span className="rounded-md bg-white px-2 py-1 text-[10px] font-bold text-rose-700">{rejectedRows.length}</span>
+                                        </div>
+                                        <div className="max-h-72 overflow-auto">
+                                          <table className="w-full min-w-[900px] text-left text-[11px]">
+                                            <thead className="sticky top-0 bg-slate-50 text-[9px] uppercase tracking-wide text-slate-500">
+                                              <tr>
+                                                <th className="px-3 py-2">Row</th>
+                                                <th className="px-3 py-2">Claim / MRN</th>
+                                                <th className="px-3 py-2">Issues</th>
+                                                <th className="px-3 py-2">Source values</th>
+                                              </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-slate-100">
+                                              {rejectedRows.slice(0, 50).map((row: any, index: number) => {
+                                                const normalizedPreview = Object.entries(row.normalized || {})
+                                                  .filter(([, value]) => value !== undefined && value !== null && String(value) !== "")
+                                                  .slice(0, 8)
+                                                  .map(([key, value]) => `${key}: ${String(value ?? "")}`)
+                                                  .join(" | ");
+                                                const sourcePreview = Object.entries(row.sourceRow || {})
+                                                  .filter(([key]) => key !== "__source_row")
+                                                  .slice(0, 8)
+                                                  .map(([key, value]) => `${key}: ${String(value ?? "")}`)
+                                                  .join(" | ");
+                                                return (
+                                                  <tr key={`${row.row || index}-${row.claimId || index}`} className="bg-white">
+                                                    <td className="px-3 py-2 font-mono font-bold text-slate-800">{row.row || "-"}</td>
+                                                    <td className="px-3 py-2 font-mono text-dark-blue">{row.claimId || "-"}</td>
+                                                    <td className="px-3 py-2 text-rose-700">
+                                                      {(Array.isArray(row.errors) ? row.errors : [row.errors]).filter(Boolean).join("; ") || "-"}
+                                                    </td>
+                                                    <td className="max-w-xl px-3 py-2 font-mono text-[10px] text-slate-500">
+                                                      {normalizedPreview && <p className="mb-1 text-slate-700">{normalizedPreview}</p>}
+                                                      <p>{sourcePreview || "-"}</p>
+                                                    </td>
+                                                  </tr>
+                                                );
+                                              })}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                        {rejectedRows.length > 50 && (
+                                          <p className="border-t border-rose-100 bg-rose-50/50 px-3 py-2 text-[10px] font-semibold text-rose-700">
+                                            {isEnglish
+                                              ? `Showing first 50 rows. Download CSV for all ${rejectedRows.length} rejected rows.`
+                                              : `Mostrando las primeras 50 filas. Descargue CSV para las ${rejectedRows.length} filas rechazadas.`}
+                                          </p>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <div className="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                                        {isEnglish
+                                          ? "Rejected-row details were not saved for this historical record. Future failed imports will include row-level issues and downloadable source rows here."
+                                          : "Los detalles de filas rechazadas no fueron guardados en este registro histórico. Los próximos imports fallidos incluirán aquí los problemas por fila y descarga de filas origen."}
+                                      </div>
+                                    )}
                                     <div className="grid gap-2 md:grid-cols-3">
                                       {detailEntries.length > 0 ? detailEntries.map(([key, value]) => (
                                         <div key={key} className="rounded-lg border border-slate-100 bg-slate-50 p-2">

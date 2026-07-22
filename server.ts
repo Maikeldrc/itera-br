@@ -469,7 +469,8 @@ function normalizePaymentImportRow(row: Record<string, unknown>, index: number, 
     excelSerialToIsoDate(importField(row, ["Payment Check Date"]));
 
   return {
-    rowNumber: index + 1,
+    rowNumber: Number(row.__source_row) || index + 1,
+    sourceRow: row,
     cptCode: mappedImportField(row, mapping, "cptCode", ["CPT Code", "CPT"]),
     facilityName: mappedImportField(row, mapping, "facilityName", ["Facility Name"]),
     renderingProviderName: mappedImportField(row, mapping, "renderingProviderName", ["Rendering Provider Name", "Provider"]),
@@ -569,7 +570,7 @@ function serviceLinesFromClaim(claim: Partial<Claim>) {
 function summarizeImport(
   importRows: Record<string, unknown>[],
   importedClaims: Claim[],
-  errors: { row: number; claimId?: string; errors: string[] }[]
+  errors: { row: number; claimId?: string; errors: string[]; sourceRow?: Record<string, unknown> }[]
 ) {
   const inputPatients = new Set(importRows.map(row => importField(row, ["MRN", "patient_id"])).filter(Boolean));
   const importedPatients = new Set(importedClaims.map(claim => textValue(claim.patient_id)).filter(Boolean));
@@ -618,7 +619,13 @@ function summarizeImport(
     topRejectionReasons: Object.entries(errorReasonCounts)
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
-      .map(([reason, count]) => ({ reason, count }))
+      .map(([reason, count]) => ({ reason, count })),
+    rejectedRowDetails: errors.map(error => ({
+      row: error.row,
+      claimId: error.claimId || "",
+      errors: error.errors,
+      sourceRow: error.sourceRow || {}
+    }))
   };
 }
 
@@ -2762,6 +2769,24 @@ async function startServer() {
       }
 
       const resultRows = analyzedRows;
+      const rejectedRowDetails = resultRows
+        .filter(row => row.status === "rejected")
+        .map(row => ({
+          row: row.rowNumber,
+          claimId: row.claimId || row.patientId || "",
+          errors: row.errors || [],
+          sourceRow: row.sourceRow || {},
+          normalized: {
+            patientAcctNo: row.patientAcctNo || "",
+            patientName: row.patientName || "",
+            cptCode: row.cptCode || "",
+            serviceDate: row.serviceDate || "",
+            payerName: row.reportPayerName || row.payerName || "",
+            payment: Number(row.payment || 0),
+            claimNo: row.claimNo || "",
+            externalPaymentId: row.externalPaymentId || ""
+          }
+        }));
       const summary = {
         totalRowsRead: importRows.length,
         readyToImport: readyRows.length,
@@ -2771,7 +2796,8 @@ async function startServer() {
         matchedClaims: new Set(resultRows.map(row => row.claimId).filter(Boolean)).size,
         matchedCptCodes: new Set(resultRows.map(row => row.cptCode).filter(Boolean)).size,
         totalPaymentInFile: Number(normalizedRows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2)),
-        totalPaymentImported: Number(resultRows.filter(row => row.status === "imported").reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2))
+        totalPaymentImported: Number(resultRows.filter(row => row.status === "imported").reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2)),
+        rejectedRowDetails
       };
 
       const importHistory = await sheetsService.createImportHistory({
