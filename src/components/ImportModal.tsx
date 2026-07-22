@@ -64,6 +64,7 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
   const [isRollbackConfirmOpen, setIsRollbackConfirmOpen] = useState(false);
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [isForceImporting, setIsForceImporting] = useState(false);
+  const [forceImportingRow, setForceImportingRow] = useState<number | null>(null);
   const [rollbackProgress, setRollbackProgress] = useState<{ percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const correctedFileInputRef = useRef<HTMLInputElement>(null);
@@ -90,6 +91,7 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
     setIsRollbackConfirmOpen(false);
     setIsRollingBack(false);
     setIsForceImporting(false);
+    setForceImportingRow(null);
     setRollbackProgress(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -472,6 +474,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       .map(err => Number(err.row))
       .filter((row): row is number => Number.isFinite(row) && row > 0)
   ));
+  const forcedImportEligibleRowSet = new Set(forcedImportEligibleRows);
 
   const escapeCsvValue = (value: unknown) => {
     const text = String(value ?? "");
@@ -570,25 +573,28 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     reader.readAsText(selectedFile);
   };
 
-  const handleForceImportRejectedRows = async () => {
-    if (!filePayload || forcedImportEligibleRows.length === 0 || isProcessing || isForceImporting) return;
+  const handleForceImportRejectedRows = async (rowNumber?: number) => {
+    const targetRows = rowNumber ? [rowNumber] : forcedImportEligibleRows;
+    if (!filePayload || targetRows.length === 0 || isProcessing || isForceImporting || forceImportingRow !== null) return;
     setIsForceImporting(true);
+    setForceImportingRow(rowNumber || null);
     try {
       await runImport({
         ...filePayload,
-        retryRows: forcedImportEligibleRows,
-        forceImportRows: forcedImportEligibleRows
+        retryRows: targetRows,
+        forceImportRows: targetRows
       });
       notify(
         isEnglish
-          ? "Eligible rejected rows were imported and marked for service-line review."
-          : "Las filas rechazadas elegibles fueron importadas y marcadas para revisión de service line.",
+          ? `${targetRows.length} rejected row(s) were imported and marked for service-line review.`
+          : `${targetRows.length} fila(s) rechazada(s) fueron importadas y marcadas para revisión de service line.`,
         "success"
       );
     } catch {
       // runImport already surfaces the failure state.
     } finally {
       setIsForceImporting(false);
+      setForceImportingRow(null);
     }
   };
 
@@ -856,7 +862,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   {filePayload && forcedImportEligibleRows.length > 0 && (
                     <button
                       onClick={handleForceImportRejectedRows}
-                      disabled={isProcessing || isForceImporting}
+                      disabled={isProcessing || isForceImporting || forceImportingRow !== null}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
                       title={isEnglish
                         ? "Import only rows with recoverable CPT/DOS rule conflicts and mark them for user review."
@@ -883,17 +889,38 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                       <th className="p-3 w-56">Claim ID</th>
                       <th className="p-3">{isEnglish ? "Issue" : "Problema"}</th>
                       <th className="p-3 w-72">{isEnglish ? "Suggested correction" : "Corrección sugerida"}</th>
+                      <th className="p-3 w-40 text-right">{isEnglish ? "Action" : "Acción"}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {importErrorRows.map(item => (
-                      <tr key={item.key} className="hover:bg-slate-50/80">
-                        <td className="p-3 font-mono font-bold text-slate-800">{item.row || "-"}</td>
-                        <td className="p-3 font-mono text-slate-700">{item.claimId}</td>
-                        <td className="p-3 text-slate-800 leading-relaxed">{item.message}</td>
-                        <td className="p-3 text-slate-600">{item.action}</td>
-                      </tr>
-                    ))}
+                    {importErrorRows.map(item => {
+                      const rowNumber = Number(item.row);
+                      const canForceRow = filePayload && forcedImportEligibleRowSet.has(rowNumber);
+                      const isThisRowImporting = forceImportingRow === rowNumber;
+                      return (
+                        <tr key={item.key} className="hover:bg-slate-50/80">
+                          <td className="p-3 font-mono font-bold text-slate-800">{item.row || "-"}</td>
+                          <td className="p-3 font-mono text-slate-700">{item.claimId}</td>
+                          <td className="p-3 text-slate-800 leading-relaxed">{item.message}</td>
+                          <td className="p-3 text-slate-600">{item.action}</td>
+                          <td className="p-3 text-right">
+                            {canForceRow ? (
+                              <button
+                                type="button"
+                                onClick={() => handleForceImportRejectedRows(rowNumber)}
+                                disabled={isProcessing || isForceImporting || forceImportingRow !== null}
+                                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
+                              >
+                                {isThisRowImporting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
+                                {isEnglish ? "Import anyway" : "Importar de todos modos"}
+                              </button>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-slate-300">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
