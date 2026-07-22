@@ -28,6 +28,17 @@ export function BulkActionToolbar({
   const [openMenu, setOpenMenu] = useState<"status" | "classification" | "billed_by" | "payment_received_by" | null>(null);
   const [pendingActionLabel, setPendingActionLabel] = useState<string | null>(null);
   const isApplying = !!pendingActionLabel;
+  const statusToneClass = (status: ClaimStatus) => {
+    if ([ClaimStatus.Denied, ClaimStatus.Rejected, ClaimStatus.WrittenOff, ClaimStatus.Uncollectible].includes(status)) {
+      return "text-rose-600 font-medium";
+    }
+    if (status === ClaimStatus.BlockedByError) return "text-amber-600 font-medium";
+    if ([ClaimStatus.Paid, ClaimStatus.Closed].includes(status)) return "text-emerald-700 font-medium";
+    if ([ClaimStatus.Appealed, ClaimStatus.Corrected, ClaimStatus.Resubmitted, ClaimStatus.ReadyToRebill].includes(status)) {
+      return "text-blue-700 font-medium";
+    }
+    return "";
+  };
 
   if (selectedCount === 0) return null;
 
@@ -82,15 +93,16 @@ export function BulkActionToolbar({
             <Check className="w-3.5 h-3.5 text-emerald-400" />
             {isEnglish ? "Change Status" : "Cambiar Estado"}
           </button>
-          <div className={`absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-44 ${openMenu === "status" ? "block" : "hidden"} group-hover:block z-50`}>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.Paid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Paid</button>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.PartiallyPaid)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Partially Paid</button>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.Denied)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-rose-600 font-medium">Denied</button>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.Rejected)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-red-600 font-medium">Rejected</button>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.Pending)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Pending</button>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.BlockedByError)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded text-amber-600">Blocked by Error</button>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.ReadyToRebill)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Ready to Rebill</button>
-            <button onClick={() => applyMenuAction("status", ClaimStatus.Closed)} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Closed</button>
+          <div className={`absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-48 max-h-72 overflow-y-auto ${openMenu === "status" ? "block" : "hidden"} group-hover:block z-50`}>
+            {Object.values(ClaimStatus).map(status => (
+              <button
+                key={status}
+                onClick={() => applyMenuAction("status", status)}
+                className={`w-full text-left p-1.5 hover:bg-slate-100 rounded ${statusToneClass(status)}`}
+              >
+                {status}
+              </button>
+            ))}
           </div>
         </div>
 
