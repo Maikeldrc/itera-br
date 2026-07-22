@@ -5,6 +5,7 @@ import {
   FeeSchedule,
   ReportFeeSchedule
 } from "./types";
+import { multiFilterIntersects, multiFilterMatches } from "./multiSelectFilters";
 
 export type ReportView =
   | "billing-summary"
@@ -296,14 +297,14 @@ function matchesFilters(line: ReportLine, filters: ReportFiltersState) {
   if (filters.startDate && serviceDate < filters.startDate) return false;
   if (filters.endDate && serviceDate > filters.endDate) return false;
   if (filters.month && (dateText(line.dos).slice(0, 7) || textValue(claim.month_of_service)) !== filters.month) return false;
-  if (filters.practiceId && textValue(claim.practice_id) !== filters.practiceId) return false;
-  if (filters.providerId && textValue(claim.provider_id) !== filters.providerId) return false;
-  if (filters.serviceType && textValue(line.serviceType) !== filters.serviceType) return false;
-  if (filters.cptCode && textValue(line.cptCode) !== filters.cptCode) return false;
-  if (filters.billedBy && textValue(claim.billed_by) !== filters.billedBy) return false;
-  if (filters.paymentReceivedBy && textValue(claim.payment_received_by) !== filters.paymentReceivedBy) return false;
-  if (filters.claimStatus && textValue(claim.claim_status) !== filters.claimStatus) return false;
-  if (filters.payerId && textValue(claim.payer_id) !== filters.payerId) return false;
+  if (!multiFilterMatches(claim.practice_id, filters.practiceId)) return false;
+  if (!multiFilterMatches(claim.provider_id, filters.providerId)) return false;
+  if (!multiFilterMatches(line.serviceType, filters.serviceType)) return false;
+  if (!multiFilterMatches(line.cptCode, filters.cptCode)) return false;
+  if (!multiFilterMatches(claim.billed_by, filters.billedBy)) return false;
+  if (!multiFilterMatches(claim.payment_received_by, filters.paymentReceivedBy)) return false;
+  if (!multiFilterMatches(claim.claim_status, filters.claimStatus)) return false;
+  if (!multiFilterMatches(claim.payer_id, filters.payerId)) return false;
   if (filters.submissionStartDate && submissionDate < filters.submissionStartDate) return false;
   if (filters.submissionEndDate && submissionDate > filters.submissionEndDate) return false;
   if (filters.paymentStartDate && (!paymentDate || paymentDate < filters.paymentStartDate)) return false;
@@ -328,14 +329,14 @@ function matchesClaimFilters(claim: Claim, filters: ReportFiltersState) {
   if (filters.startDate && serviceDate < filters.startDate) return false;
   if (filters.endDate && serviceDate > filters.endDate) return false;
   if (filters.month && monthKeyFromClaim(claim) !== filters.month) return false;
-  if (filters.practiceId && textValue(claim.practice_id) !== filters.practiceId) return false;
-  if (filters.providerId && textValue(claim.provider_id) !== filters.providerId) return false;
-  if (filters.serviceType && !textValue(claim.service_type).split(",").map(item => item.trim()).includes(filters.serviceType)) return false;
-  if (filters.cptCode && !textValue(claim.cpt_hcpcs).split(/[\s,]+/).includes(filters.cptCode)) return false;
-  if (filters.billedBy && textValue(claim.billed_by) !== filters.billedBy) return false;
-  if (filters.paymentReceivedBy && textValue(claim.payment_received_by) !== filters.paymentReceivedBy) return false;
-  if (filters.claimStatus && textValue(claim.claim_status) !== filters.claimStatus) return false;
-  if (filters.payerId && textValue(claim.payer_id) !== filters.payerId) return false;
+  if (!multiFilterMatches(claim.practice_id, filters.practiceId)) return false;
+  if (!multiFilterMatches(claim.provider_id, filters.providerId)) return false;
+  if (!multiFilterIntersects(textValue(claim.service_type).split(",").map(item => item.trim()), filters.serviceType)) return false;
+  if (!multiFilterIntersects(textValue(claim.cpt_hcpcs).split(/[\s,]+/), filters.cptCode)) return false;
+  if (!multiFilterMatches(claim.billed_by, filters.billedBy)) return false;
+  if (!multiFilterMatches(claim.payment_received_by, filters.paymentReceivedBy)) return false;
+  if (!multiFilterMatches(claim.claim_status, filters.claimStatus)) return false;
+  if (!multiFilterMatches(claim.payer_id, filters.payerId)) return false;
   if (filters.submissionStartDate && submissionDate < filters.submissionStartDate) return false;
   if (filters.submissionEndDate && submissionDate > filters.submissionEndDate) return false;
   if (filters.paymentStartDate && (!paymentDate || paymentDate < filters.paymentStartDate)) return false;

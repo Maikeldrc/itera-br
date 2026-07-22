@@ -3,6 +3,8 @@ import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, FileSpreadsheet, R
 import { apiFetch } from "../apiClient";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
+import { MultiSelectFilter } from "./MultiSelectFilter";
+import { decodeMultiFilter, multiFilterIntersects, multiFilterMatches } from "../multiSelectFilters";
 
 type ImportPayload = { rows?: Record<string, string>[]; fileName?: string; fileBase64?: string };
 
@@ -648,12 +650,18 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const resultRows = result?.rows || [];
   const normalizedResultSearch = resultSearch.trim().toLowerCase();
   const filteredResultRows = resultRows.filter(row => {
-    if (resultStatusFilter !== "all" && row.status !== resultStatusFilter) return false;
-    if (resultIssueFilter === "errors" && row.errors.length === 0) return false;
-    if (resultIssueFilter === "warnings" && row.warnings.length === 0) return false;
-    if (resultIssueFilter === "payer_mismatch" && !row.payerMismatch) return false;
-    if (resultIssueFilter === "payment_activity" && row.status !== "payment_activity") return false;
-    if (resultIssueFilter === "safe_match" && (row.errors.length > 0 || row.warnings.length > 0)) return false;
+    if (!multiFilterMatches(row.status, resultStatusFilter === "all" ? "" : resultStatusFilter)) return false;
+    const selectedIssues = decodeMultiFilter(resultIssueFilter === "all" ? "" : resultIssueFilter);
+    if (selectedIssues.length > 0) {
+      const rowIssues = [
+        row.errors.length > 0 ? "errors" : "",
+        row.warnings.length > 0 ? "warnings" : "",
+        row.payerMismatch ? "payer_mismatch" : "",
+        row.status === "payment_activity" ? "payment_activity" : "",
+        row.errors.length === 0 && row.warnings.length === 0 ? "safe_match" : ""
+      ].filter(Boolean);
+      if (!multiFilterIntersects(rowIssues, selectedIssues)) return false;
+    }
     if (!normalizedResultSearch) return true;
     return [
       row.rowNumber,
@@ -1120,33 +1128,37 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                 </label>
                 <label className="block">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Status" : "Estado"}</span>
-                  <select
-                    value={resultStatusFilter}
-                    onChange={event => setResultStatusFilter(event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                  >
-                    <option value="all">{isEnglish ? "All statuses" : "Todos"}</option>
-                    <option value="ready">{isEnglish ? "Ready" : "Lista"}</option>
-                    <option value="imported">{isEnglish ? "Imported" : "Importada"}</option>
-                    <option value="needs_review">{isEnglish ? "Needs Review" : "Requiere revisión"}</option>
-                    <option value="payment_activity">{isEnglish ? "Payment Activity" : "Actividad de pago"}</option>
-                    <option value="rejected">{isEnglish ? "Rejected" : "Rechazada"}</option>
-                  </select>
+                  <MultiSelectFilter
+                    value={resultStatusFilter === "all" ? "" : resultStatusFilter}
+                    onChange={value => setResultStatusFilter(value || "all")}
+                    allLabel={isEnglish ? "All statuses" : "Todos"}
+                    options={[
+                      { value: "ready", label: isEnglish ? "Ready" : "Lista" },
+                      { value: "imported", label: isEnglish ? "Imported" : "Importada" },
+                      { value: "needs_review", label: isEnglish ? "Needs Review" : "Requiere revisión" },
+                      { value: "payment_activity", label: isEnglish ? "Payment Activity" : "Actividad de pago" },
+                      { value: "rejected", label: isEnglish ? "Rejected" : "Rechazada" }
+                    ]}
+                    className="mt-1"
+                    buttonClassName="bg-white px-3 py-2 font-semibold"
+                  />
                 </label>
                 <label className="block">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Issue type" : "Tipo de issue"}</span>
-                  <select
-                    value={resultIssueFilter}
-                    onChange={event => setResultIssueFilter(event.target.value)}
-                    className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
-                  >
-                    <option value="all">{isEnglish ? "All rows" : "Todas las filas"}</option>
-                    <option value="errors">{isEnglish ? "Errors only" : "Solo errores"}</option>
-                    <option value="warnings">{isEnglish ? "Warnings only" : "Solo advertencias"}</option>
-                    <option value="payer_mismatch">{isEnglish ? "Payer mismatch" : "Payer diferente"}</option>
-                    <option value="payment_activity">{isEnglish ? "Payment activity" : "Actividad de pago"}</option>
-                    <option value="safe_match">{isEnglish ? "Safe matches" : "Coincidencias seguras"}</option>
-                  </select>
+                  <MultiSelectFilter
+                    value={resultIssueFilter === "all" ? "" : resultIssueFilter}
+                    onChange={value => setResultIssueFilter(value || "all")}
+                    allLabel={isEnglish ? "All rows" : "Todas las filas"}
+                    options={[
+                      { value: "errors", label: isEnglish ? "Errors only" : "Solo errores" },
+                      { value: "warnings", label: isEnglish ? "Warnings only" : "Solo advertencias" },
+                      { value: "payer_mismatch", label: isEnglish ? "Payer mismatch" : "Payer diferente" },
+                      { value: "payment_activity", label: isEnglish ? "Payment activity" : "Actividad de pago" },
+                      { value: "safe_match", label: isEnglish ? "Safe matches" : "Coincidencias seguras" }
+                    ]}
+                    className="mt-1"
+                    buttonClassName="bg-white px-3 py-2 font-semibold"
+                  />
                 </label>
                 <div className="flex items-end">
                   <button

@@ -49,12 +49,14 @@ import { ReportsPage } from "./components/reports/ReportsPage";
 import { RcmWorkQueue } from "./components/RcmWorkQueue";
 import { PaymentReconciliationImport } from "./components/PaymentReconciliationImport";
 import { PayerCombobox } from "./components/PayerCombobox";
+import { MultiSelectFilter } from "./components/MultiSelectFilter";
 import { useFeedback } from "./components/FeedbackProvider";
 import { AppLanguage, useLanguage } from "./components/LanguageProvider";
 import { useAuth } from "./auth";
 import { apiFetch, setApiTokenProvider } from "./apiClient";
 import { validateClaimCptRepeatLimitsAgainstExisting, validateCptRepeatLimits } from "./cptRepeatLimits";
 import { validateUniquePatientProvider } from "./patientRegistrationValidation";
+import { multiFilterMatches } from "./multiSelectFilters";
 import {
   canUserAccessMenu,
   canUserPerformAction,
@@ -2323,18 +2325,17 @@ export default function App() {
     if (filters.endDate && toText(claim.date_of_service_from) > filters.endDate) return false;
     
     // Select dropdowns
-    if (filters.providerId && toText(claim.provider_id) !== filters.providerId) return false;
-    if (filters.payerId && toText(claim.payer_id) !== filters.payerId) return false;
-    if (filters.serviceType && toText(claim.service_type) !== filters.serviceType) return false;
-    if (filters.billedBy && toText(claim.billed_by) !== filters.billedBy) return false;
-    if (filters.paymentReceivedBy && toText(claim.payment_received_by) !== filters.paymentReceivedBy) return false;
-    if (filters.status && toText(claim.claim_status) !== filters.status) return false;
-    if (filters.classification && toText(claim.claim_classification) !== filters.classification) return false;
+    if (!multiFilterMatches(claim.provider_id, filters.providerId)) return false;
+    if (!multiFilterMatches(claim.payer_id, filters.payerId)) return false;
+    if (!multiFilterMatches(claim.service_type, filters.serviceType)) return false;
+    if (!multiFilterMatches(claim.billed_by, filters.billedBy)) return false;
+    if (!multiFilterMatches(claim.payment_received_by, filters.paymentReceivedBy)) return false;
+    if (!multiFilterMatches(claim.claim_status, filters.status)) return false;
+    if (!multiFilterMatches(claim.claim_classification, filters.classification)) return false;
     if (filters.monthOfService && toText(claim.month_of_service) !== filters.monthOfService) return false;
     
     // Error Flag
     if (filters.errorFlag) {
-      const targetFlag = filters.errorFlag === "true";
       const hasServiceLineImportError = (() => {
         try {
           const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
@@ -2343,7 +2344,7 @@ export default function App() {
           return false;
         }
       })();
-      if ((claim.error_flag || hasServiceLineImportError) !== targetFlag) return false;
+      if (!multiFilterMatches(String(Boolean(claim.error_flag || hasServiceLineImportError)), filters.errorFlag)) return false;
     }
 
     return true;
@@ -2445,11 +2446,11 @@ export default function App() {
       ].some(value => toText(value).toLowerCase().includes(search));
       if (!matches) return false;
     }
-    if (denialProviderFilter && toText(c.provider_name) !== denialProviderFilter) return false;
-    if (denialPayerFilter && toText(c.payer_name) !== denialPayerFilter) return false;
-    if (denialStatusFilter && toText(c.claim_status) !== denialStatusFilter) return false;
-    if (denialCarcFilter && toText(c.carc_code) !== denialCarcFilter) return false;
-    if (denialCorrectionFilter && toText(c.correction_status) !== denialCorrectionFilter) return false;
+    if (!multiFilterMatches(c.provider_name, denialProviderFilter)) return false;
+    if (!multiFilterMatches(c.payer_name, denialPayerFilter)) return false;
+    if (!multiFilterMatches(c.claim_status, denialStatusFilter)) return false;
+    if (!multiFilterMatches(c.carc_code, denialCarcFilter)) return false;
+    if (!multiFilterMatches(c.correction_status, denialCorrectionFilter)) return false;
     return true;
   });
   const sortedDenialClaims = sortRows(filteredDenialClaims, denialSort, (claim, field) => {
@@ -2501,11 +2502,10 @@ export default function App() {
       ].some(value => toText(value).toLowerCase().includes(search));
       if (!matches) return false;
     }
-    if (blockedClaimProviderFilter && toText(c.provider_name) !== blockedClaimProviderFilter) return false;
-    if (blockedClaimCategoryFilter && toText(c.error_category) !== blockedClaimCategoryFilter) return false;
-    if (blockedClaimCorrectionFilter && toText(c.correction_status) !== blockedClaimCorrectionFilter) return false;
-    if (blockedClaimTypeFilter === "locked" && !c.locked) return false;
-    if (blockedClaimTypeFilter === "error" && !c.error_flag) return false;
+    if (!multiFilterMatches(c.provider_name, blockedClaimProviderFilter)) return false;
+    if (!multiFilterMatches(c.error_category, blockedClaimCategoryFilter)) return false;
+    if (!multiFilterMatches(c.correction_status, blockedClaimCorrectionFilter)) return false;
+    if (blockedClaimTypeFilter && !multiFilterMatches(c.locked ? "locked" : c.error_flag ? "error" : "", blockedClaimTypeFilter)) return false;
     return true;
   });
   const sortedBlockedClaims = sortRows(filteredBlockedClaims, blockedClaimSort, (claim, field) => {
@@ -2556,9 +2556,9 @@ export default function App() {
     }
     if (paymentStartDate && toText(payment.payment_date) < paymentStartDate) return false;
     if (paymentEndDate && toText(payment.payment_date) > paymentEndDate) return false;
-    if (paymentReceivedByFilter && toText(payment.payment_received_by) !== paymentReceivedByFilter) return false;
-    if (paymentPayerFilter && toText(payment.payer_name) !== paymentPayerFilter) return false;
-    if (paymentSourceFilter && toText(payment.payment_source) !== paymentSourceFilter) return false;
+    if (!multiFilterMatches(payment.payment_received_by, paymentReceivedByFilter)) return false;
+    if (!multiFilterMatches(payment.payer_name, paymentPayerFilter)) return false;
+    if (!multiFilterMatches(payment.payment_source, paymentSourceFilter)) return false;
     return true;
   });
   const sortedPayments = sortRows(filteredPayments, paymentSort, (payment, field) => {
@@ -2617,12 +2617,12 @@ export default function App() {
       ].some(value => toText(value).toLowerCase().includes(search));
       if (!matches) return false;
     }
-    if (importExceptionTypeFilter && toText(item.type) !== importExceptionTypeFilter) return false;
-    if (importExceptionSourceFilter && toText(item.source) !== importExceptionSourceFilter) return false;
-    if (importExceptionSeverityFilter && toText(item.severity) !== importExceptionSeverityFilter) return false;
+    if (!multiFilterMatches(item.type, importExceptionTypeFilter)) return false;
+    if (!multiFilterMatches(item.source, importExceptionSourceFilter)) return false;
+    if (!multiFilterMatches(item.severity, importExceptionSeverityFilter)) return false;
     if (importExceptionStatusFilter) {
       const status = task?.status || item.status;
-      if (toText(status) !== importExceptionStatusFilter) return false;
+      if (!multiFilterMatches(status, importExceptionStatusFilter)) return false;
     }
     return true;
   });
@@ -3115,59 +3115,59 @@ export default function App() {
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Type</span>
-                      <select
+                      <MultiSelectFilter
                         value={importExceptionTypeFilter}
-                        onChange={event => {
-                          setImportExceptionTypeFilter(event.target.value);
+                        onChange={value => {
+                          setImportExceptionTypeFilter(value);
                           setImportExceptionPage(1);
                         }}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="">{isEnglish ? "All types" : "Todos"}</option>
-                        {importExceptionTypes.map(type => <option key={type} value={type}>{type}</option>)}
-                      </select>
+                        allLabel={isEnglish ? "All types" : "Todos"}
+                        options={importExceptionTypes.map(type => ({ value: type, label: type }))}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Source</span>
-                      <select
+                      <MultiSelectFilter
                         value={importExceptionSourceFilter}
-                        onChange={event => {
-                          setImportExceptionSourceFilter(event.target.value);
+                        onChange={value => {
+                          setImportExceptionSourceFilter(value);
                           setImportExceptionPage(1);
                         }}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="">{isEnglish ? "All sources" : "Todos"}</option>
-                        {importExceptionSources.map(source => <option key={source} value={source}>{source}</option>)}
-                      </select>
+                        allLabel={isEnglish ? "All sources" : "Todos"}
+                        options={importExceptionSources.map(source => ({ value: source, label: source }))}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Severity</span>
-                      <select
+                      <MultiSelectFilter
                         value={importExceptionSeverityFilter}
-                        onChange={event => {
-                          setImportExceptionSeverityFilter(event.target.value);
+                        onChange={value => {
+                          setImportExceptionSeverityFilter(value);
                           setImportExceptionPage(1);
                         }}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="">{isEnglish ? "All severities" : "Todas"}</option>
-                        {importExceptionSeverities.map(severity => <option key={severity} value={severity}>{severity}</option>)}
-                      </select>
+                        allLabel={isEnglish ? "All severities" : "Todas"}
+                        options={importExceptionSeverities.map(severity => ({ value: severity, label: severity }))}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Status</span>
-                      <select
+                      <MultiSelectFilter
                         value={importExceptionStatusFilter}
-                        onChange={event => {
-                          setImportExceptionStatusFilter(event.target.value);
+                        onChange={value => {
+                          setImportExceptionStatusFilter(value);
                           setImportExceptionPage(1);
                         }}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="">{isEnglish ? "All statuses" : "Todos"}</option>
-                        {importExceptionStatuses.map(status => <option key={status} value={status}>{status}</option>)}
-                      </select>
+                        allLabel={isEnglish ? "All statuses" : "Todos"}
+                        options={importExceptionStatuses.map(status => ({ value: status, label: status }))}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <div className="flex items-end">
                       <button
@@ -3582,46 +3582,46 @@ export default function App() {
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Received by" : "Recibido por"}</span>
-                      <select
+                      <MultiSelectFilter
                         value={paymentReceivedByFilter}
-                        onChange={event => {
-                          setPaymentReceivedByFilter(event.target.value);
+                        onChange={value => {
+                          setPaymentReceivedByFilter(value);
                           setPaymentPage(1);
                         }}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="">{isEnglish ? "All" : "Todos"}</option>
-                        <option value="ITERA">ITERA</option>
-                        <option value="Provider">Provider</option>
-                      </select>
+                        allLabel={isEnglish ? "All" : "Todos"}
+                        options={[{ value: "ITERA", label: "ITERA" }, { value: "Provider", label: "Provider" }]}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Insurance" : "Aseguradora"}</span>
-                      <select
+                      <MultiSelectFilter
                         value={paymentPayerFilter}
-                        onChange={event => {
-                          setPaymentPayerFilter(event.target.value);
+                        onChange={value => {
+                          setPaymentPayerFilter(value);
                           setPaymentPage(1);
                         }}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="">{isEnglish ? "All payers" : "Todos los payers"}</option>
-                        {paymentPayers.map(payer => <option key={payer} value={payer}>{payer}</option>)}
-                      </select>
+                        allLabel={isEnglish ? "All payers" : "Todos los payers"}
+                        placeholder={isEnglish ? "Search payer..." : "Buscar payer..."}
+                        options={paymentPayers.map(payer => ({ value: payer, label: payer }))}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Source" : "Origen"}</span>
-                      <select
+                      <MultiSelectFilter
                         value={paymentSourceFilter}
-                        onChange={event => {
-                          setPaymentSourceFilter(event.target.value);
+                        onChange={value => {
+                          setPaymentSourceFilter(value);
                           setPaymentPage(1);
                         }}
-                        className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100"
-                      >
-                        <option value="">{isEnglish ? "All sources" : "Todos"}</option>
-                        {paymentSources.map(source => <option key={source} value={source}>{source}</option>)}
-                      </select>
+                        allLabel={isEnglish ? "All sources" : "Todos"}
+                        options={paymentSources.map(source => ({ value: source, label: source }))}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <div className="flex items-end">
                       <button
@@ -3795,38 +3795,23 @@ export default function App() {
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Provider" : "Provider"}</span>
-                      <select value={denialProviderFilter} onChange={event => { setDenialProviderFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All providers" : "Todos"}</option>
-                        {denialProviders.map(provider => <option key={provider} value={provider}>{provider}</option>)}
-                      </select>
+                      <MultiSelectFilter value={denialProviderFilter} onChange={value => { setDenialProviderFilter(value); setDenialPage(1); }} allLabel={isEnglish ? "All providers" : "Todos"} options={denialProviders.map(provider => ({ value: provider, label: provider }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Payer" : "Payer"}</span>
-                      <select value={denialPayerFilter} onChange={event => { setDenialPayerFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All payers" : "Todos"}</option>
-                        {denialPayers.map(payer => <option key={payer} value={payer}>{payer}</option>)}
-                      </select>
+                      <MultiSelectFilter value={denialPayerFilter} onChange={value => { setDenialPayerFilter(value); setDenialPage(1); }} allLabel={isEnglish ? "All payers" : "Todos"} options={denialPayers.map(payer => ({ value: payer, label: payer }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Status</span>
-                      <select value={denialStatusFilter} onChange={event => { setDenialStatusFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All statuses" : "Todos"}</option>
-                        {denialStatuses.map(status => <option key={status} value={status}>{status}</option>)}
-                      </select>
+                      <MultiSelectFilter value={denialStatusFilter} onChange={value => { setDenialStatusFilter(value); setDenialPage(1); }} allLabel={isEnglish ? "All statuses" : "Todos"} options={denialStatuses.map(status => ({ value: status, label: status }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">CARC</span>
-                      <select value={denialCarcFilter} onChange={event => { setDenialCarcFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All CARC" : "Todos"}</option>
-                        {denialCarcs.map(carc => <option key={carc} value={carc}>{carc}</option>)}
-                      </select>
+                      <MultiSelectFilter value={denialCarcFilter} onChange={value => { setDenialCarcFilter(value); setDenialPage(1); }} allLabel={isEnglish ? "All CARC" : "Todos"} options={denialCarcs.map(carc => ({ value: carc, label: carc }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Correction" : "Corrección"}</span>
-                      <select value={denialCorrectionFilter} onChange={event => { setDenialCorrectionFilter(event.target.value); setDenialPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All phases" : "Todas"}</option>
-                        {denialCorrections.map(phase => <option key={phase} value={phase}>{phase}</option>)}
-                      </select>
+                      <MultiSelectFilter value={denialCorrectionFilter} onChange={value => { setDenialCorrectionFilter(value); setDenialPage(1); }} allLabel={isEnglish ? "All phases" : "Todas"} options={denialCorrections.map(phase => ({ value: phase, label: phase }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <div className="flex items-end">
                       <button type="button" onClick={resetDenialFilters} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100">
@@ -3944,32 +3929,29 @@ export default function App() {
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Provider" : "Provider"}</span>
-                      <select value={blockedClaimProviderFilter} onChange={event => { setBlockedClaimProviderFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All providers" : "Todos"}</option>
-                        {blockedClaimProviders.map(provider => <option key={provider} value={provider}>{provider}</option>)}
-                      </select>
+                      <MultiSelectFilter value={blockedClaimProviderFilter} onChange={value => { setBlockedClaimProviderFilter(value); setBlockedClaimPage(1); }} allLabel={isEnglish ? "All providers" : "Todos"} options={blockedClaimProviders.map(provider => ({ value: provider, label: provider }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Error category" : "Categoría"}</span>
-                      <select value={blockedClaimCategoryFilter} onChange={event => { setBlockedClaimCategoryFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All categories" : "Todas"}</option>
-                        {blockedClaimCategories.map(category => <option key={category} value={category}>{category}</option>)}
-                      </select>
+                      <MultiSelectFilter value={blockedClaimCategoryFilter} onChange={value => { setBlockedClaimCategoryFilter(value); setBlockedClaimPage(1); }} allLabel={isEnglish ? "All categories" : "Todas"} options={blockedClaimCategories.map(category => ({ value: category, label: category }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Correction" : "Corrección"}</span>
-                      <select value={blockedClaimCorrectionFilter} onChange={event => { setBlockedClaimCorrectionFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All phases" : "Todas"}</option>
-                        {blockedClaimCorrections.map(phase => <option key={phase} value={phase}>{phase}</option>)}
-                      </select>
+                      <MultiSelectFilter value={blockedClaimCorrectionFilter} onChange={value => { setBlockedClaimCorrectionFilter(value); setBlockedClaimPage(1); }} allLabel={isEnglish ? "All phases" : "Todas"} options={blockedClaimCorrections.map(phase => ({ value: phase, label: phase }))} className="mt-1" buttonClassName="h-9 bg-white px-3 font-semibold" />
                     </label>
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Hold type" : "Tipo"}</span>
-                      <select value={blockedClaimTypeFilter} onChange={event => { setBlockedClaimTypeFilter(event.target.value); setBlockedClaimPage(1); }} className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:ring-2 focus:ring-blue-100">
-                        <option value="">{isEnglish ? "All holds" : "Todos"}</option>
-                        <option value="locked">{isEnglish ? "Locked" : "Bloqueado"}</option>
-                        <option value="error">{isEnglish ? "Error flag" : "Con error"}</option>
-                      </select>
+                      <MultiSelectFilter
+                        value={blockedClaimTypeFilter}
+                        onChange={value => { setBlockedClaimTypeFilter(value); setBlockedClaimPage(1); }}
+                        allLabel={isEnglish ? "All holds" : "Todos"}
+                        options={[
+                          { value: "locked", label: isEnglish ? "Locked" : "Bloqueado" },
+                          { value: "error", label: isEnglish ? "Error flag" : "Con error" }
+                        ]}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
                     </label>
                     <div className="flex items-end">
                       <button type="button" onClick={resetBlockedClaimFilters} className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-100">

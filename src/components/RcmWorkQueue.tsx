@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from "react";
 import { ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, Filter, Search, UserRound } from "lucide-react";
 import { Claim, User } from "../types";
+import { MultiSelectFilter } from "./MultiSelectFilter";
+import { multiFilterMatches } from "../multiSelectFilters";
 
 type QueueLine = {
   id: string;
@@ -111,10 +113,10 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
     ].join(" ").toLowerCase();
     const term = search.trim().toLowerCase();
     if (term && !haystack.includes(term)) return false;
-    if (actionFilter && row.nextAction !== actionFilter) return false;
-    if (providerFilter && row.providerName !== providerFilter) return false;
-    if (payerFilter && row.payerName !== payerFilter) return false;
-    if (statusFilter && row.status !== statusFilter) return false;
+    if (!multiFilterMatches(row.nextAction, actionFilter)) return false;
+    if (!multiFilterMatches(row.providerName, providerFilter)) return false;
+    if (!multiFilterMatches(row.payerName, payerFilter)) return false;
+    if (!multiFilterMatches(row.status, statusFilter)) return false;
     return true;
   });
   const sortedRows = useMemo(() => {
@@ -230,14 +232,14 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
               <span className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
                 <Filter className="h-3.5 w-3.5" /> {String(label)}
               </span>
-              <select
+              <MultiSelectFilter
                 value={String(value)}
-                onChange={(event) => (setter as React.Dispatch<React.SetStateAction<string>>)(event.target.value)}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-primary-blue focus:bg-white"
-              >
-                <option value="">{isEnglish ? "All" : "Todos"}</option>
-                {(options as string[]).map(option => <option key={option} value={option}>{option}</option>)}
-              </select>
+                onChange={(nextValue) => (setter as React.Dispatch<React.SetStateAction<string>>)(nextValue)}
+                options={(options as string[]).map(option => ({ value: option, label: option }))}
+                allLabel={isEnglish ? "All" : "Todos"}
+                placeholder={isEnglish ? "Search..." : "Buscar..."}
+                buttonClassName="px-3 py-2 font-semibold"
+              />
             </label>
           ))}
         </div>

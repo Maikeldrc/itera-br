@@ -1,7 +1,7 @@
 import React from "react";
 import { Download, RotateCcw, Save, Search } from "lucide-react";
 import { ClaimStatus, Payer, Provider } from "../../types";
-import { PayerCombobox } from "../PayerCombobox";
+import { MultiSelectFilter } from "../MultiSelectFilter";
 import {
   AgingBucket,
   ReportFiltersState,
@@ -188,40 +188,14 @@ export function ReportFilters({
           <span className={labelClass}>Month of Service</span>
           <input type="month" value={filters.month} onChange={e => update("month", e.target.value)} className={labeledField} aria-label="Month of service" />
         </label>
-        <select value={filters.practiceId} onChange={e => update("practiceId", e.target.value)} className={field}>
-          <option value="">All practices</option>
-          {practices.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-        <select value={filters.providerId} onChange={e => update("providerId", e.target.value)} className={field}>
-          <option value="">All providers</option>
-          {providers.map(item => <option key={item.provider_id} value={item.provider_id}>{item.provider_name}</option>)}
-        </select>
-        <select value={filters.serviceType} onChange={e => update("serviceType", e.target.value)} className={field}>
-          <option value="">All services</option>
-          {serviceTypes.map(item => <option key={item} value={item}>{item}</option>)}
-        </select>
-        <select value={filters.cptCode} onChange={e => update("cptCode", e.target.value)} className={field}>
-          <option value="">All CPT codes</option>
-          {cptCodes.map(item => <option key={item} value={item}>{item}</option>)}
-        </select>
-        <select value={filters.billedBy} onChange={e => update("billedBy", e.target.value)} className={field}>
-          <option value="">Billed By: All</option><option>ITERA</option><option>Provider</option>
-        </select>
-        <select value={filters.paymentReceivedBy} onChange={e => update("paymentReceivedBy", e.target.value)} className={field}>
-          <option value="">Payment Receiver: All</option><option>ITERA</option><option>Provider</option><option>Split</option><option>Unknown</option>
-        </select>
-        <select value={filters.claimStatus} onChange={e => update("claimStatus", e.target.value)} className={field}>
-          <option value="">All statuses</option>
-          {Object.values(ClaimStatus).map(item => <option key={item} value={item}>{item}</option>)}
-        </select>
-        <PayerCombobox
-          payers={payers}
-          value={filters.payerId}
-          onChange={payerId => update("payerId", payerId)}
-          emptyLabel="All payers"
-          placeholder="Type payer..."
-          inputClassName="py-1.5 text-[10px]"
-        />
+        <MultiSelectFilter value={filters.practiceId} onChange={value => update("practiceId", value)} allLabel="All practices" placeholder="Search practice..." options={practices.map(item => ({ value: item.id, label: item.name }))} buttonClassName="bg-white py-1.5 text-[10px]" />
+        <MultiSelectFilter value={filters.providerId} onChange={value => update("providerId", value)} allLabel="All providers" placeholder="Search provider..." options={providers.map(item => ({ value: item.provider_id, label: item.provider_name, meta: item.npi }))} buttonClassName="bg-white py-1.5 text-[10px]" />
+        <MultiSelectFilter value={filters.serviceType} onChange={value => update("serviceType", value)} allLabel="All services" placeholder="Search service..." options={serviceTypes.map(item => ({ value: item, label: item }))} buttonClassName="bg-white py-1.5 text-[10px]" />
+        <MultiSelectFilter value={filters.cptCode} onChange={value => update("cptCode", value)} allLabel="All CPT codes" placeholder="Search CPT..." options={cptCodes.map(item => ({ value: item, label: item }))} buttonClassName="bg-white py-1.5 text-[10px]" />
+        <MultiSelectFilter value={filters.billedBy} onChange={value => update("billedBy", value)} allLabel="Billed By: All" options={[{ value: "ITERA", label: "ITERA" }, { value: "Provider", label: "Provider" }]} buttonClassName="bg-white py-1.5 text-[10px]" />
+        <MultiSelectFilter value={filters.paymentReceivedBy} onChange={value => update("paymentReceivedBy", value)} allLabel="Payment Receiver: All" options={["ITERA", "Provider", "Split", "Unknown"].map(item => ({ value: item, label: item }))} buttonClassName="bg-white py-1.5 text-[10px]" />
+        <MultiSelectFilter value={filters.claimStatus} onChange={value => update("claimStatus", value)} allLabel="All statuses" placeholder="Search status..." options={Object.values(ClaimStatus).map(item => ({ value: item, label: item }))} buttonClassName="bg-white py-1.5 text-[10px]" />
+        <MultiSelectFilter value={filters.payerId} onChange={value => update("payerId", value)} allLabel="All payers" placeholder="Search payer..." options={payers.map(item => ({ value: item.payer_id, label: item.payer_name, meta: item.payer_id }))} buttonClassName="bg-white py-1.5 text-[10px]" />
         <label>
           <span className={labelClass}>Submission From</span>
           <input type="date" value={filters.submissionStartDate} onChange={e => update("submissionStartDate", e.target.value)} className={labeledField} title="Submission date from" aria-label="Submission date from" />

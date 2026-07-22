@@ -7,7 +7,7 @@ import React, { useState } from "react";
 import { Filter, RotateCcw, Search, ChevronDown, ChevronUp } from "lucide-react";
 import { ClaimStatus, ClaimClassification, Provider, Payer } from "../types";
 import { useLanguage } from "./LanguageProvider";
-import { PayerCombobox } from "./PayerCombobox";
+import { MultiSelectFilter } from "./MultiSelectFilter";
 
 export interface FilterState {
   search: string;
@@ -108,18 +108,13 @@ export function ClaimFilters({
           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
             {isEnglish ? "Claim Status" : "Estado Claim"}
           </label>
-          <select
+          <MultiSelectFilter
             value={filters.status}
-            onChange={(e) => onChange({ status: e.target.value })}
-            className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-          >
-            <option value="">{isEnglish ? "All Statuses" : "Todos los Estados"}</option>
-            {Object.values(ClaimStatus).map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
+            onChange={(status) => onChange({ status })}
+            allLabel={isEnglish ? "All Statuses" : "Todos los Estados"}
+            placeholder={isEnglish ? "Search status..." : "Buscar estado..."}
+            options={Object.values(ClaimStatus).map(status => ({ value: status, label: status }))}
+          />
         </div>
 
         {/* 3. Classification */}
@@ -127,18 +122,13 @@ export function ClaimFilters({
           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
             {isEnglish ? "Classification" : "Clasificación"}
           </label>
-          <select
+          <MultiSelectFilter
             value={filters.classification}
-            onChange={(e) => onChange({ classification: e.target.value })}
-            className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-          >
-            <option value="">{isEnglish ? "All Classifications" : "Todas las Clasificaciones"}</option>
-            {Object.values(ClaimClassification).map((classification) => (
-              <option key={classification} value={classification}>
-                {classification}
-              </option>
-            ))}
-          </select>
+            onChange={(classification) => onChange({ classification })}
+            allLabel={isEnglish ? "All Classifications" : "Todas las Clasificaciones"}
+            placeholder={isEnglish ? "Search classification..." : "Buscar clasificación..."}
+            options={Object.values(ClaimClassification).map(classification => ({ value: classification, label: classification }))}
+          />
         </div>
 
         {/* 4. Provider */}
@@ -146,18 +136,13 @@ export function ClaimFilters({
           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
             {isEnglish ? "Physician / Provider" : "Médico / Proveedor"}
           </label>
-          <select
+          <MultiSelectFilter
             value={filters.providerId}
-            onChange={(e) => onChange({ providerId: e.target.value })}
-            className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-          >
-            <option value="">{isEnglish ? "All Providers" : "Todos los Proveedores"}</option>
-            {providers.map((p) => (
-              <option key={p.provider_id} value={p.provider_id}>
-                {p.provider_name}
-              </option>
-            ))}
-          </select>
+            onChange={(providerId) => onChange({ providerId })}
+            allLabel={isEnglish ? "All Providers" : "Todos los Proveedores"}
+            placeholder={isEnglish ? "Search provider..." : "Buscar provider..."}
+            options={providers.map(provider => ({ value: provider.provider_id, label: provider.provider_name, meta: provider.npi }))}
+          />
         </div>
 
         {/* 5. Insurance (Payer) */}
@@ -165,13 +150,12 @@ export function ClaimFilters({
           <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
             {isEnglish ? "Insurance (Payer)" : "Aseguradora (Payer)"}
           </label>
-          <PayerCombobox
-            payers={payers}
+          <MultiSelectFilter
             value={filters.payerId}
             onChange={(payerId) => onChange({ payerId })}
-            emptyLabel={isEnglish ? "All Insurances" : "Todas las Aseguradoras"}
-            placeholder={isEnglish ? "Type insurance..." : "Escriba insurance..."}
-            inputClassName="py-1.5 text-xs"
+            allLabel={isEnglish ? "All Insurances" : "Todas las Aseguradoras"}
+            placeholder={isEnglish ? "Search insurance..." : "Buscar insurance..."}
+            options={payers.map(payer => ({ value: payer.payer_id, label: payer.payer_name, meta: payer.payer_id }))}
           />
         </div>
 
@@ -196,18 +180,13 @@ export function ClaimFilters({
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                 {isEnglish ? "Service Type" : "Tipo de Servicio"}
               </label>
-              <select
+              <MultiSelectFilter
                 value={filters.serviceType}
-                onChange={(e) => onChange({ serviceType: e.target.value })}
-                className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-              >
-                <option value="">{isEnglish ? "All Services" : "Todos los Servicios"}</option>
-                {availableServiceTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
+                onChange={(serviceType) => onChange({ serviceType })}
+                allLabel={isEnglish ? "All Services" : "Todos los Servicios"}
+                placeholder={isEnglish ? "Search service..." : "Buscar servicio..."}
+                options={availableServiceTypes.map(type => ({ value: type, label: type }))}
+              />
             </div>
 
             {/* 8. Billed By */}
@@ -215,15 +194,12 @@ export function ClaimFilters({
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                 {isEnglish ? "Billed By" : "Facturado por"}
               </label>
-              <select
+              <MultiSelectFilter
                 value={filters.billedBy}
-                onChange={(e) => onChange({ billedBy: e.target.value })}
-                className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-              >
-                <option value="">{isEnglish ? "All" : "Todos"}</option>
-                <option value="ITERA">ITERA</option>
-                <option value="Provider">Provider</option>
-              </select>
+                onChange={(billedBy) => onChange({ billedBy })}
+                allLabel={isEnglish ? "All" : "Todos"}
+                options={[{ value: "ITERA", label: "ITERA" }, { value: "Provider", label: "Provider" }]}
+              />
             </div>
 
             {/* 9. Payment Received By */}
@@ -231,17 +207,12 @@ export function ClaimFilters({
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                 {isEnglish ? "Collected By" : "Cobrado por"}
               </label>
-              <select
+              <MultiSelectFilter
                 value={filters.paymentReceivedBy}
-                onChange={(e) => onChange({ paymentReceivedBy: e.target.value })}
-                className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-              >
-                <option value="">{isEnglish ? "All" : "Todos"}</option>
-                <option value="ITERA">ITERA</option>
-                <option value="Provider">Provider</option>
-                <option value="Split">Split</option>
-                <option value="Unknown">Unknown</option>
-              </select>
+                onChange={(paymentReceivedBy) => onChange({ paymentReceivedBy })}
+                allLabel={isEnglish ? "All" : "Todos"}
+                options={["ITERA", "Provider", "Split", "Unknown"].map(item => ({ value: item, label: item }))}
+              />
             </div>
 
             {/* 10. Date From */}
@@ -275,15 +246,15 @@ export function ClaimFilters({
               <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">
                 {isEnglish ? "Errors / Blocks" : "Errores / Bloqueos"}
               </label>
-              <select
+              <MultiSelectFilter
                 value={filters.errorFlag}
-                onChange={(e) => onChange({ errorFlag: e.target.value })}
-                className="w-full py-1.5 px-2 text-xs rounded border border-slate-200 focus:outline-hidden focus:ring-1 focus:ring-primary-blue focus:border-primary-blue bg-slate-50 focus:bg-white text-slate-800 font-medium cursor-pointer"
-              >
-                <option value="">{isEnglish ? "All claims" : "Todos los claims"}</option>
-                <option value="true">{isEnglish ? "With Error / Blocked" : "Con Error / Bloqueado"}</option>
-                <option value="false">{isEnglish ? "No Error (Clean)" : "Sin Error (Limpio)"}</option>
-              </select>
+                onChange={(errorFlag) => onChange({ errorFlag })}
+                allLabel={isEnglish ? "All claims" : "Todos los claims"}
+                options={[
+                  { value: "true", label: isEnglish ? "With Error / Blocked" : "Con Error / Bloqueado" },
+                  { value: "false", label: isEnglish ? "No Error (Clean)" : "Sin Error (Limpio)" }
+                ]}
+              />
             </div>
           </>
         )}
