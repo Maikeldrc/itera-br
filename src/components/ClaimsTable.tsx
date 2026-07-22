@@ -26,7 +26,9 @@ import {
   Check,
   Loader2,
   MessageSquareText,
-  Tag
+  Tag,
+  Download,
+  Columns3
 } from "lucide-react";
 import { Claim, ClaimStatus, ClaimClassification, UserRole, type Note, type User as AppUser } from "../types";
 import { StatusBadge } from "./StatusBadge";
@@ -281,8 +283,9 @@ const ENTITY_IDENTIFIER_CATALOG = [
   { code: "FA", description: "Facility" }
 ];
 
-type SortField = "claim_id" | "date_of_service_from" | "billed_charge" | "paid_amount" | "ar_balance" | "ending_ap_to_physician" | "updated_at" | "patient_display_name_masked" | "provider_name" | "cpt_hcpcs" | "billed_by" | "claim_status" | "payer_name";
+type SortField = "claim_id" | "date_of_service_from" | "billed_charge" | "paid_amount" | "ar_balance" | "ending_ap_to_physician" | "updated_at" | "patient_display_name_masked" | "provider_name" | "cpt_hcpcs" | "billed_by" | "claim_status" | "payer_name" | "claim_label";
 type SortOrder = "asc" | "desc";
+type ClaimTableColumnId = "patient" | "provider" | "dos" | "cpt" | "billed" | "billedBy" | "status" | "label" | "payer" | "paid";
 
 export function ClaimsTable({
   claims,
@@ -303,6 +306,19 @@ export function ClaimsTable({
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [isColumnPickerOpen, setIsColumnPickerOpen] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<Record<ClaimTableColumnId, boolean>>({
+    patient: true,
+    provider: true,
+    dos: true,
+    cpt: true,
+    billed: true,
+    billedBy: true,
+    status: true,
+    label: true,
+    payer: true,
+    paid: true
+  });
   const activeAssignableUsers = allUsers
     .filter(user => user.active)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -851,6 +867,9 @@ export function ClaimsTable({
       } else if (sortField === "claim_status") {
         valA = a.status;
         valB = b.status;
+      } else if (sortField === "claim_label") {
+        valA = a.claim.claim_label;
+        valB = b.claim.claim_label;
       } else if (sortField === "payer_name") {
         valA = a.claim.payer_name;
         valB = b.claim.payer_name;
@@ -910,6 +929,86 @@ export function ClaimsTable({
     return `${month}-${shortYear}`;
   };
 
+  const columnOptions: Array<{ id: ClaimTableColumnId; label: string; sort?: SortField }> = [
+    { id: "patient", label: isEnglish ? "Patient" : "Paciente", sort: "patient_display_name_masked" },
+    { id: "provider", label: isEnglish ? "Provider / Physician" : "Proveedor / Médico", sort: "provider_name" },
+    { id: "dos", label: "DOS", sort: "date_of_service_from" },
+    { id: "cpt", label: viewMode === "patient" ? "CPT Codes" : (isEnglish ? "CPT Code" : "Código CPT"), sort: "cpt_hcpcs" },
+    { id: "billed", label: isEnglish ? "Billed" : "Facturado", sort: "billed_charge" },
+    { id: "billedBy", label: isEnglish ? "Billed By" : "Facturado por", sort: "billed_by" },
+    { id: "status", label: isEnglish ? "Status" : "Estado", sort: "claim_status" },
+    { id: "label", label: "Label", sort: "claim_label" },
+    { id: "payer", label: isEnglish ? "Primary Payer" : "Pagador Primario", sort: "payer_name" },
+    { id: "paid", label: isEnglish ? "Paid" : "Pagado", sort: "paid_amount" }
+  ];
+  const shownColumnOptions = columnOptions.filter(column => visibleColumns[column.id]);
+  const dataColumnCount = shownColumnOptions.length;
+  const tableColSpan = dataColumnCount + 2;
+  const renderSortableColumnHeader = (column: typeof columnOptions[number], align: "left" | "center" | "right" = "left") => {
+    const justify = align === "right" ? "justify-end" : align === "center" ? "justify-center" : "";
+    return (
+      <th
+        key={column.id}
+        onClick={() => column.sort && handleSort(column.sort)}
+        className={`px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors ${align === "right" ? "text-right" : align === "center" ? "text-center" : ""}`}
+      >
+        <div className={`flex items-center gap-1 ${justify}`}>
+          {column.label}
+          {column.sort && sortField === column.sort && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
+        </div>
+      </th>
+    );
+  };
+  const escapeCsv = (value: unknown) => {
+    const text = String(value ?? "");
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const downloadCsv = (filename: string, rows: Array<Record<string, unknown>>) => {
+    const headers = shownColumnOptions.map(column => column.label);
+    const csv = [
+      headers.map(escapeCsv).join(","),
+      ...rows.map(row => shownColumnOptions.map(column => escapeCsv(row[column.id])).join(","))
+    ].join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+  const exportVisibleTable = () => {
+    if (viewMode === "patient") {
+      downloadCsv(`ITERA_Claims_Worklist_${new Date().toISOString().slice(0, 10)}.csv`, sortedClaims.map(claim => ({
+        patient: `${claim.patient_display_name_masked} (${claim.patient_id})`,
+        provider: `${claim.provider_name} / ${claim.practice_name}`,
+        dos: claim.date_of_service_from,
+        cpt: claim.cpt_hcpcs,
+        billed: claim.billed_charge,
+        billedBy: claim.billed_by,
+        status: claim.claim_status,
+        label: claim.claim_label,
+        payer: `${claim.payer_name} (${claim.payer_id})`,
+        paid: claim.paid_amount
+      })));
+      return;
+    }
+    downloadCsv(`ITERA_Claims_Worklist_CPT_${new Date().toISOString().slice(0, 10)}.csv`, sortedServiceLines.map(row => ({
+      patient: `${row.claim.patient_display_name_masked} (${row.claim.patient_id})`,
+      provider: `${row.claim.provider_name} / ${row.claim.practice_name}`,
+      dos: row.dos || row.claim.date_of_service_from,
+      cpt: row.cpt,
+      billed: row.charged,
+      billedBy: row.claim.billed_by,
+      status: row.status,
+      label: row.claim.claim_label,
+      payer: `${row.claim.payer_name} (${row.claim.payer_id})`,
+      paid: row.paid + row.secondaryPaid
+    })));
+  };
+
   const isAdmin = userRole === UserRole.Admin;
   const ClaimLabelBadge = ({ label }: { label?: string }) => {
     const normalized = normalizeClaimLabel(label);
@@ -964,29 +1063,93 @@ export function ClaimsTable({
               : (isEnglish ? "One CPT code per row" : "Un código CPT por fila")})
           </span>
         </div>
-        <div className="flex bg-slate-200/60 p-1 rounded-lg">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex bg-slate-200/60 p-1 rounded-lg">
+            <button
+              type="button"
+              onClick={() => { setViewMode("patient"); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                viewMode === "patient"
+                  ? "bg-white text-primary-blue shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              {isEnglish ? "Patient View (Claims)" : "Vista Paciente (Reclamos)"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setViewMode("cpt"); setCurrentPage(1); }}
+              className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+                viewMode === "cpt"
+                  ? "bg-white text-primary-blue shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              {isEnglish ? "Detailed View (CPTs)" : "Vista Detallada (CPTs)"}
+            </button>
+          </div>
           <button
             type="button"
-            onClick={() => { setViewMode("patient"); setCurrentPage(1); }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
-              viewMode === "patient"
-                ? "bg-white text-primary-blue shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
+            onClick={exportVisibleTable}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100"
           >
-            {isEnglish ? "Patient View (Claims)" : "Vista Paciente (Reclamos)"}
+            <Download className="h-3.5 w-3.5" />
+            {isEnglish ? "Export table" : "Exportar tabla"}
           </button>
-          <button
-            type="button"
-            onClick={() => { setViewMode("cpt"); setCurrentPage(1); }}
-            className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
-              viewMode === "cpt"
-                ? "bg-white text-primary-blue shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            {isEnglish ? "Detailed View (CPTs)" : "Vista Detallada (CPTs)"}
-          </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setIsColumnPickerOpen(value => !value)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100"
+            >
+              <Columns3 className="h-3.5 w-3.5" />
+              {isEnglish ? "Columns" : "Columnas"}
+            </button>
+            {isColumnPickerOpen && (
+              <div className="absolute right-0 top-full z-40 mt-2 w-60 rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-xl">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="font-bold text-slate-800">{isEnglish ? "Visible columns" : "Columnas visibles"}</p>
+                  <button
+                    type="button"
+                    onClick={() => setVisibleColumns({
+                      patient: true,
+                      provider: true,
+                      dos: true,
+                      cpt: true,
+                      billed: true,
+                      billedBy: true,
+                      status: true,
+                      label: true,
+                      payer: true,
+                      paid: true
+                    })}
+                    className="text-[10px] font-bold text-primary-blue hover:underline"
+                  >
+                    {isEnglish ? "Reset" : "Reset"}
+                  </button>
+                </div>
+                <div className="max-h-72 space-y-1 overflow-y-auto">
+                  {columnOptions.map(column => (
+                    <label key={column.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 font-semibold text-slate-700 hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={visibleColumns[column.id]}
+                        onChange={event => {
+                          const checked = event.target.checked;
+                          setVisibleColumns(current => {
+                            const next = { ...current, [column.id]: checked };
+                            return Object.values(next).some(Boolean) ? next : current;
+                          });
+                        }}
+                        className="rounded border-slate-300 text-primary-blue focus:ring-primary-blue"
+                      />
+                      {column.label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1002,60 +1165,16 @@ export function ClaimsTable({
                   className="rounded border-slate-300 text-primary-blue focus:ring-primary-blue h-3.5 w-3.5 cursor-pointer"
                 />
               </th>
-              <th onClick={() => handleSort("patient_display_name_masked")} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center gap-1">
-                  {isEnglish ? "Patient" : "Paciente"}
-                  {sortField === "patient_display_name_masked" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
-              <th onClick={() => handleSort("provider_name")} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center gap-1">
-                  {isEnglish ? "Provider / Physician" : "Proveedor / Médico"}
-                  {sortField === "provider_name" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
-              <th onClick={() => handleSort("date_of_service_from")} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center gap-1">
-                  DOS
-                  {sortField === "date_of_service_from" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
-              <th onClick={() => handleSort("cpt_hcpcs")} className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center justify-center gap-1">
-                  {viewMode === "patient" ? "CPT Codes" : (isEnglish ? "CPT Code" : "Código CPT")}
-                  {sortField === "cpt_hcpcs" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
-              <th onClick={() => handleSort("billed_by")} className="px-4 py-3 text-center cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center justify-center gap-1">
-                  {isEnglish ? "Billed By" : "Facturado por"}
-                  {sortField === "billed_by" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
-              <th onClick={() => handleSort("claim_status")} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center gap-1">
-                  {isEnglish ? "Status" : "Estado"}
-                  {sortField === "claim_status" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
-              <th className="px-4 py-3">
-                <div className="flex items-center gap-1">
-                  Label
-                </div>
-              </th>
-              <th onClick={() => handleSort("payer_name")} className="px-4 py-3 cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center gap-1">
-                  {isEnglish ? "Primary Payer" : "Pagador Primario"}
-                  {sortField === "payer_name" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
-
-              <th onClick={() => handleSort("paid_amount")} className="px-4 py-3 text-right cursor-pointer hover:bg-slate-100 transition-colors">
-                <div className="flex items-center justify-end gap-1">
-                  {isEnglish ? "Paid" : "Pagado"}
-                  {sortField === "paid_amount" && (sortOrder === "asc" ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />)}
-                </div>
-              </th>
+              {visibleColumns.patient && renderSortableColumnHeader(columnOptions.find(column => column.id === "patient")!)}
+              {visibleColumns.provider && renderSortableColumnHeader(columnOptions.find(column => column.id === "provider")!)}
+              {visibleColumns.dos && renderSortableColumnHeader(columnOptions.find(column => column.id === "dos")!)}
+              {visibleColumns.cpt && renderSortableColumnHeader(columnOptions.find(column => column.id === "cpt")!, "center")}
+              {visibleColumns.billed && renderSortableColumnHeader(columnOptions.find(column => column.id === "billed")!, "right")}
+              {visibleColumns.billedBy && renderSortableColumnHeader(columnOptions.find(column => column.id === "billedBy")!, "center")}
+              {visibleColumns.status && renderSortableColumnHeader(columnOptions.find(column => column.id === "status")!)}
+              {visibleColumns.label && renderSortableColumnHeader(columnOptions.find(column => column.id === "label")!)}
+              {visibleColumns.payer && renderSortableColumnHeader(columnOptions.find(column => column.id === "payer")!)}
+              {visibleColumns.paid && renderSortableColumnHeader(columnOptions.find(column => column.id === "paid")!, "right")}
               <th className="px-4 py-3 text-center w-24">{isEnglish ? "Actions" : "Acciones"}</th>
             </tr>
           </thead>
@@ -1063,7 +1182,7 @@ export function ClaimsTable({
             {viewMode === "patient" ? (
               paginatedClaims.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="text-center p-12 text-slate-500 font-sans">
+                  <td colSpan={tableColSpan} className="text-center p-12 text-slate-500 font-sans">
                     {isEnglish ? "No claims found for the selected filters." : "No se encontraron claims para los filtros seleccionados."}
                   </td>
                 </tr>
@@ -1094,7 +1213,7 @@ export function ClaimsTable({
                       </td>
 
                       {/* Masked Patient with flags */}
-                      <td className="px-4 py-3 font-sans">
+                      {visibleColumns.patient && <td className="px-4 py-3 font-sans">
                         <div className="flex items-center gap-1.5">
                           <div className="font-semibold text-slate-700">{claim.patient_display_name_masked}</div>
                           {noteCount > 0 && (
@@ -1123,19 +1242,19 @@ export function ClaimsTable({
                           )}
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono">ID: {claim.patient_id}</div>
-                      </td>
+                      </td>}
 
                       {/* Provider */}
-                      <td className="px-4 py-3 font-sans">
+                      {visibleColumns.provider && <td className="px-4 py-3 font-sans">
                         <div className="font-semibold text-slate-700">{claim.provider_name}</div>
                         <div className="text-[10px] text-slate-400 font-mono">{claim.practice_name}</div>
-                      </td>
+                      </td>}
 
                       {/* DOS */}
-                      <td className="px-4 py-3 font-mono text-slate-500">{formatDos(claim.date_of_service_from)}</td>
+                      {visibleColumns.dos && <td className="px-4 py-3 font-mono text-slate-500">{formatDos(claim.date_of_service_from)}</td>}
 
                       {/* All CPT codes in this claim */}
-                      <td className="px-4 py-3">
+                      {visibleColumns.cpt && <td className="px-4 py-3">
                         <div className="flex min-w-28 max-w-48 flex-wrap justify-center gap-1">
                           {getClaimCptCodes(claim).length > 0 ? (
                             getClaimCptCodes(claim).map(code => (
@@ -1150,36 +1269,43 @@ export function ClaimsTable({
                             <span className="text-[10px] italic text-slate-400">Sin CPT</span>
                           )}
                         </div>
-                      </td>
+                      </td>}
+
+                      {/* Billed */}
+                      {visibleColumns.billed && (
+                        <td className="px-4 py-3 text-right font-semibold font-mono text-slate-800">
+                          {formatCurrency(claim.billed_charge)}
+                        </td>
+                      )}
 
                       {/* Billed By */}
-                      <td className="px-4 py-3 text-center">
+                      {visibleColumns.billedBy && <td className="px-4 py-3 text-center">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${claim.billed_by === "ITERA" ? "bg-[#1b98e0]/10 text-[#004e89]" : "bg-slate-100 text-slate-600"}`}>
                           {claim.billed_by}
                         </span>
-                      </td>
+                      </td>}
 
                       {/* Status Badge */}
-                      <td className="px-4 py-3">
+                      {visibleColumns.status && <td className="px-4 py-3">
                         <StatusBadge status={claim.claim_status} />
-                      </td>
+                      </td>}
 
                       {/* Label */}
-                      <td className="px-4 py-3">
+                      {visibleColumns.label && <td className="px-4 py-3">
                         <ClaimLabelBadge label={claim.claim_label} />
-                      </td>
+                      </td>}
 
                       {/* Primary Payer */}
-                      <td className="px-4 py-3 font-sans">
+                      {visibleColumns.payer && <td className="px-4 py-3 font-sans">
                         <div className="text-xs font-semibold text-slate-700">{claim.payer_name}</div>
                         <div className="text-[10px] text-slate-400">{claim.payer_id}</div>
-                      </td>
+                      </td>}
 
 
                       {/* Financial Values */}
-                      <td className="px-4 py-3 text-right font-semibold font-mono text-emerald-600">
+                      {visibleColumns.paid && <td className="px-4 py-3 text-right font-semibold font-mono text-emerald-600">
                         {formatCurrency(claim.paid_amount)}
-                      </td>
+                      </td>}
 
                       {/* Actions */}
                       <td className="px-4 py-3 text-center relative" onClick={(e) => e.stopPropagation()}>
@@ -1360,7 +1486,7 @@ export function ClaimsTable({
             ) : (
               paginatedServiceLines.length === 0 ? (
                 <tr>
-                  <td colSpan={14} className="text-center p-12 text-slate-500 font-sans">
+                  <td colSpan={tableColSpan} className="text-center p-12 text-slate-500 font-sans">
                     {isEnglish ? "No service lines found for the selected filters." : "No se encontraron líneas de servicio para los filtros seleccionados."}
                   </td>
                 </tr>
@@ -1395,7 +1521,7 @@ export function ClaimsTable({
                       </td>
 
                       {/* Patient Info */}
-                      <td className="px-4 py-3 font-sans">
+                      {visibleColumns.patient && <td className="px-4 py-3 font-sans">
                         <div className="flex items-center gap-1.5">
                           <div className="font-semibold text-slate-700">{claim.patient_display_name_masked}</div>
                           {isLocked && (
@@ -1415,19 +1541,19 @@ export function ClaimsTable({
                           )}
                         </div>
                         <div className="text-[10px] text-slate-400 font-mono">ID: {claim.patient_id}</div>
-                      </td>
+                      </td>}
 
                       {/* Provider Info */}
-                      <td className="px-4 py-3 font-sans">
+                      {visibleColumns.provider && <td className="px-4 py-3 font-sans">
                         <div className="font-semibold text-slate-700">{claim.provider_name}</div>
                         <div className="text-[10px] text-slate-400 font-mono">{claim.practice_name}</div>
-                      </td>
+                      </td>}
 
                       {/* DOS */}
-                      <td className="px-4 py-3 font-mono text-slate-500">{formatDos(claim.date_of_service_from)}</td>
+                      {visibleColumns.dos && <td className="px-4 py-3 font-mono text-slate-500">{formatDos(slRow.dos || claim.date_of_service_from)}</td>}
 
                       {/* CPT Code */}
-                      <td className="px-4 py-3 text-center font-mono font-bold text-primary-blue text-xs">
+                      {visibleColumns.cpt && <td className="px-4 py-3 text-center font-mono font-bold text-primary-blue text-xs">
                         <div className="flex items-center justify-center gap-1.5">
                           <span>{slRow.cpt}</span>
                           {slRow.locked && (
@@ -1437,36 +1563,43 @@ export function ClaimsTable({
                             <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-rose-600" title={slRow.errorReason || "Imported with service-line error"} />
                           )}
                         </div>
-                      </td>
+                      </td>}
+
+                      {/* Billed */}
+                      {visibleColumns.billed && (
+                        <td className="px-4 py-3 text-right font-semibold font-mono text-slate-800">
+                          {formatCurrency(slRow.charged)}
+                        </td>
+                      )}
 
                       {/* Billed By */}
-                      <td className="px-4 py-3 text-center">
+                      {visibleColumns.billedBy && <td className="px-4 py-3 text-center">
                         <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${claim.billed_by === "ITERA" ? "bg-[#1b98e0]/10 text-[#004e89]" : "bg-slate-100 text-slate-600"}`}>
                           {claim.billed_by}
                         </span>
-                      </td>
+                      </td>}
 
                       {/* Status */}
-                      <td className="px-4 py-3">
+                      {visibleColumns.status && <td className="px-4 py-3">
                         <StatusBadge status={slRow.status as ClaimStatus} />
-                      </td>
+                      </td>}
 
                       {/* Label */}
-                      <td className="px-4 py-3">
+                      {visibleColumns.label && <td className="px-4 py-3">
                         <ClaimLabelBadge label={claim.claim_label} />
-                      </td>
+                      </td>}
 
                       {/* Primary Payer */}
-                      <td className="px-4 py-3 font-sans">
+                      {visibleColumns.payer && <td className="px-4 py-3 font-sans">
                         <div className="text-xs font-semibold text-slate-700">{claim.payer_name}</div>
                         <div className="text-[10px] text-slate-400">{claim.payer_id}</div>
-                      </td>
+                      </td>}
 
 
                       {/* CPT Financial Values */}
-                      <td className="px-4 py-3 text-right font-semibold font-mono text-emerald-600">
+                      {visibleColumns.paid && <td className="px-4 py-3 text-right font-semibold font-mono text-emerald-600">
                         {formatCurrency(slRow.paid + slRow.secondaryPaid)}
-                      </td>
+                      </td>}
 
                       {/* Actions */}
                       <td className="px-4 py-3 text-center relative" onClick={(e) => e.stopPropagation()}>
