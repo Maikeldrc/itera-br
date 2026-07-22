@@ -309,6 +309,7 @@ export default function App() {
   const [paymentSourceFilter, setPaymentSourceFilter] = useState("");
   const [paymentPage, setPaymentPage] = useState(1);
   const [paymentRowsPerPage, setPaymentRowsPerPage] = useState(10);
+  const [claimsKpiExpanded, setClaimsKpiExpanded] = useState(false);
   const [denialSearch, setDenialSearch] = useState("");
   const [denialProviderFilter, setDenialProviderFilter] = useState("");
   const [denialPayerFilter, setDenialPayerFilter] = useState("");
@@ -2297,6 +2298,68 @@ export default function App() {
     return true;
   });
 
+  const buildClaimsKpis = (claimSet: Claim[]) => {
+    const statusCounts = claimSet.reduce<Record<string, number>>((acc, claim) => {
+      const status = toText(claim.claim_status) || "Unknown";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    const billedByCounts = claimSet.reduce<Record<string, number>>((acc, claim) => {
+      const owner = toText(claim.billed_by) || "Unknown";
+      acc[owner] = (acc[owner] || 0) + 1;
+      return acc;
+    }, {});
+    const payerCount = new Set(claimSet.map(claim => toText(claim.payer_id || claim.payer_name)).filter(Boolean)).size;
+    const providerCount = new Set(claimSet.map(claim => toText(claim.provider_id || claim.provider_name)).filter(Boolean)).size;
+    let cptUnits = 0;
+    let serviceLineErrors = 0;
+    claimSet.forEach(claim => {
+      let countedFromServiceLines = false;
+      try {
+        const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
+        if (Array.isArray(lines) && lines.length > 0) {
+          countedFromServiceLines = true;
+          lines.forEach((line: any) => {
+            cptUnits += Math.max(1, Number(line?.units || 1));
+            if (line?.importError || line?.errorFlag) serviceLineErrors += 1;
+          });
+        }
+      } catch {
+        countedFromServiceLines = false;
+      }
+      if (!countedFromServiceLines) {
+        const codes = toText(claim.cpt_hcpcs).split(",").map(code => code.trim()).filter(Boolean);
+        cptUnits += codes.length > 0 ? codes.length : Math.max(1, Number(claim.units || 1));
+      }
+    });
+    const totals = claimSet.reduce((acc, claim) => {
+      acc.billed += Number(claim.billed_charge || 0);
+      acc.paid += Number(claim.paid_amount || 0);
+      acc.balance += Number(claim.ar_balance || 0);
+      acc.denied += Number(claim.denied_amount || 0);
+      acc.adjustments += Number(claim.insurance_adjustment || 0);
+      return acc;
+    }, { billed: 0, paid: 0, balance: 0, denied: 0, adjustments: 0 });
+    return {
+      claims: claimSet.length,
+      cptUnits,
+      payerCount,
+      providerCount,
+      serviceLineErrors,
+      statusCounts,
+      billedByCounts,
+      ...totals
+    };
+  };
+  const claimsKpis = buildClaimsKpis(filteredClaims);
+  const totalClaimsKpis = buildClaimsKpis(visibleClaims);
+  const claimsKpiHasActiveFilters = filteredClaims.length !== visibleClaims.length || JSON.stringify(filters) !== JSON.stringify(INITIAL_FILTERS);
+  const claimsKpiStatusEntries = Object.entries(claimsKpis.statusCounts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 6);
+  const claimsKpiBilledByEntries = Object.entries(claimsKpis.billedByCounts)
+    .sort(([, a], [, b]) => b - a);
+
   const serviceLineImportErrorClaimCount = visibleClaims.filter(claim => {
     try {
       const lines = claim.service_lines_json ? JSON.parse(claim.service_lines_json) : [];
@@ -2707,6 +2770,109 @@ export default function App() {
                 payers={payers}
                 availableServiceTypes={availableServiceTypes}
               />
+
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => setClaimsKpiExpanded(value => !value)}
+                  className="flex w-full flex-col gap-3 border-b border-slate-100 px-5 py-4 text-left hover:bg-slate-50 md:flex-row md:items-center md:justify-between"
+                >
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-bold text-slate-900">{isEnglish ? "Worklist KPIs" : "KPIs del Worklist"}</h3>
+                      {claimsKpiHasActiveFilters && (
+                        <span className="rounded-full bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-blue-700">
+                          {isEnglish ? "Filtered" : "Filtrado"}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {isEnglish
+                        ? "Indicators update with the current filters and compare against the visible total for your role."
+                        : "Los indicadores se actualizan con los filtros actuales y se comparan contra el total visible para su rol."}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="rounded-lg bg-slate-100 px-2.5 py-1 font-mono font-bold text-slate-800">
+                      {claimsKpis.claims}/{totalClaimsKpis.claims} {isEnglish ? "claims" : "claims"}
+                    </span>
+                    <span className="rounded-lg bg-emerald-50 px-2.5 py-1 font-mono font-bold text-emerald-700">
+                      {formatUSD(claimsKpis.paid)}
+                    </span>
+                    {claimsKpiExpanded ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                  </div>
+                </button>
+                {claimsKpiExpanded && (
+                  <div className="space-y-4 bg-slate-50/60 p-4">
+                    <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
+                      {[
+                        [isEnglish ? "Filtered claims" : "Claims filtrados", claimsKpis.claims, `${totalClaimsKpis.claims} ${isEnglish ? "total" : "total"}`],
+                        [isEnglish ? "CPT units" : "Unidades CPT", claimsKpis.cptUnits, `${totalClaimsKpis.cptUnits} ${isEnglish ? "total" : "total"}`],
+                        [isEnglish ? "Providers" : "Providers", claimsKpis.providerCount, `${totalClaimsKpis.providerCount} ${isEnglish ? "total" : "total"}`],
+                        [isEnglish ? "Payers" : "Payers", claimsKpis.payerCount, `${totalClaimsKpis.payerCount} ${isEnglish ? "total" : "total"}`],
+                        [isEnglish ? "Billed" : "Facturado", formatUSD(claimsKpis.billed), formatUSD(totalClaimsKpis.billed)],
+                        [isEnglish ? "Paid" : "Pagado", formatUSD(claimsKpis.paid), formatUSD(totalClaimsKpis.paid)],
+                        [isEnglish ? "A/R balance" : "Balance A/R", formatUSD(claimsKpis.balance), formatUSD(totalClaimsKpis.balance)],
+                        [isEnglish ? "Denied" : "Denegado", formatUSD(claimsKpis.denied), formatUSD(totalClaimsKpis.denied)]
+                      ].map(([label, value, total]) => (
+                        <div key={String(label)} className="rounded-lg border border-slate-200 bg-white p-3">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                          <p className="mt-1 truncate font-mono text-lg font-bold text-slate-900" title={String(value)}>{value}</p>
+                          <p className="mt-1 truncate text-[10px] font-semibold text-slate-400" title={String(total)}>{total}</p>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="grid gap-3 lg:grid-cols-3">
+                      <div className="rounded-lg border border-slate-200 bg-white p-3 lg:col-span-2">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Claims by status" : "Claims por status"}</p>
+                          <span className="text-[10px] font-semibold text-slate-400">{isEnglish ? "Filtered set" : "Filtro actual"}</span>
+                        </div>
+                        <div className="grid gap-2 md:grid-cols-3">
+                          {claimsKpiStatusEntries.length === 0 ? (
+                            <p className="text-xs font-semibold text-slate-400">{isEnglish ? "No claims to summarize." : "No hay claims para resumir."}</p>
+                          ) : claimsKpiStatusEntries.map(([status, count]) => {
+                            const percent = claimsKpis.claims > 0 ? Math.round((count / claimsKpis.claims) * 100) : 0;
+                            return (
+                              <div key={status} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="truncate text-[11px] font-bold text-slate-700" title={status}>{status}</span>
+                                  <span className="font-mono text-[11px] font-bold text-slate-900">{count}</span>
+                                </div>
+                                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white ring-1 ring-slate-100">
+                                  <div className="h-full rounded-full bg-primary-blue" style={{ width: `${percent}%` }} />
+                                </div>
+                                <p className="mt-1 text-[10px] font-semibold text-slate-400">{percent}%</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-white p-3">
+                        <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Operational mix" : "Mezcla operativa"}</p>
+                        <div className="space-y-2">
+                          {claimsKpiBilledByEntries.length === 0 ? (
+                            <p className="text-xs font-semibold text-slate-400">-</p>
+                          ) : claimsKpiBilledByEntries.map(([owner, count]) => (
+                            <div key={owner} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+                              <span className="font-bold text-slate-700">{owner}</span>
+                              <span className="font-mono font-bold text-slate-900">{count}</span>
+                            </div>
+                          ))}
+                          <div className="flex items-center justify-between gap-3 rounded-lg bg-rose-50 px-3 py-2 text-xs">
+                            <span className="font-bold text-rose-700">{isEnglish ? "Service-line errors" : "Errores service-line"}</span>
+                            <span className="font-mono font-bold text-rose-700">{claimsKpis.serviceLineErrors}</span>
+                          </div>
+                          <div className="flex items-center justify-between gap-3 rounded-lg bg-amber-50 px-3 py-2 text-xs">
+                            <span className="font-bold text-amber-700">{isEnglish ? "Adjustments" : "Ajustes"}</span>
+                            <span className="font-mono font-bold text-amber-700">{formatUSD(claimsKpis.adjustments)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {serviceLineImportErrorClaimCount > 0 && (
                 <div className="flex flex-col gap-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs text-rose-800 shadow-xs md:flex-row md:items-center md:justify-between">
