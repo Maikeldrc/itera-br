@@ -2627,7 +2627,7 @@ async function startServer() {
 
         if (!row.cptCode) errors.push("CPT Code is required.");
         if (!row.serviceDate) errors.push("Service Date is required.");
-        if (!row.paymentDate) warnings.push("Payment date is missing; today's date will be used if imported.");
+        if (!row.paymentDate) warnings.push(`Payment date is missing for source row ${row.rowNumber}; today's date will be used if imported.`);
         if (!Number.isFinite(row.payment) || row.payment <= 0) errors.push("Payment amount must be greater than zero.");
 
         const claimNo = normalizeMatchText(row.claimNo);
@@ -2649,6 +2649,13 @@ async function startServer() {
           );
           return Boolean(samePatient && sameDos);
         };
+        const describeCandidateClaims = (items: Claim[]) => items
+          .slice(0, 8)
+          .map(claim => {
+            const dos = textValue(claim.date_of_service_from).slice(0, 10) || textValue(claim.month_of_service).slice(0, 7) || "no DOS";
+            return `${claim.claim_id} (${claim.patient_display_name_masked || claim.patient_id || "patient unknown"}; payer ${claim.payer_name || claim.payer_id || "unknown"}; provider ${claim.provider_name || "unknown"}; DOS ${dos})`;
+          })
+          .join(" | ");
 
         let candidates = claims.filter(claim => {
           const serviceLines = parseServiceLines(claim);
@@ -2669,7 +2676,7 @@ async function startServer() {
             return hasCpt && matchesOperationalKeys(claim);
           });
           if (candidates.length > 0) {
-            warnings.push("External Claim No did not match the internal claim ID; matched by Patient Acct No, CPT and DOS instead.");
+            warnings.push(`External Claim No "${row.claimNo || "blank"}" did not match an internal claim ID. Found ${candidates.length} candidate claim(s) by Patient Acct No "${row.patientAcctNo || "blank"}", CPT ${cptCode || "blank"} and DOS ${row.serviceDate || "blank"}: ${describeCandidateClaims(candidates)}${candidates.length > 8 ? " | ..." : ""}.`);
           }
         }
 
@@ -2703,7 +2710,7 @@ async function startServer() {
         }
         const hasMultipleCandidateReview = errors.length === 0 && candidates.length > 1;
         if (hasMultipleCandidateReview) {
-          warnings.push("Multiple matching claims found; requires human review.");
+          warnings.push(`Multiple matching claims found for Patient Acct No "${row.patientAcctNo || "blank"}", CPT ${cptCode || "blank"}, DOS ${row.serviceDate || "blank"}${row.payerName ? `, report payer "${row.payerName}"` : ""}. Review and choose the correct claim: ${describeCandidateClaims(candidates)}${candidates.length > 8 ? " | ..." : ""}.`);
         }
         if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
         if (errors.length === 0 && claim && sheetsService.isPeriodClosed(claimPeriod(claim))) {
