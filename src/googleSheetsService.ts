@@ -884,6 +884,7 @@ export class GoogleSheetsService {
         eligibility_supported: /^yes$/i.test(String(row.Eligibility ?? "").trim()),
         claim_status_supported: /^yes$/i.test(String(row["Claim Status"] ?? "").trim()),
         dental_eligibility_supported: /^yes$/i.test(String(row["Dental Eligibility"] ?? "").trim()),
+        out_of_network_provider_ids: byId.get(payerCode)?.out_of_network_provider_ids || "",
         active: true
       };
 
@@ -2036,7 +2037,8 @@ const PROVIDERS_HEADERS = [
 
 const PAYERS_HEADERS = [
   "payer_id", "payer_name", "payer_type", "pverify_payer_code",
-  "eligibility_supported", "claim_status_supported", "dental_eligibility_supported", "active"
+  "eligibility_supported", "claim_status_supported", "dental_eligibility_supported",
+  "out_of_network_provider_ids", "active"
 ];
 
 const USERS_HEADERS = [

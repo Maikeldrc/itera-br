@@ -723,6 +723,45 @@ function markClaimAsForcedImportError(claim: Claim, validationErrors: string[], 
   };
 }
 
+function payerOutOfNetworkProviderIds(payer: Partial<Payer> | null | undefined) {
+  return String(payer?.out_of_network_provider_ids || "")
+    .split(/[\u001f,\n;|]+/)
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function isPayerOutOfNetworkForProvider(payer: Partial<Payer> | null | undefined, provider: Partial<{ provider_id: string; npi: string }> | null | undefined) {
+  const outOfNetworkIds = payerOutOfNetworkProviderIds(payer).map(value => value.toLowerCase());
+  if (outOfNetworkIds.length === 0) return false;
+  const providerKeys = [provider?.provider_id, provider?.npi].map(value => textValue(value).toLowerCase()).filter(Boolean);
+  return providerKeys.some(key => outOfNetworkIds.includes(key));
+}
+
+function markClaimAsOutOfNetwork(claim: Claim, payer: Partial<Payer>, provider: Partial<{ provider_name: string; provider_id: string; npi: string }>): Claim {
+  const reason = `Insurance ${payer.payer_name || payer.payer_id || claim.payer_name} is out of network with provider ${provider.provider_name || claim.provider_name}.`;
+  const serviceLines = serviceLinesFromClaim(claim).map(line => ({
+    ...line,
+    importError: true,
+    errorFlag: true,
+    errorCategory: ErrorCategory.EligibilityIssue,
+    errorReason: reason,
+    nextAction: line?.nextAction && line.nextAction !== "No action" ? line.nextAction : "Check eligibility",
+    notes: [...(Array.isArray(line?.notes) ? line.notes : []), reason]
+  }));
+  return {
+    ...claim,
+    claim_status: ClaimStatus.BlockedByError,
+    claim_classification: ClaimClassification.EligibilityIssue,
+    error_flag: true,
+    error_category: ErrorCategory.EligibilityIssue,
+    locked: true,
+    lock_reason: reason,
+    correction_status: "Pending",
+    last_note: `${reason} ${claim.last_note || ""}`.trim(),
+    service_lines_json: JSON.stringify(serviceLines)
+  };
+}
+
 function hasTrackedImportRepeatError(claim: Partial<Claim>, message: string) {
   if (!isForceImportEligibleError(message) || !claim.error_flag || !claim.error_category) return false;
   const cptMatch = message.match(/CPT\s+([A-Z0-9]+)/i);
@@ -2262,6 +2301,8 @@ async function startServer() {
             } else {
               errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
             }
+          } else if (isPayerOutOfNetworkForProvider(payer, provider)) {
+            claimsToImport.push(markClaimAsOutOfNetwork(calculated, payer!, provider!));
           } else {
             claimsToImport.push(calculated);
           }
@@ -2346,7 +2387,20 @@ async function startServer() {
             errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
           }
         } else {
-          claimsToImport.push(calculated);
+          const claimProvider = providers.find(provider =>
+            textValue(provider.provider_id) === textValue(calculated.provider_id) ||
+            textValue(provider.npi) === textValue(calculated.provider_npi)
+          );
+          const claimPayer = payers.find(payer =>
+            textValue(payer.payer_id) === textValue(calculated.payer_id) ||
+            equivalentExternalCode(payer.payer_id, calculated.payer_id) ||
+            equivalentExternalCode(payer.payer_name, calculated.payer_name)
+          );
+          if (isPayerOutOfNetworkForProvider(claimPayer, claimProvider || calculated)) {
+            claimsToImport.push(markClaimAsOutOfNetwork(calculated, claimPayer || calculated, claimProvider || calculated));
+          } else {
+            claimsToImport.push(calculated);
+          }
         }
       }
 

@@ -216,6 +216,7 @@ export interface Payer {
   eligibility_supported?: boolean | string;
   claim_status_supported?: boolean | string;
   dental_eligibility_supported?: boolean | string;
+  out_of_network_provider_ids?: string;
   active: boolean;
 }
 

@@ -171,6 +171,7 @@ type TableSortState = {
 };
 
 const toText = (value: unknown) => String(value ?? "").trim();
+const splitDelimitedIds = (value: unknown) => toText(value).split(/[\u001f,\n;|]+/).map(item => item.trim()).filter(Boolean);
 
 const normalizeServiceType = (value: unknown) => toText(value).toUpperCase();
 
@@ -416,6 +417,7 @@ export default function App() {
   const [payerEligibilityInput, setPayerEligibilityInput] = useState(false);
   const [payerClaimStatusInput, setPayerClaimStatusInput] = useState(false);
   const [payerDentalEligibilityInput, setPayerDentalEligibilityInput] = useState(false);
+  const [payerOutOfNetworkProviderIdsInput, setPayerOutOfNetworkProviderIdsInput] = useState("");
   const [payerActiveInput, setPayerActiveInput] = useState(true);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
   const [providerSearchTerm, setProviderSearchTerm] = useState("");
@@ -442,6 +444,9 @@ export default function App() {
 
   const visibleClaims = filterClaimsForUser(claims, currentUser);
   const visibleProviders = filterProvidersForUser(providers, currentUser);
+  const providerNetworkOptions = visibleProviders
+    .filter(provider => provider.active !== false)
+    .map(provider => ({ value: provider.provider_id, label: provider.provider_name, meta: provider.npi }));
   const selectedNewPayer = payers.find(payer => payer.payer_id === newPayerId);
 
   useEffect(() => {
@@ -1845,6 +1850,7 @@ export default function App() {
     setPayerEligibilityInput(false);
     setPayerClaimStatusInput(false);
     setPayerDentalEligibilityInput(false);
+    setPayerOutOfNetworkProviderIdsInput("");
     setPayerActiveInput(true);
   };
 
@@ -1859,6 +1865,7 @@ export default function App() {
     setPayerEligibilityInput(toBooleanFlag(payer.eligibility_supported));
     setPayerClaimStatusInput(toBooleanFlag(payer.claim_status_supported));
     setPayerDentalEligibilityInput(toBooleanFlag(payer.dental_eligibility_supported));
+    setPayerOutOfNetworkProviderIdsInput(toText(payer.out_of_network_provider_ids));
     setPayerActiveInput(payer.active);
   };
 
@@ -1876,6 +1883,7 @@ export default function App() {
       eligibility_supported: payerEligibilityInput,
       claim_status_supported: payerClaimStatusInput,
       dental_eligibility_supported: payerDentalEligibilityInput,
+      out_of_network_provider_ids: payerOutOfNetworkProviderIdsInput,
       active: payerActiveInput
     };
 
@@ -5855,6 +5863,25 @@ export default function App() {
                         </button>
                       )}
                     </div>
+                    <div className="lg:col-span-7">
+                      <label className="block text-[9px] font-bold uppercase tracking-wider text-slate-500 mb-1">
+                        {isEnglish ? "Out-of-network providers" : "Providers fuera de red"}
+                      </label>
+                      <MultiSelectFilter
+                        value={payerOutOfNetworkProviderIdsInput}
+                        onChange={setPayerOutOfNetworkProviderIdsInput}
+                        allLabel={isEnglish ? "In network with all providers" : "En red con todos los providers"}
+                        placeholder={isEnglish ? "Search provider..." : "Buscar provider..."}
+                        options={providerNetworkOptions}
+                        className="max-w-2xl"
+                        buttonClassName="bg-white py-2 text-[11px] font-semibold"
+                      />
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        {isEnglish
+                          ? "Default is in network. Select only the providers where this payer is out of network; imported claims for those combinations will be blocked for review."
+                          : "Por defecto está en red. Seleccione solo los providers donde este payer está fuera de red; los claims importados para esas combinaciones se bloquearán para revisión."}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="overflow-x-auto">
@@ -5866,14 +5893,19 @@ export default function App() {
                           <th className="p-3">{isEnglish ? "Insurance" : "Aseguradora"}</th>
                           <th className="p-3">Type</th>
                           <th className="p-3">Support</th>
+                          <th className="p-3">{isEnglish ? "Out of network" : "Fuera de red"}</th>
                           <th className="p-3">Status</th>
                           <th className="p-3 text-right">{isEnglish ? "Actions" : "Acciones"}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
                         {payers
-                          .filter(payer => `${payer.payer_id} ${payer.payer_name} ${payer.payer_type} ${payer.pverify_payer_code || ""}`.toLowerCase().includes(payerSearchTerm.toLowerCase()))
-                          .map(payer => (
+                          .filter(payer => `${payer.payer_id} ${payer.payer_name} ${payer.payer_type} ${payer.pverify_payer_code || ""} ${splitDelimitedIds(payer.out_of_network_provider_ids).map(id => providers.find(provider => provider.provider_id === id || provider.npi === id)?.provider_name || id).join(" ")}`.toLowerCase().includes(payerSearchTerm.toLowerCase()))
+                          .map(payer => {
+                            const outOfNetworkProviders = splitDelimitedIds(payer.out_of_network_provider_ids)
+                              .map(id => providers.find(provider => provider.provider_id === id || provider.npi === id))
+                              .filter(Boolean) as Provider[];
+                            return (
                             <tr key={payer.payer_id} className="hover:bg-slate-50/60">
                               <td className="p-3 font-mono font-bold text-primary-blue">{payer.payer_id}</td>
                               <td className="p-3 font-mono text-slate-500">{payer.pverify_payer_code || "-"}</td>
@@ -5894,6 +5926,26 @@ export default function App() {
                                     </span>
                                   ))}
                                 </div>
+                              </td>
+                              <td className="p-3">
+                                {outOfNetworkProviders.length > 0 ? (
+                                  <div className="flex max-w-xs flex-wrap gap-1">
+                                    {outOfNetworkProviders.slice(0, 3).map(provider => (
+                                      <span key={provider.provider_id} className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[8px] font-bold text-amber-700" title={`${provider.provider_name} (${provider.npi})`}>
+                                        {provider.provider_name}
+                                      </span>
+                                    ))}
+                                    {outOfNetworkProviders.length > 3 && (
+                                      <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[8px] font-bold text-slate-500">
+                                        +{outOfNetworkProviders.length - 3}
+                                      </span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[8px] font-bold text-emerald-700">
+                                    {isEnglish ? "All in network" : "Todos en red"}
+                                  </span>
+                                )}
                               </td>
                               <td className="p-3">
                                 <span className={`rounded-full border px-2 py-0.5 text-[9px] font-bold ${payer.active ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-500"}`}>
@@ -5921,7 +5973,8 @@ export default function App() {
                                 </div>
                               </td>
                             </tr>
-                          ))}
+                          );
+                          })}
                       </tbody>
                     </table>
                   </div>
