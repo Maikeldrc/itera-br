@@ -8,7 +8,7 @@ import { MultiSelectFilter } from "./MultiSelectFilter";
 import { PayerCombobox } from "./PayerCombobox";
 import { decodeMultiFilter, multiFilterIntersects, multiFilterMatches } from "../multiSelectFilters";
 
-type ImportPayload = { rows?: Record<string, string>[]; fileName?: string; fileBase64?: string };
+type ImportPayload = { rows?: Record<string, string>[]; fileName?: string; fileBase64?: string; retryRows?: number[] };
 
 type PaymentImportMapping = Record<string, string>;
 
@@ -200,6 +200,21 @@ function money(value: number) {
 
 const wait = (ms: number) => new Promise(resolve => window.setTimeout(resolve, ms));
 
+function summarizePaymentImportRows(rows: PaymentImportRow[], applied: boolean): PaymentImportSummary {
+  return {
+    totalRowsRead: rows.length,
+    readyToImport: rows.filter(row => row.status === "ready").length,
+    importedRows: applied ? rows.filter(row => row.status === "imported").length : 0,
+    needsReviewRows: rows.filter(row => row.status === "needs_review").length,
+    paymentActivityRows: rows.filter(row => row.status === "payment_activity").length,
+    rejectedRows: rows.filter(row => row.status === "rejected").length,
+    matchedClaims: new Set(rows.map(row => row.claimId).filter(Boolean)).size,
+    matchedCptCodes: new Set(rows.map(row => row.cptCode).filter(Boolean)).size,
+    totalPaymentInFile: Number(rows.reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2)),
+    totalPaymentImported: Number(rows.filter(row => row.status === "imported").reduce((sum, row) => sum + Number(row.payment || 0), 0).toFixed(2))
+  };
+}
+
 const SCHEMA_ANALYSIS_TIMEOUT_MS = 45_000;
 const TEMPLATE_SAVE_TIMEOUT_MS = 45_000;
 const PAYMENT_ANALYSIS_TIMEOUT_MS = 180_000;
@@ -251,6 +266,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
   const [acceptedPayerAssociations, setAcceptedPayerAssociations] = useState<Record<string, AcceptedPayerAssociation>>({});
   const [selectedMismatchPayers, setSelectedMismatchPayers] = useState<Record<string, string>>({});
+  const [recheckingRow, setRecheckingRow] = useState<number | null>(null);
   const [result, setResult] = useState<PaymentImportResult | null>(null);
   const [resultSearch, setResultSearch] = useState("");
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
@@ -403,6 +419,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     setResultStatusFilter("all");
     setResultIssueFilter("all");
     setProgress(null);
+    setRecheckingRow(null);
     setRestoredFromSavedAnalysis(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -470,6 +487,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
+    setRecheckingRow(null);
     setSchema(null);
     setMapping({});
     setSelectedTemplateId("");
@@ -650,6 +668,70 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     } finally {
       setIsProcessing(false);
       setProgress(null);
+    }
+  };
+
+  const recheckRow = async (row: PaymentImportRow) => {
+    if (!payload || isProcessing || recheckingRow !== null) return;
+    if (schema && !mappingIssues.valid) {
+      notify(
+        isEnglish
+          ? "Complete the required column mapping before rechecking this row."
+          : "Complete el mapeo de columnas requerido antes de rechequear esta fila.",
+        "warning"
+      );
+      setMappingExpanded(true);
+      return;
+    }
+
+    setRecheckingRow(row.rowNumber);
+    try {
+      const response = await fetchWithTimeout(
+        "/api/payment-reconciliation-import",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...payload,
+            apply: false,
+            retryRows: [row.rowNumber],
+            mapping: schema ? mapping : undefined,
+            acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
+          })
+        },
+        PAYMENT_ANALYSIS_TIMEOUT_MS,
+        isEnglish
+          ? "The row recheck is taking too long. Try again after refreshing the payment analysis."
+          : "El rechequeo de la fila está tardando demasiado. Intente nuevamente después de refrescar el análisis.",
+        processRequestRef
+      );
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Row recheck failed.");
+      const checkedRow = (data.rows || []).find((item: PaymentImportRow) => Number(item.rowNumber) === Number(row.rowNumber));
+      if (!checkedRow) throw new Error("The selected row was not returned by the recheck.");
+
+      setResult(current => {
+        if (!current) return current;
+        const rows = current.rows.map(item => Number(item.rowNumber) === Number(row.rowNumber) ? checkedRow : item);
+        return {
+          ...current,
+          applied: false,
+          summary: summarizePaymentImportRows(rows, false),
+          rows
+        };
+      });
+      notify(
+        checkedRow.status === "ready"
+          ? (isEnglish ? `Row ${row.rowNumber} is now ready to import.` : `La fila ${row.rowNumber} ya está lista para importar.`)
+          : (isEnglish ? `Row ${row.rowNumber} was rechecked and remains ${checkedRow.status.replace("_", " ")}.` : `La fila ${row.rowNumber} fue rechequeada y permanece en ${checkedRow.status.replace("_", " ")}.`),
+        checkedRow.status === "ready" ? "success" : "warning"
+      );
+    } catch (err: any) {
+      if (err.message !== REQUEST_ABORTED_MESSAGE) {
+        notify(`${isEnglish ? "Row recheck error" : "Error rechequeando fila"}: ${err.message}`, "error");
+      }
+    } finally {
+      setRecheckingRow(null);
     }
   };
 
@@ -1440,13 +1522,29 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                       </td>
                       <td className="px-3 py-3 text-right font-mono font-bold text-emerald-700">{money(Number(row.payment || 0))}</td>
                       <td className="max-w-sm px-3 py-3">
-                        {row.errors.length > 0 ? (
-                          <p className="flex items-start gap-1 text-rose-700"><XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {row.errors.join("; ")}</p>
-                        ) : row.warnings.length > 0 ? (
-                          <p className="flex items-start gap-1 text-amber-700"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {row.warnings.join("; ")}</p>
-                        ) : (
-                          <p className="flex items-start gap-1 text-emerald-700"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {isEnglish ? "Safe match" : "Coincidencia segura"}</p>
-                        )}
+                        <div className="space-y-2">
+                          {row.errors.length > 0 ? (
+                            <p className="flex items-start gap-1 text-rose-700"><XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {row.errors.join("; ")}</p>
+                          ) : row.warnings.length > 0 ? (
+                            <p className="flex items-start gap-1 text-amber-700"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {row.warnings.join("; ")}</p>
+                          ) : (
+                            <p className="flex items-start gap-1 text-emerald-700"><CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {isEnglish ? "Safe match" : "Coincidencia segura"}</p>
+                          )}
+                          {!result?.applied && ["needs_review", "rejected", "payment_activity"].includes(row.status) && (
+                            <button
+                              type="button"
+                              onClick={() => void recheckRow(row)}
+                              disabled={isProcessing || recheckingRow !== null}
+                              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-700 shadow-sm hover:border-primary-blue hover:bg-blue-50 hover:text-primary-blue disabled:cursor-wait disabled:opacity-50"
+                              title={isEnglish ? "Recheck this row only using the current file and mapping." : "Rechequear solo esta fila usando el archivo y mapeo actual."}
+                            >
+                              <RefreshCw className={`h-3.5 w-3.5 ${recheckingRow === row.rowNumber ? "animate-spin" : ""}`} />
+                              {recheckingRow === row.rowNumber
+                                ? (isEnglish ? "Rechecking..." : "Rechequeando...")
+                                : (isEnglish ? "Recheck row" : "Rechequear fila")}
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

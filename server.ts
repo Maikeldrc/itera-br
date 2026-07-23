@@ -2582,8 +2582,11 @@ async function startServer() {
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, apply, fileName, mapping, acceptedPayerAssociations } = req.body;
+      const { rows, fileBase64, apply, fileName, mapping, acceptedPayerAssociations, retryRows } = req.body;
       const importRows = fileBase64 ? parseUploadedTableRows(fileBase64, textValue(fileName)) : rows;
+      const retryRowSet = Array.isArray(retryRows)
+        ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
+        : new Set<number>();
 
       if (!importRows || !Array.isArray(importRows)) {
         return res.status(400).json({ error: "Rows or XLSX file content are required for payment reconciliation import." });
@@ -2612,9 +2615,12 @@ async function startServer() {
           : []
       );
 
-      const normalizedRows = fillDownPaymentImportRows(
+      const allNormalizedRows = fillDownPaymentImportRows(
         importRows.map((row: Record<string, unknown>, index: number) => normalizePaymentImportRow(row, index, importMapping))
       );
+      const normalizedRows = retryRowSet.size > 0
+        ? allNormalizedRows.filter(row => retryRowSet.has(Number(row.rowNumber)))
+        : allNormalizedRows;
       const analyzedRows = normalizedRows.map(row => {
         const errors: string[] = [];
         const warnings: string[] = [];
