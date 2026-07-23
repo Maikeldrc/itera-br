@@ -1896,9 +1896,10 @@ async function startServer() {
       const operatorEmail = getOperatorEmail(req);
       const claimId = textValue(req.body?.claimId);
       const reportPayerName = textValue(req.body?.reportPayerName);
+      const requestedPayerId = textValue(req.body?.payerId);
 
-      if (!claimId || !reportPayerName) {
-        return res.status(400).json({ error: "claimId and reportPayerName are required." });
+      if (!claimId || (!reportPayerName && !requestedPayerId)) {
+        return res.status(400).json({ error: "claimId and payerId or reportPayerName are required." });
       }
 
       const claim = (await sheetsService.getClaims()).find(item => item.claim_id === claimId && !item.deleted_flag);
@@ -1911,7 +1912,12 @@ async function startServer() {
       }
 
       const payers = await sheetsService.getPayers();
-      const matchedPayer = findMatchingPayer(payers, reportPayerName);
+      const matchedPayer = requestedPayerId
+        ? payers.find(payer => textValue(payer.payer_id) === requestedPayerId) || null
+        : findMatchingPayer(payers, reportPayerName);
+      if (requestedPayerId && !matchedPayer) {
+        return res.status(400).json({ error: "Selected payer was not found in Settings." });
+      }
       const previousPayerId = claim.payer_id || "";
       const previousPayerName = claim.payer_name || previousPayerId || "Unknown";
       const newPayerId = matchedPayer?.payer_id || reportPayerName;
@@ -1930,7 +1936,7 @@ async function startServer() {
         });
       }
 
-      const traceNote = `Payment Import payer update: ${previousPayerName} -> ${newPayerName}.`;
+      const traceNote = `Payment Import payer update: ${previousPayerName} -> ${newPayerName}${reportPayerName ? ` (report payer: ${reportPayerName})` : ""}.`;
       const updated = await sheetsService.updateClaim(claimId, {
         ...claim,
         payer_id: newPayerId,
@@ -1945,7 +1951,7 @@ async function startServer() {
         field_name: "payer_id",
         previous_value: previousPayerId,
         new_value: newPayerId,
-        reason: `Insurance changed from "${previousPayerName}" to "${newPayerName}" from Payment Import report.`,
+        reason: `Insurance changed from "${previousPayerName}" to "${newPayerName}" from Payment Import report${reportPayerName ? ` payer "${reportPayerName}"` : ""}.`,
         changed_by: operatorEmail,
         changed_at: new Date().toISOString()
       });

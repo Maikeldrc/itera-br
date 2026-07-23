@@ -3697,6 +3697,7 @@ export default function App() {
           {/* VIEW: PAYMENT RECONCILIATION IMPORT */}
           {currentView === "payment-reconciliation-import" && (
             <PaymentReconciliationImport
+              payers={payers}
               canApply={canUserPerformAction(currentUser, "payments.apply")}
               onImported={() => fetchAllData({ showInitialLoading: false })}
             />

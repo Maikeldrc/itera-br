@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, FileSpreadsheet, RefreshCw, Save, SlidersHorizontal, Upload, XCircle } from "lucide-react";
 import { apiFetch } from "../apiClient";
+import { Payer } from "../types";
 import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
 import { MultiSelectFilter } from "./MultiSelectFilter";
+import { PayerCombobox } from "./PayerCombobox";
 import { decodeMultiFilter, multiFilterIntersects, multiFilterMatches } from "../multiSelectFilters";
 
 type ImportPayload = { rows?: Record<string, string>[]; fileName?: string; fileBase64?: string };
@@ -96,6 +98,7 @@ type ImportProgressState = {
 interface PaymentReconciliationImportProps {
   onImported: () => Promise<void>;
   canApply?: boolean;
+  payers: Payer[];
 }
 
 type PersistedPaymentImportAnalysis = {
@@ -109,6 +112,7 @@ type PersistedPaymentImportAnalysis = {
   systemName: string;
   selectedTemplateId: string;
   acceptedPayerAssociations: Record<string, AcceptedPayerAssociation>;
+  selectedMismatchPayers: Record<string, string>;
   result: PaymentImportResult;
   resultSearch: string;
   resultStatusFilter: string;
@@ -224,7 +228,7 @@ function statusBadge(status: PaymentImportRow["status"], isEnglish: boolean) {
   return <span className={`rounded-md border px-2 py-1 text-[10px] font-bold ${classes[status]}`}>{labels[status]}</span>;
 }
 
-export function PaymentReconciliationImport({ onImported, canApply = true }: PaymentReconciliationImportProps) {
+export function PaymentReconciliationImport({ onImported, canApply = true, payers }: PaymentReconciliationImportProps) {
   const { notify } = useFeedback();
   const { language } = useLanguage();
   const isEnglish = language === "en";
@@ -246,6 +250,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const [progress, setProgress] = useState<ImportProgressState | null>(null);
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
   const [acceptedPayerAssociations, setAcceptedPayerAssociations] = useState<Record<string, AcceptedPayerAssociation>>({});
+  const [selectedMismatchPayers, setSelectedMismatchPayers] = useState<Record<string, string>>({});
   const [result, setResult] = useState<PaymentImportResult | null>(null);
   const [resultSearch, setResultSearch] = useState("");
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
@@ -280,6 +285,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
       setSystemName(saved.systemName || "");
       setSelectedTemplateId(saved.selectedTemplateId || "");
       setAcceptedPayerAssociations(saved.acceptedPayerAssociations || {});
+      setSelectedMismatchPayers(saved.selectedMismatchPayers || {});
       setResult(saved.result);
       setResultSearch(saved.resultSearch || "");
       setResultStatusFilter(saved.resultStatusFilter || "all");
@@ -311,6 +317,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
         systemName,
         selectedTemplateId,
         acceptedPayerAssociations,
+        selectedMismatchPayers,
         result,
         resultSearch,
         resultStatusFilter,
@@ -340,6 +347,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     systemName,
     selectedTemplateId,
     acceptedPayerAssociations,
+    selectedMismatchPayers,
     resultSearch,
     resultStatusFilter,
     resultIssueFilter,
@@ -390,6 +398,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     setSelectedTemplateId("");
     setResult(null);
     setAcceptedPayerAssociations({});
+    setSelectedMismatchPayers({});
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
@@ -457,6 +466,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     setFileName(file.name);
     setResult(null);
     setAcceptedPayerAssociations({});
+    setSelectedMismatchPayers({});
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
@@ -643,8 +653,17 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     }
   };
 
-  const applyPayerChange = async (row: PaymentImportRow) => {
-    if (!row.claimId || !(row.reportPayerName || row.suggestedPayerName)) return;
+  const applyPayerChange = async (row: PaymentImportRow, payerId?: string) => {
+    const selectedPayerId = payerId || row.suggestedPayerId || "";
+    if (!row.claimId || !selectedPayerId) {
+      notify(
+        isEnglish
+          ? "Select a registered platform payer before changing claim insurance."
+          : "Seleccione un payer registrado en la plataforma antes de cambiar el seguro del claim.",
+        "warning"
+      );
+      return;
+    }
     const key = rowKey(row);
     setPayerChangeState(current => ({ ...current, [key]: "applying" }));
     try {
@@ -653,7 +672,8 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           claimId: row.claimId,
-          reportPayerName: row.suggestedPayerName || row.reportPayerName
+          payerId: selectedPayerId,
+          reportPayerName: row.reportPayerName || row.suggestedPayerName || ""
         })
       });
       const data = await response.json();
@@ -663,11 +683,14 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
         if (!current) return current;
         const rows = current.rows.map(item => {
           if (rowKey(item) !== key) return item;
-          const newPayerName = data.newPayerName || item.suggestedPayerName || item.reportPayerName || item.payerName;
+          const newPayerId = data.newPayerId || selectedPayerId;
+          const newPayerName = data.newPayerName || payers.find(payer => payer.payer_id === selectedPayerId)?.payer_name || item.suggestedPayerName || item.payerName;
           const warnings = item.warnings.filter(warning => !warning.toLowerCase().startsWith("payer mismatch:"));
           const stillNeedsReview = warnings.some(warning => warning.toLowerCase().includes("already has payment activity"));
           return {
             ...item,
+            suggestedPayerId: newPayerId,
+            suggestedPayerName: newPayerName,
             payerName: newPayerName,
             claimPayerName: newPayerName,
             payerMismatch: false,
@@ -686,6 +709,11 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
           },
           rows
         };
+      });
+      setSelectedMismatchPayers(current => {
+        const next = { ...current };
+        delete next[key];
+        return next;
       });
       setPayerChangeState(current => ({ ...current, [key]: "applied" }));
       notify(
@@ -1338,7 +1366,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                       <td className="px-3 py-3 font-mono text-slate-500">{row.serviceDate || "-"}</td>
                       <td className="px-3 py-3">
                         {row.payerMismatch ? (
-                          <div className="space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+                          <div className="min-w-[320px] space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
                             <div className="space-y-1">
                               <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">{isEnglish ? "Payer mismatch" : "Payer diferente"}</p>
                               <p className="text-[11px] text-slate-700">
@@ -1347,26 +1375,54 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
                               <p className="text-[11px] text-slate-700">
                                 <span className="font-bold">{isEnglish ? "Report" : "Reporte"}:</span> {row.reportPayerName || row.suggestedPayerName || "-"}
                               </p>
+                              {row.suggestedPayerId ? (
+                                <p className="rounded-md border border-emerald-100 bg-white px-2 py-1 text-[11px] text-slate-700">
+                                  <span className="font-bold text-emerald-700">{isEnglish ? "Matched platform payer" : "Payer identificado"}:</span>{" "}
+                                  {row.suggestedPayerName} <span className="font-mono text-[10px] text-slate-400">({row.suggestedPayerId})</span>
+                                </p>
+                              ) : (
+                                <p className="rounded-md border border-amber-100 bg-white px-2 py-1 text-[11px] font-semibold text-amber-800">
+                                  {isEnglish
+                                    ? "Report payer was not identified in Settings. Select the real platform payer below."
+                                    : "El payer del reporte no fue identificado en Settings. Seleccione debajo el payer real de la plataforma."}
+                                </p>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                                {isEnglish ? "Registered payer to apply" : "Payer registrado a aplicar"}
+                              </p>
+                              <PayerCombobox
+                                payers={payers}
+                                value={selectedMismatchPayers[rowKey(row)] || row.suggestedPayerId || ""}
+                                onChange={payerId => setSelectedMismatchPayers(current => ({ ...current, [rowKey(row)]: payerId }))}
+                                allowEmpty
+                                emptyLabel={isEnglish ? "Select platform payer" : "Seleccione payer de plataforma"}
+                                placeholder={isEnglish ? "Type payer name or code..." : "Escriba nombre o código del payer..."}
+                                inputClassName="bg-white py-1.5 text-[11px]"
+                              />
                             </div>
                             <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void applyPayerChange(row, selectedMismatchPayers[rowKey(row)] || row.suggestedPayerId)}
+                                disabled={payerChangeState[rowKey(row)] === "applying" || !(selectedMismatchPayers[rowKey(row)] || row.suggestedPayerId)}
+                                className="inline-flex items-center gap-1 rounded-md bg-dark-blue px-2 py-1 text-[10px] font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-50"
+                                title={isEnglish ? "Change the claim insurance to the selected registered payer." : "Cambia el seguro del claim al payer registrado seleccionado."}
+                              >
+                                {payerChangeState[rowKey(row)] === "applying"
+                                  ? (isEnglish ? "Applying..." : "Aplicando...")
+                                  : row.suggestedPayerId && !(selectedMismatchPayers[rowKey(row)] && selectedMismatchPayers[rowKey(row)] !== row.suggestedPayerId)
+                                    ? (isEnglish ? "Apply platform payer" : "Aplicar payer identificado")
+                                    : (isEnglish ? "Associate selected payer" : "Asociar payer seleccionado")}
+                              </button>
                               <button
                                 type="button"
                                 onClick={() => associateReportPayer(row)}
                                 className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-white px-2 py-1 text-[10px] font-bold text-amber-800 shadow-sm hover:bg-amber-100"
                                 title={isEnglish ? "Keep the current claim insurance and accept this report payer name as the same payer for this import." : "Mantiene el seguro actual del claim y acepta este nombre del reporte como el mismo payer para esta importación."}
                               >
-                                {isEnglish ? "Associate" : "Asociar"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void applyPayerChange(row)}
-                                disabled={payerChangeState[rowKey(row)] === "applying"}
-                                className="inline-flex items-center gap-1 rounded-md bg-dark-blue px-2 py-1 text-[10px] font-bold text-white shadow-sm hover:bg-secondary-blue disabled:opacity-50"
-                                title={isEnglish ? "Change the claim insurance to the payer shown in the report." : "Cambia el seguro del claim al payer que viene en el reporte."}
-                              >
-                                {payerChangeState[rowKey(row)] === "applying"
-                                  ? (isEnglish ? "Changing..." : "Cambiando...")
-                                  : (isEnglish ? "Change insurance" : "Cambiar seguro")}
+                                {isEnglish ? "Treat as current payer" : "Tratar como payer actual"}
                               </button>
                             </div>
                           </div>
