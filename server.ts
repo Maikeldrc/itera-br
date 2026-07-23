@@ -2807,6 +2807,7 @@ async function startServer() {
             payerPayment: number;
             patientPayment: number;
             contractualAdjustment: number;
+            allowedAmount: number;
           }>();
 
           const addLineAllocation = (index: number, row: typeof claimRows[number]) => {
@@ -2815,13 +2816,15 @@ async function startServer() {
               totalPayment: 0,
               payerPayment: 0,
               patientPayment: 0,
-              contractualAdjustment: 0
+              contractualAdjustment: 0,
+              allowedAmount: 0
             };
             current.rows.push(row);
             current.totalPayment = Number((current.totalPayment + Number(row.payment || 0)).toFixed(2));
             current.payerPayment = Number((current.payerPayment + Number(row.payerPayment || 0)).toFixed(2));
             current.patientPayment = Number((current.patientPayment + Number(row.patientPayment || 0)).toFixed(2));
             current.contractualAdjustment = Number((current.contractualAdjustment + Number(row.contractualAdjustment || 0)).toFixed(2));
+            current.allowedAmount = Number(Math.max(current.allowedAmount, Number(row.allowedAmount || 0)).toFixed(2));
             lineAllocations.set(index, current);
           };
 
@@ -2844,17 +2847,24 @@ async function startServer() {
             const payerPayment = allocation.payerPayment;
             const patientPayment = allocation.patientPayment;
             const contractualAdjustment = allocation.contractualAdjustment;
+            const reportAllowedAmount = allocation.allowedAmount;
             const charged = Number(line?.charged || 0);
             const paid = Number((Number(line?.paid || 0) + totalPayment).toFixed(2));
             const maxAdjustment = Number(Math.max(0, charged - paid - Number(line?.secondaryPaid || 0) - Number(line?.patResp || 0)).toFixed(2));
-            const adj = contractualAdjustment > 0
-              ? Number(Math.min(contractualAdjustment, maxAdjustment).toFixed(2))
+            const inferredAllowedAdjustment = reportAllowedAmount > 0 && reportAllowedAmount < charged
+              ? Number((charged - reportAllowedAmount).toFixed(2))
+              : 0;
+            const effectiveContractualAdjustment = contractualAdjustment > 0
+              ? contractualAdjustment
+              : inferredAllowedAdjustment;
+            const adj = effectiveContractualAdjustment > 0
+              ? Number(Math.min(effectiveContractualAdjustment, maxAdjustment).toFixed(2))
               : Number(line?.adj || 0);
             const allowed = Number(Math.max(0, charged - adj).toFixed(2));
             const balance = Number(Math.max(0, charged - adj - paid - Number(line?.secondaryPaid || 0) - Number(line?.patResp || 0)).toFixed(2));
             const notes = Array.isArray(line?.notes) ? [...line.notes] : [];
             const overpaidAmount = Number(Math.max(0, paid + Number(line?.secondaryPaid || 0) - charged).toFixed(2));
-            notes.push(`Payment Import: payer ${payerPayment.toFixed(2)}, patient ${patientPayment.toFixed(2)}, contractual adjustment applied ${adj.toFixed(2)}${contractualAdjustment > adj ? ` (report adjustment ${contractualAdjustment.toFixed(2)} exceeded this CPT line capacity)` : ""}${overpaidAmount > 0 ? ` Overpaid by ${overpaidAmount.toFixed(2)}; review required.` : ""}.`);
+            notes.push(`Payment Import: payer ${payerPayment.toFixed(2)}, patient ${patientPayment.toFixed(2)}, contractual adjustment applied ${adj.toFixed(2)}${contractualAdjustment <= 0 && inferredAllowedAdjustment > 0 ? ` (inferred from report allowed amount ${reportAllowedAmount.toFixed(2)})` : ""}${effectiveContractualAdjustment > adj ? ` (report adjustment ${effectiveContractualAdjustment.toFixed(2)} exceeded this CPT line capacity)` : ""}${overpaidAmount > 0 ? ` Overpaid by ${overpaidAmount.toFixed(2)}; review required.` : ""}.`);
             claimPaymentTotal = Number((claimPaymentTotal + totalPayment).toFixed(2));
             const paymentDate = matchingRows.map(row => row.paymentDate).filter(Boolean).sort().pop() || "";
             const checkNo = matchingRows.map(row => row.checkNo).filter(Boolean).pop() || "";
