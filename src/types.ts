@@ -92,7 +92,7 @@ export interface Claim {
   date_of_service_from: string; // YYYY-MM-DD
   date_of_service_to: string; // YYYY-MM-DD
   month_of_service: string; // YYYY-MM
-  billed_by: "ITERA" | "Provider";
+  billed_by: "ITERA" | "Provider" | "Unknown";
   payment_received_by: "ITERA" | "Provider" | "Split" | "Unknown";
   claim_status: ClaimStatus;
   claim_classification: ClaimClassification;

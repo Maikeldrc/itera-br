@@ -2069,7 +2069,8 @@ async function startServer() {
     try {
       const operatorEmail = getOperatorEmail(req);
       const { rows, fileBase64, retryRows, fileName, forceImportRows, importBilledBy } = req.body;
-      const batchBilledBy: "ITERA" | "Provider" = importBilledBy === "Provider" ? "Provider" : "ITERA";
+      const batchBilledBy: "ITERA" | "Provider" | "Unknown" =
+        importBilledBy === "Provider" ? "Provider" : importBilledBy === "ITERA" ? "ITERA" : "Unknown";
       const retryRowSet = Array.isArray(retryRows)
         ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
         : null;
@@ -2283,7 +2284,7 @@ async function startServer() {
           date_of_service_from: row.date_of_service_from?.trim() || new Date().toISOString().split("T")[0],
           date_of_service_to: row.date_of_service_to?.trim() || new Date().toISOString().split("T")[0],
           month_of_service: row.month_of_service?.trim() || new Date().toISOString().slice(0, 7),
-          billed_by: (row.billed_by?.trim() === "Provider" ? "Provider" : row.billed_by?.trim() === "ITERA" ? "ITERA" : batchBilledBy) as any,
+          billed_by: (row.billed_by?.trim() === "Provider" ? "Provider" : row.billed_by?.trim() === "ITERA" ? "ITERA" : row.billed_by?.trim() === "Unknown" ? "Unknown" : batchBilledBy) as any,
           payment_received_by: (["ITERA", "Provider", "Split", "Unknown"].includes(row.payment_received_by) ? row.payment_received_by : "Unknown") as any,
           claim_status: (row.claim_status?.trim() || ClaimStatus.Submitted) as any,
           claim_classification: (row.claim_classification?.trim() || ClaimClassification.CleanClaim) as any,
@@ -2878,7 +2879,7 @@ async function startServer() {
           const hasOverpaidLine = serviceLines.some(line =>
             Number(line.paid || 0) + Number(line.secondaryPaid || 0) > Number(line.charged || 0) + 0.01
           );
-          const paymentReceivedBy = claim.billed_by === "Provider" ? "Provider" : "ITERA";
+          const paymentReceivedBy = claim.billed_by === "Provider" ? "Provider" : claim.billed_by === "ITERA" ? "ITERA" : "Unknown";
 
           const updated = calculateClaimFinancials({
             ...claim,

@@ -198,7 +198,7 @@ export function ClaimFilters({
                 value={filters.billedBy}
                 onChange={(billedBy) => onChange({ billedBy })}
                 allLabel={isEnglish ? "All" : "Todos"}
-                options={[{ value: "ITERA", label: "ITERA" }, { value: "Provider", label: "Provider" }]}
+                options={[{ value: "ITERA", label: "ITERA" }, { value: "Provider", label: "Provider" }, { value: "Unknown", label: isEnglish ? "Not specified" : "No especificar" }]}
               />
             </div>
 

@@ -64,7 +64,7 @@ export function calculateClaimFinancials(
   let provider_ar = 0;
   if (claim.billed_by === "ITERA") {
     itera_ar = ar_balance;
-  } else {
+  } else if (claim.billed_by === "Provider") {
     provider_ar = ar_balance;
   }
 
@@ -77,7 +77,7 @@ export function calculateClaimFinancials(
     if (claim.billed_by === "Provider") {
       net_itera_revenue = Math.min(Math.max(0, Number(config.iteraFeeWhenProviderBills || 0)), total_collections);
       net_provider_revenue = Math.max(0, total_collections - net_itera_revenue);
-    } else {
+    } else if (claim.billed_by === "ITERA") {
       net_provider_revenue = Math.min(Math.max(0, Number(config.physicianFeeWhenIteraBills || 0)), total_collections);
       net_itera_revenue = Math.max(0, total_collections - net_provider_revenue);
     }
@@ -142,8 +142,8 @@ export function validateClaim(claim: Partial<Claim>): string[] {
     errors.push("Claim ID is required.");
   }
   
-  if (!claim.billed_by || (claim.billed_by !== "ITERA" && claim.billed_by !== "Provider")) {
-    errors.push("Billed by must be either 'ITERA' or 'Provider'.");
+  if (!claim.billed_by || !["ITERA", "Provider", "Unknown"].includes(claim.billed_by)) {
+    errors.push("Billed by must be 'ITERA', 'Provider' or 'Unknown'.");
   }
 
   if (

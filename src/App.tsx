@@ -347,7 +347,7 @@ export default function App() {
   const [newPatientName, setNewPatientName] = useState("");
   const [newPatientId, setNewPatientId] = useState("");
   const [newDos, setNewDos] = useState("");
-  const [newBilledBy, setNewBilledBy] = useState<"" | "ITERA" | "Provider">("");
+  const [newBilledBy, setNewBilledBy] = useState<"" | "ITERA" | "Provider" | "Unknown">("");
   const [newProviderId, setNewProviderId] = useState("");
   const [newPayerId, setNewPayerId] = useState("");
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
@@ -785,7 +785,7 @@ export default function App() {
     setNewPatientName(toText(claim.patient_display_name_masked));
     setNewPatientId(toText(claim.patient_id));
     setNewDos(toText(claim.date_of_service_from).slice(0, 10));
-    setNewBilledBy((claim.billed_by === "ITERA" || claim.billed_by === "Provider") ? claim.billed_by : "");
+    setNewBilledBy((claim.billed_by === "ITERA" || claim.billed_by === "Provider" || claim.billed_by === "Unknown") ? claim.billed_by : "");
     setNewProviderId(toText(claim.provider_id));
     setNewPayerId(toText(claim.payer_id));
 
@@ -6296,10 +6296,11 @@ export default function App() {
                   <select
                     required
                     value={newBilledBy}
-                    onChange={(e) => setNewBilledBy(e.target.value as "" | "ITERA" | "Provider")}
+                    onChange={(e) => setNewBilledBy(e.target.value as "" | "ITERA" | "Provider" | "Unknown")}
                     className="w-full p-2 border border-slate-200 rounded bg-slate-50 text-slate-700 font-semibold"
                   >
                     <option value="" disabled>{isEnglish ? "Select" : "Selecciona"}</option>
+                    <option value="Unknown">{isEnglish ? "Not specified" : "No especificar"}</option>
                     <option value="ITERA">ITERA</option>
                     <option value="Provider">Provider</option>
                   </select>

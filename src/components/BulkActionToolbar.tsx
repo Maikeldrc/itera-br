@@ -147,6 +147,7 @@ export function BulkActionToolbar({
           <div className={`absolute bottom-full mb-1 right-0 bg-white text-slate-800 text-xs rounded shadow-xl border border-slate-200 p-1 w-32 ${openMenu === "billed_by" ? "block" : "hidden"} group-hover:block z-50`}>
             <button onClick={() => applyMenuAction("billed_by", "ITERA")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">ITERA</button>
             <button onClick={() => applyMenuAction("billed_by", "Provider")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Provider</button>
+            <button onClick={() => applyMenuAction("billed_by", "Unknown")} className="w-full text-left p-1.5 hover:bg-slate-100 rounded">Not specified</button>
           </div>
         </div>
 

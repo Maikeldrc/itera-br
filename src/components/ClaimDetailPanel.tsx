@@ -716,7 +716,7 @@ export function ClaimDetailPanel({
   const [classification, setClassification] = useState<ClaimClassification>(claim.claim_classification);
   const [claimLabel, setClaimLabel] = useState(normalizeClaimLabel(claim.claim_label));
   const [customClaimLabel, setCustomClaimLabel] = useState("");
-  const [billedBy, setBilledBy] = useState<"ITERA" | "Provider">(claim.billed_by);
+  const [billedBy, setBilledBy] = useState<Claim["billed_by"]>(claim.billed_by);
   const [paymentReceivedBy, setPaymentReceivedBy] = useState<Claim["payment_received_by"]>(claim.payment_received_by);
   
   // Financial field states
@@ -2407,6 +2407,7 @@ export function ClaimDetailPanel({
                     onChange={(e) => setBilledBy(e.target.value as any)}
                     className="w-full text-xs p-2 rounded-lg border border-slate-200 bg-slate-50 font-semibold text-slate-700"
                   >
+                    <option value="Unknown">{isEnglish ? "Not specified" : "No especificar"}</option>
                     <option value="ITERA">ITERA (ITERA Health handles claim submission)</option>
                     <option value="Provider">Provider (Medical Practice submitted directly)</option>
                   </select>

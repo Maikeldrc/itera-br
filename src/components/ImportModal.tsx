@@ -16,8 +16,8 @@ interface ImportModalProps {
   onRollback: (claimIds: string[], fileName?: string) => Promise<{ revertedClaims?: number; requestedClaims?: number }>;
 }
 
-type ImportBillingOwner = "" | "ITERA" | "Provider";
-type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: "ITERA" | "Provider" };
+type ImportBillingOwner = "Unknown" | "ITERA" | "Provider";
+type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: ImportBillingOwner };
 
 type ImportSummary = {
   totalRowsRead: number;
@@ -59,7 +59,7 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
   const isEnglish = language === "en";
   const [file, setFile] = useState<File | null>(null);
   const [filePayload, setFilePayload] = useState<{ fileName: string; fileBase64: string } | null>(null);
-  const [importBilledBy, setImportBilledBy] = useState<ImportBillingOwner>("");
+  const [importBilledBy, setImportBilledBy] = useState<ImportBillingOwner>("Unknown");
   const [parsedRows, setParsedRows] = useState<any[]>([]);
   const [validationResults, setValidationResults] = useState<{ row: number; claim_id: string; status: "valid" | "invalid"; errors: string[] }[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -87,7 +87,7 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
     clearProgressTimer();
     setFile(null);
     setFilePayload(null);
-    setImportBilledBy("");
+    setImportBilledBy("Unknown");
     setParsedRows([]);
     setValidationResults([]);
     setIsProcessing(false);
@@ -251,8 +251,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       } else if (!claim_id) {
         errors.push(isEnglish ? "Claim ID is required." : "Claim ID es requerido.");
       }
-      if (!isBillingWorklist && (!claimObj.billed_by || (claimObj.billed_by !== "ITERA" && claimObj.billed_by !== "Provider"))) {
-        errors.push(isEnglish ? "Billed by must be 'ITERA' or 'Provider'." : "Billed by debe ser 'ITERA' o 'Provider'.");
+      if (!isBillingWorklist && (!claimObj.billed_by || !["ITERA", "Provider", "Unknown"].includes(claimObj.billed_by))) {
+        errors.push(isEnglish ? "Billed by must be 'ITERA', 'Provider' or 'Unknown'." : "Billed by debe ser 'ITERA', 'Provider' o 'Unknown'.");
       }
       if (claimObj.billed_charge && isNaN(Number(claimObj.billed_charge))) {
         errors.push(isEnglish ? "Billed Charge must be a numeric value." : "Billed Charge debe ser un valor numérico.");
@@ -410,15 +410,6 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const handleImportClick = async () => {
-    if (!importBilledBy) {
-      notify(
-        isEnglish
-          ? "Select whether this import is billed by ITERA or by the Provider before importing."
-          : "Seleccione si esta importación corresponde a billing de ITERA o del Provider antes de importar.",
-        "warning"
-      );
-      return;
-    }
     await runImport(filePayload || parsedRows);
   };
 
@@ -427,8 +418,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     startImportProgress();
     try {
       const importPayload = Array.isArray(payload)
-        ? { rows: payload, fileName: file?.name || "", importBilledBy: importBilledBy || undefined }
-        : { ...payload, importBilledBy: importBilledBy || undefined };
+        ? { rows: payload, fileName: file?.name || "", importBilledBy }
+        : { ...payload, importBilledBy };
       const res = await onImport(importPayload);
       clearProgressTimer();
       setImportProgress({
@@ -611,16 +602,6 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     const selectedFile = e.target.files?.[0];
     e.target.value = "";
     if (!selectedFile || !importResult) return;
-    if (!importBilledBy) {
-      notify(
-        isEnglish
-          ? "Select the billing owner before uploading corrected rows."
-          : "Seleccione el responsable del billing antes de cargar filas corregidas.",
-        "warning"
-      );
-      return;
-    }
-
     const lowerName = selectedFile.name.toLowerCase();
     const isExcel = lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls");
     if (isExcel) {
@@ -671,15 +652,6 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const handleForceImportRejectedRows = async (rowNumber?: number) => {
     const targetRows = rowNumber ? [rowNumber] : forcedImportEligibleRows;
     if (!filePayload || targetRows.length === 0 || isProcessing || isForceImporting || forceImportingRow !== null) return;
-    if (!importBilledBy) {
-      notify(
-        isEnglish
-          ? "Select whether this import is billed by ITERA or by the Provider before importing."
-          : "Seleccione si esta importación corresponde a billing de ITERA o del Provider antes de importar.",
-        "warning"
-      );
-      return;
-    }
     setIsForceImporting(true);
     setForceImportingRow(rowNumber || null);
     try {
@@ -806,12 +778,12 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   </h4>
                   <p className="mt-1 text-xs leading-relaxed text-slate-500">
                     {isEnglish
-                      ? "Choose whether the imported Claims/CPT lines belong to Provider billing or ITERA billing. Billing Worklist Excel rows use this value for every imported claim."
-                      : "Seleccione si los Claims/CPT importados corresponden al billing del Provider o al billing de ITERA. Las filas del Billing Worklist Excel usarán este valor para cada claim importado."}
+                      ? "Choose whether the imported Claims/CPT lines belong to Provider billing, ITERA billing, or leave the billing owner unclassified. Billing Worklist Excel rows use this value for every imported claim."
+                      : "Seleccione si los Claims/CPT importados corresponden al billing del Provider, al billing de ITERA, o déjelos sin clasificar. Las filas del Billing Worklist Excel usarán este valor para cada claim importado."}
                   </p>
                 </div>
-                <div className="grid min-w-[360px] grid-cols-2 gap-2">
-                  {(["ITERA", "Provider"] as const).map(owner => (
+                <div className="grid w-full gap-2 sm:grid-cols-3 lg:min-w-[520px]">
+                  {(["Unknown", "ITERA", "Provider"] as const).map(owner => (
                     <button
                       key={owner}
                       type="button"
@@ -824,12 +796,16 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                       }`}
                     >
                       <span className="block text-xs font-bold">
-                        {owner === "ITERA"
+                        {owner === "Unknown"
+                          ? (isEnglish ? "Not specified" : "No especificar")
+                          : owner === "ITERA"
                           ? (isEnglish ? "ITERA Billing" : "Billing de ITERA")
                           : (isEnglish ? "Provider Billing" : "Billing del Provider")}
                       </span>
                       <span className="mt-1 block text-[10px] font-semibold text-slate-500">
-                        {owner === "ITERA"
+                        {owner === "Unknown"
+                          ? (isEnglish ? "Leave billing owner unclassified." : "Deja el responsable del billing sin clasificar.")
+                          : owner === "ITERA"
                           ? (isEnglish ? "Claims are billed by ITERA." : "Claims facturados por ITERA.")
                           : (isEnglish ? "Claims are billed by the practice/provider." : "Claims facturados por la práctica/provider.")}
                       </span>
@@ -837,11 +813,6 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   ))}
                 </div>
               </div>
-              {!importBilledBy && (
-                <p className="mt-3 text-[11px] font-semibold text-amber-700">
-                  {isEnglish ? "Required before import." : "Requerido antes de importar."}
-                </p>
-              )}
             </div>
           )}
 
@@ -1221,13 +1192,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           </button>
           <button
             onClick={handleImportClick}
-            disabled={(!filePayload && parsedRows.length === 0) || !importBilledBy || isProcessing || isRollingBack || importAlreadyFinalized}
+            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized}
             className="bg-primary-blue hover:bg-secondary-blue disabled:bg-slate-300 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md"
             title={importAlreadyFinalized
               ? (isEnglish ? "This import batch is finalized. Close this window to start a new import." : "Este lote de importación ya finalizó. Cierre esta ventana para iniciar una nueva importación.")
-              : !importBilledBy
-                ? (isEnglish ? "Select ITERA Billing or Provider Billing before importing." : "Seleccione Billing de ITERA o Billing del Provider antes de importar.")
-                : undefined}
+              : undefined}
           >
             {isProcessing
               ? (isEnglish ? "Processing..." : "Procesando...")
