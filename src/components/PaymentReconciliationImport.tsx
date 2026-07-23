@@ -9,6 +9,7 @@ import { PayerCombobox } from "./PayerCombobox";
 import { decodeMultiFilter, multiFilterIntersects, multiFilterMatches } from "../multiSelectFilters";
 import { formatDosDate } from "../dateFormatting";
 
+type PaymentImportBillingOwner = "Unknown" | "ITERA" | "Provider";
 type ImportPayload = { rows?: Record<string, string>[]; fileName?: string; fileBase64?: string; retryRows?: number[] };
 
 type PaymentImportMapping = Record<string, string>;
@@ -114,6 +115,7 @@ type PersistedPaymentImportAnalysis = {
   selectedTemplateId: string;
   acceptedPayerAssociations: Record<string, AcceptedPayerAssociation>;
   selectedMismatchPayers: Record<string, string>;
+  importBilledBy: PaymentImportBillingOwner;
   result: PaymentImportResult;
   resultSearch: string;
   resultStatusFilter: string;
@@ -276,6 +278,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
   const [payerChangeState, setPayerChangeState] = useState<Record<string, "applying" | "applied">>({});
   const [acceptedPayerAssociations, setAcceptedPayerAssociations] = useState<Record<string, AcceptedPayerAssociation>>({});
   const [selectedMismatchPayers, setSelectedMismatchPayers] = useState<Record<string, string>>({});
+  const [importBilledBy, setImportBilledBy] = useState<PaymentImportBillingOwner>("Unknown");
   const [recheckingRow, setRecheckingRow] = useState<number | null>(null);
   const [isRefreshingSavedAnalysis, setIsRefreshingSavedAnalysis] = useState(false);
   const [result, setResult] = useState<PaymentImportResult | null>(null);
@@ -314,6 +317,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       setSelectedTemplateId(saved.selectedTemplateId || "");
       setAcceptedPayerAssociations(saved.acceptedPayerAssociations || {});
       setSelectedMismatchPayers(saved.selectedMismatchPayers || {});
+      setImportBilledBy(saved.importBilledBy || "Unknown");
       setResult(saved.result);
       setResultSearch(saved.resultSearch || "");
       setResultStatusFilter(saved.resultStatusFilter || "all");
@@ -346,6 +350,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         selectedTemplateId,
         acceptedPayerAssociations,
         selectedMismatchPayers,
+        importBilledBy,
         result,
         resultSearch,
         resultStatusFilter,
@@ -376,6 +381,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     selectedTemplateId,
     acceptedPayerAssociations,
     selectedMismatchPayers,
+    importBilledBy,
     resultSearch,
     resultStatusFilter,
     resultIssueFilter,
@@ -427,6 +433,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     setResult(null);
     setAcceptedPayerAssociations({});
     setSelectedMismatchPayers({});
+    setImportBilledBy("Unknown");
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
@@ -496,6 +503,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     setResult(null);
     setAcceptedPayerAssociations({});
     setSelectedMismatchPayers({});
+    setImportBilledBy("Unknown");
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
@@ -626,6 +634,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
             ...payload,
             apply,
             mapping: schema ? mapping : undefined,
+            importBilledBy,
             acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
           })
         },
@@ -707,6 +716,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
           apply: false,
           retryRows: targetRows,
           mapping: schema ? mapping : undefined,
+          importBilledBy,
           acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
         })
       },
@@ -1306,6 +1316,53 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {payload && !result?.applied && (
+          <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  {isEnglish ? "Billing ownership for this payment import" : "Responsable del billing para esta importación de pagos"}
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                  {isEnglish
+                    ? "Choose whether imported payment rows should classify matched claims as ITERA billing, Provider billing, or leave the existing claim billing owner unchanged."
+                    : "Seleccione si las filas de pago importadas deben clasificar los claims como billing de ITERA, billing del Provider, o dejar sin cambios el responsable actual del claim."}
+                </p>
+              </div>
+              <div className="grid w-full gap-2 sm:grid-cols-3 lg:max-w-3xl">
+                {(["Unknown", "ITERA", "Provider"] as const).map(owner => (
+                  <button
+                    key={owner}
+                    type="button"
+                    onClick={() => setImportBilledBy(owner)}
+                    disabled={isProcessing}
+                    className={`rounded-xl border px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                      importBilledBy === owner
+                        ? "border-primary-blue bg-blue-50 text-dark-blue shadow-sm ring-2 ring-blue-100"
+                        : "border-slate-200 bg-slate-50 text-slate-600 hover:border-blue-200 hover:bg-blue-50/60"
+                    }`}
+                  >
+                    <span className="block text-xs font-bold">
+                      {owner === "Unknown"
+                        ? (isEnglish ? "Not specified" : "No especificar")
+                        : owner === "ITERA"
+                          ? (isEnglish ? "ITERA Billing" : "Billing de ITERA")
+                          : (isEnglish ? "Provider Billing" : "Billing del Provider")}
+                    </span>
+                    <span className="mt-1 block text-[10px] font-semibold text-slate-500">
+                      {owner === "Unknown"
+                        ? (isEnglish ? "Keep each matched claim's current billing owner." : "Mantiene el responsable actual del billing en cada claim.")
+                        : owner === "ITERA"
+                          ? (isEnglish ? "Classify matched claims as billed by ITERA." : "Clasifica los claims matcheados como facturados por ITERA.")
+                          : (isEnglish ? "Classify matched claims as billed by the practice/provider." : "Clasifica los claims matcheados como facturados por la práctica/provider.")}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
 

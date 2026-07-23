@@ -2587,7 +2587,9 @@ async function startServer() {
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, apply, fileName, mapping, acceptedPayerAssociations, retryRows } = req.body;
+      const { rows, fileBase64, apply, fileName, mapping, acceptedPayerAssociations, retryRows, importBilledBy } = req.body;
+      const paymentImportBilledBy: "ITERA" | "Provider" | "Unknown" =
+        importBilledBy === "Provider" ? "Provider" : importBilledBy === "ITERA" ? "ITERA" : "Unknown";
       const importRows = fileBase64 ? parseUploadedTableRows(fileBase64, textValue(fileName)) : rows;
       const retryRowSet = Array.isArray(retryRows)
         ? new Set(retryRows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0))
@@ -2879,10 +2881,12 @@ async function startServer() {
           const hasOverpaidLine = serviceLines.some(line =>
             Number(line.paid || 0) + Number(line.secondaryPaid || 0) > Number(line.charged || 0) + 0.01
           );
-          const paymentReceivedBy = claim.billed_by === "Provider" ? "Provider" : claim.billed_by === "ITERA" ? "ITERA" : "Unknown";
+          const effectiveBilledBy = paymentImportBilledBy === "Unknown" ? claim.billed_by : paymentImportBilledBy;
+          const paymentReceivedBy = effectiveBilledBy === "Provider" ? "Provider" : effectiveBilledBy === "ITERA" ? "ITERA" : "Unknown";
 
           const updated = calculateClaimFinancials({
             ...claim,
+            billed_by: effectiveBilledBy,
             service_lines_json: JSON.stringify(serviceLines),
             billed_charge: totalLineCharged || claim.billed_charge,
             allowed_amount: totalLineAllowed,
@@ -2903,7 +2907,7 @@ async function startServer() {
             eob_received: claimRows.some(row => row.paymentDate) ? "Yes" : claim.eob_received,
             payment_date: latestPaymentDate || new Date().toISOString().slice(0, 10),
             check_or_eft_number: latestCheckNo,
-            last_note: `${hasOverpaidLine ? "Payment Import detected overpayment; review required. " : ""}Payment Import applied ${claimRows.length} payment row(s). ${claim.last_note || ""}`.trim()
+            last_note: `${hasOverpaidLine ? "Payment Import detected overpayment; review required. " : ""}Payment Import applied ${claimRows.length} payment row(s).${paymentImportBilledBy !== "Unknown" && paymentImportBilledBy !== claim.billed_by ? ` Billing owner changed to ${paymentImportBilledBy}.` : ""} ${claim.last_note || ""}`.trim()
           }, reconciliationConfig);
 
           const validationErrors = validateClaim(updated);
