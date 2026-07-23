@@ -1907,6 +1907,7 @@ async function startServer() {
       const claimId = textValue(req.body?.claimId);
       const reportPayerName = textValue(req.body?.reportPayerName);
       const requestedPayerId = textValue(req.body?.payerId);
+      const requestedPayerName = textValue(req.body?.payerName);
 
       if (!claimId || (!reportPayerName && !requestedPayerId)) {
         return res.status(400).json({ error: "claimId and payerId or reportPayerName are required." });
@@ -1931,7 +1932,9 @@ async function startServer() {
       const previousPayerId = claim.payer_id || "";
       const previousPayerName = claim.payer_name || previousPayerId || "Unknown";
       const newPayerId = matchedPayer?.payer_id || reportPayerName;
-      const newPayerName = matchedPayer?.payer_name || reportPayerName;
+      const newPayerName = requestedPayerId && matchedPayer
+        ? (requestedPayerName || matchedPayer.payer_name || matchedPayer.payer_id)
+        : (matchedPayer?.payer_name || reportPayerName);
 
       if (entityNamesMatch(previousPayerName || previousPayerId, newPayerName || newPayerId)) {
         return res.json({

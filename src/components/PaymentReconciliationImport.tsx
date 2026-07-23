@@ -809,6 +809,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
 
   const applyPayerChange = async (row: PaymentImportRow, payerId?: string) => {
     const selectedPayerId = payerId || row.suggestedPayerId || "";
+    const selectedPayerName = payers.find(payer => payer.payer_id === selectedPayerId)?.payer_name || row.suggestedPayerName || "";
     if (!row.claimId || !selectedPayerId) {
       notify(
         isEnglish
@@ -827,6 +828,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         body: JSON.stringify({
           claimId: row.claimId,
           payerId: selectedPayerId,
+          payerName: selectedPayerName,
           reportPayerName: row.reportPayerName || row.suggestedPayerName || ""
         })
       });
@@ -838,7 +840,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         const rows = current.rows.map(item => {
           if (rowKey(item) !== key) return item;
           const newPayerId = data.newPayerId || selectedPayerId;
-          const newPayerName = data.newPayerName || payers.find(payer => payer.payer_id === selectedPayerId)?.payer_name || item.suggestedPayerName || item.payerName;
+          const newPayerName = data.newPayerName || selectedPayerName || item.suggestedPayerName || item.payerName;
           const warnings = item.warnings.filter(warning => !warning.toLowerCase().startsWith("payer mismatch:"));
           const stillNeedsReview = warnings.some(warning => warning.toLowerCase().includes("already has payment activity"));
           return {
