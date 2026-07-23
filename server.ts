@@ -2142,12 +2142,7 @@ async function startServer() {
           if (codes.length === 0) rowErrors.push("At least one CPT code is required.");
 
           const feeFallbackNotes: string[] = [];
-          const unitsByCode = codes.reduce<Record<string, number>>((acc, code) => {
-            acc[code] = (acc[code] || 0) + 1;
-            return acc;
-          }, {});
-          const uniqueCodes = Object.keys(unitsByCode);
-          const serviceLines = uniqueCodes.map(code => {
+          const serviceLines = codes.map(code => {
             const feeCandidates = feeSchedules
               .filter(item => textValue(item.cpt_code) === code)
               .sort((a, b) => Math.abs(Number(a.year) - year) - Math.abs(Number(b.year) - year));
@@ -2161,12 +2156,11 @@ async function startServer() {
               feeFallbackNotes.push(`CPT ${code} used ${fee.year} fee because ${year} fee was not found`);
             }
             const rate = Number(isSemester2 ? fee.semester2_rate : fee.semester1_rate);
-            const units = unitsByCode[code];
-            const charged = Number((rate * units).toFixed(2));
+            const charged = Number(rate.toFixed(2));
             return {
               cpt: code,
               dos: serviceFrom,
-              units,
+              units: 1,
               charged,
               allowed: charged,
               adj: 0,
@@ -2208,7 +2202,7 @@ async function startServer() {
             payer_id: payer!.payer_id,
             payer_name: String(row["Primary Insurance Name"] || payer!.payer_name).trim() || payer!.payer_name,
             service_type: importField(row, ["Service"]) || "CCM",
-            cpt_hcpcs: uniqueCodes.join(", "),
+            cpt_hcpcs: codes.join(", "),
             modifiers: "",
             units: serviceLines.reduce((sum, line) => sum + Number(line.units || 1), 0),
             date_of_service_from: serviceFrom,
