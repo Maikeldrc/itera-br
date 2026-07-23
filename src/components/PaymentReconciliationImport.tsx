@@ -243,6 +243,15 @@ function statusBadge(status: PaymentImportRow["status"], isEnglish: boolean) {
   return <span className={`rounded-md border px-2 py-1 text-[10px] font-bold ${classes[status]}`}>{labels[status]}</span>;
 }
 
+function hasLegacyGenericMatchWarning(row: PaymentImportRow) {
+  const text = [...(row.errors || []), ...(row.warnings || [])].join(" ");
+  return (
+    text.includes("Payment date is missing; today's date will be used if imported.") ||
+    text.includes("External Claim No did not match the internal claim ID; matched by Patient Acct No, CPT and DOS instead.") ||
+    text.includes("Multiple matching claims found; requires human review.")
+  );
+}
+
 export function PaymentReconciliationImport({ onImported, canApply = true, payers }: PaymentReconciliationImportProps) {
   const { notify } = useFeedback();
   const { language } = useLanguage();
@@ -267,6 +276,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
   const [acceptedPayerAssociations, setAcceptedPayerAssociations] = useState<Record<string, AcceptedPayerAssociation>>({});
   const [selectedMismatchPayers, setSelectedMismatchPayers] = useState<Record<string, string>>({});
   const [recheckingRow, setRecheckingRow] = useState<number | null>(null);
+  const [isRefreshingSavedAnalysis, setIsRefreshingSavedAnalysis] = useState(false);
   const [result, setResult] = useState<PaymentImportResult | null>(null);
   const [resultSearch, setResultSearch] = useState("");
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
@@ -274,6 +284,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
   const [resultSort, setResultSort] = useState<{ field: string; direction: "asc" | "desc" }>({ field: "row", direction: "asc" });
   const [restoredFromSavedAnalysis, setRestoredFromSavedAnalysis] = useState(false);
   const persistWarningShownRef = useRef(false);
+  const legacyRefreshAttemptedRef = useRef(false);
 
   const abortRequests = () => {
     schemaRequestRef.current?.abort();
@@ -671,8 +682,9 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     }
   };
 
-  const recheckRow = async (row: PaymentImportRow) => {
-    if (!payload || isProcessing || recheckingRow !== null) return;
+  const recheckRows = async (rowNumbers: number[]) => {
+    const targetRows = Array.from(new Set(rowNumbers.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0)));
+    if (!payload || targetRows.length === 0) return [] as PaymentImportRow[];
     if (schema && !mappingIssues.valid) {
       notify(
         isEnglish
@@ -681,35 +693,53 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         "warning"
       );
       setMappingExpanded(true);
-      return;
+      return [] as PaymentImportRow[];
     }
 
+    const response = await fetchWithTimeout(
+      "/api/payment-reconciliation-import",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          apply: false,
+          retryRows: targetRows,
+          mapping: schema ? mapping : undefined,
+          acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
+        })
+      },
+      PAYMENT_ANALYSIS_TIMEOUT_MS,
+      isEnglish
+        ? "The row recheck is taking too long. Try again after refreshing the payment analysis."
+        : "El rechequeo de la fila está tardando demasiado. Intente nuevamente después de refrescar el análisis.",
+      processRequestRef
+    );
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "Row recheck failed.");
+    const checkedRows = (data.rows || []) as PaymentImportRow[];
+    if (checkedRows.length === 0) throw new Error("The selected row was not returned by the recheck.");
+    const checkedByRow = new Map(checkedRows.map(item => [Number(item.rowNumber), item] as const));
+    setResult(current => {
+      if (!current) return current;
+      const rows = current.rows.map(item => checkedByRow.get(Number(item.rowNumber)) || item);
+      return {
+        ...current,
+        applied: false,
+        summary: summarizePaymentImportRows(rows, false),
+        rows
+      };
+    });
+    return checkedRows;
+  };
+
+  const recheckRow = async (row: PaymentImportRow) => {
+    if (!payload || isProcessing || recheckingRow !== null || isRefreshingSavedAnalysis) return;
     setRecheckingRow(row.rowNumber);
     try {
-      const response = await fetchWithTimeout(
-        "/api/payment-reconciliation-import",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...payload,
-            apply: false,
-            retryRows: [row.rowNumber],
-            mapping: schema ? mapping : undefined,
-            acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
-          })
-        },
-        PAYMENT_ANALYSIS_TIMEOUT_MS,
-        isEnglish
-          ? "The row recheck is taking too long. Try again after refreshing the payment analysis."
-          : "El rechequeo de la fila está tardando demasiado. Intente nuevamente después de refrescar el análisis.",
-        processRequestRef
-      );
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Row recheck failed.");
-      const checkedRow = (data.rows || []).find((item: PaymentImportRow) => Number(item.rowNumber) === Number(row.rowNumber));
-      if (!checkedRow) throw new Error("The selected row was not returned by the recheck.");
-
+      const checkedRows = await recheckRows([row.rowNumber]);
+      const checkedRow = checkedRows.find(item => Number(item.rowNumber) === Number(row.rowNumber));
+      if (!checkedRow) return;
       setResult(current => {
         if (!current) return current;
         const rows = current.rows.map(item => Number(item.rowNumber) === Number(row.rowNumber) ? checkedRow : item);
@@ -734,6 +764,37 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       setRecheckingRow(null);
     }
   };
+
+  useEffect(() => {
+    if (!restoredFromSavedAnalysis || legacyRefreshAttemptedRef.current || !result || !payload || isProcessing) return;
+    const legacyRows = result.rows
+      .filter(row => !result.applied && hasLegacyGenericMatchWarning(row))
+      .map(row => row.rowNumber);
+    if (legacyRows.length === 0) return;
+
+    legacyRefreshAttemptedRef.current = true;
+    setIsRefreshingSavedAnalysis(true);
+    void recheckRows(legacyRows)
+      .then(() => {
+        notify(
+          isEnglish
+            ? `Refreshed ${legacyRows.length} saved analysis row(s) with detailed match information.`
+            : `Se refrescaron ${legacyRows.length} fila(s) del análisis guardado con detalles del match.`,
+          "info"
+        );
+      })
+      .catch((err: any) => {
+        if (err.message !== REQUEST_ABORTED_MESSAGE) {
+          notify(
+            isEnglish
+              ? "Could not refresh the saved analysis details. Click Recheck row on any generic warning."
+              : "No se pudieron refrescar los detalles del análisis guardado. Use Rechequear fila en cualquier warning genérico.",
+            "warning"
+          );
+        }
+      })
+      .finally(() => setIsRefreshingSavedAnalysis(false));
+  }, [restoredFromSavedAnalysis, result, payload, isProcessing]);
 
   const applyPayerChange = async (row: PaymentImportRow, payerId?: string) => {
     const selectedPayerId = payerId || row.suggestedPayerId || "";
@@ -990,6 +1051,12 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                     ? `Showing the last analysis for ${fileName || "the selected payment report"}. It remains available until you discard it or start a new import.`
                     : `Mostrando el último análisis de ${fileName || "el reporte de pagos seleccionado"}. Se conserva hasta que lo descarte o inicie una nueva importación.`}
                 </p>
+                {isRefreshingSavedAnalysis && (
+                  <p className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-white px-2 py-1 text-[11px] font-bold text-primary-blue">
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    {isEnglish ? "Refreshing saved warning details..." : "Actualizando detalles del análisis guardado..."}
+                  </p>
+                )}
               </div>
             </div>
             <button
