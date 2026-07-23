@@ -43,6 +43,7 @@ import { PayerCombobox } from "./PayerCombobox";
 import { PENDING_ERA_ACTION, validateServiceLineDetails } from "../serviceLineValidation";
 import { validateCptRepeatLimitsByLine } from "../cptRepeatLimits";
 import { CLAIM_LABEL_OPTIONS, getClaimLabelClasses, normalizeClaimLabel } from "../claimLabels";
+import { formatDosDate } from "../dateFormatting";
 
 const COMMON_CPT_DESCRIPTIONS: Record<string, string> = {
   "99453": "RPM - Initial device setup, patient education, and training.",
@@ -1691,7 +1692,7 @@ export function ClaimDetailPanel({
 
             <div className="min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2.5 shadow-sm">
               <span className="itera-label block">{isEnglish ? "Visit" : "Visita"}</span>
-              <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-800">DOS: {claim.date_of_service_from}</span>
+              <span className="mt-0.5 block truncate text-[11px] font-bold text-slate-800">DOS: {formatDosDate(claim.date_of_service_from)}</span>
               <span className="block truncate font-mono text-[9px] text-slate-400">{isEnglish ? "Type" : "Tipo"}: {claim.service_type || "N/A"}</span>
             </div>
           </div>
@@ -2388,7 +2389,7 @@ export function ClaimDetailPanel({
                 </div>
                 <div>
                   <span className="block text-slate-400 font-mono">Fecha de Servicio (DOS)</span>
-                  <span className="font-bold text-slate-700 font-mono">{claim.date_of_service_from}</span>
+                  <span className="font-bold text-slate-700 font-mono">{formatDosDate(claim.date_of_service_from)}</span>
                 </div>
                 <div>
                   <span className="block text-slate-400 font-mono">Mes de Servicio</span>
@@ -2479,7 +2480,7 @@ export function ClaimDetailPanel({
                           </td>
                           <td className="p-2">
                             {isReadOnly ? (
-                              <span className="font-mono text-slate-600 text-[10px]">{line.dos || claim.date_of_service_from || "—"}</span>
+                              <span className="font-mono text-slate-600 text-[10px]">{formatDosDate(line.dos || claim.date_of_service_from)}</span>
                             ) : (
                               <input
                                 type="date"

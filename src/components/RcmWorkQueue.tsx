@@ -3,6 +3,7 @@ import { ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, Filter, Search, Us
 import { Claim, User } from "../types";
 import { MultiSelectFilter } from "./MultiSelectFilter";
 import { multiFilterMatches } from "../multiSelectFilters";
+import { formatDosDate } from "../dateFormatting";
 
 type QueueLine = {
   id: string;
@@ -332,7 +333,7 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
                       </td>
                       <td className="px-3 py-3">{row.providerName || "-"}</td>
                       <td className="px-3 py-3">{row.payerName || "-"}</td>
-                      <td className="px-3 py-3 font-mono text-slate-500">{shortDate(row.dos)}</td>
+                      <td className="px-3 py-3 font-mono text-slate-500">{formatDosDate(row.dos)}</td>
                       <td className="px-3 py-3">
                         <span className="rounded bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">{row.status || "-"}</span>
                       </td>

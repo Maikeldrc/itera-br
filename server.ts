@@ -46,6 +46,16 @@ function textValue(value: unknown) {
   return String(value ?? "").trim();
 }
 
+function formatDisplayDos(value: unknown, fallback = "blank") {
+  const text = textValue(value);
+  if (!text) return fallback;
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[2]}-${isoMatch[3]}-${isoMatch[1].slice(2)}`;
+  const slashMatch = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (slashMatch) return `${slashMatch[1].padStart(2, "0")}-${slashMatch[2].padStart(2, "0")}-${slashMatch[3].slice(-2)}`;
+  return text;
+}
+
 function safeJsonParse(value: unknown, fallback: unknown = {}) {
   try {
     const text = textValue(value);
@@ -337,9 +347,9 @@ function existingPaymentActivityMessage(claim: Partial<Claim>, line: any, cptCod
   ];
   const paymentDate = textValue(line?.paymentDate);
   const eftNumber = textValue(line?.eftNumber);
-  if (paymentDate) details.push(`payment date ${paymentDate}`);
+  if (paymentDate) details.push(`payment date ${formatDisplayDos(paymentDate)}`);
   if (eftNumber) details.push(`EFT/check ${eftNumber}`);
-  return `Matched claim ${claim.claim_id || "unknown"} CPT ${cptCode || textValue(line?.cpt) || "unknown"}${lineDos ? ` DOS ${lineDos}` : ""} already has payment activity (${details.join(", ")}). It was not overwritten.`;
+  return `Matched claim ${claim.claim_id || "unknown"} CPT ${cptCode || textValue(line?.cpt) || "unknown"}${lineDos ? ` DOS ${formatDisplayDos(lineDos)}` : ""} already has payment activity (${details.join(", ")}). It was not overwritten.`;
 }
 
 function serviceLineDos(line: any, claim: Partial<Claim>) {
@@ -2652,8 +2662,8 @@ async function startServer() {
         const describeCandidateClaims = (items: Claim[]) => items
           .slice(0, 8)
           .map(claim => {
-            const dos = textValue(claim.date_of_service_from).slice(0, 10) || textValue(claim.month_of_service).slice(0, 7) || "no DOS";
-            return `${claim.claim_id} (${claim.patient_display_name_masked || claim.patient_id || "patient unknown"}; payer ${claim.payer_name || claim.payer_id || "unknown"}; provider ${claim.provider_name || "unknown"}; DOS ${dos})`;
+            const dos = textValue(claim.date_of_service_from).slice(0, 10) || textValue(claim.month_of_service).slice(0, 7);
+            return `${claim.claim_id} (${claim.patient_display_name_masked || claim.patient_id || "patient unknown"}; payer ${claim.payer_name || claim.payer_id || "unknown"}; provider ${claim.provider_name || "unknown"}; DOS ${dos ? formatDisplayDos(dos) : "no DOS"})`;
           })
           .join(" | ");
 
@@ -2676,7 +2686,7 @@ async function startServer() {
             return hasCpt && matchesOperationalKeys(claim);
           });
           if (candidates.length > 0) {
-            warnings.push(`External Claim No "${row.claimNo || "blank"}" did not match an internal claim ID. Found ${candidates.length} candidate claim(s) by Patient Acct No "${row.patientAcctNo || "blank"}", CPT ${cptCode || "blank"} and DOS ${row.serviceDate || "blank"}: ${describeCandidateClaims(candidates)}${candidates.length > 8 ? " | ..." : ""}.`);
+            warnings.push(`External Claim No "${row.claimNo || "blank"}" did not match an internal claim ID. Found ${candidates.length} candidate claim(s) by Patient Acct No "${row.patientAcctNo || "blank"}", CPT ${cptCode || "blank"} and DOS ${formatDisplayDos(row.serviceDate)}: ${describeCandidateClaims(candidates)}${candidates.length > 8 ? " | ..." : ""}.`);
           }
         }
 
@@ -2706,11 +2716,11 @@ async function startServer() {
           : null;
 
         if (errors.length === 0 && candidates.length === 0) {
-          errors.push(`No matching claim/CPT found for Patient Acct No ${row.patientAcctNo || "blank"}, CPT ${cptCode || "blank"} and DOS ${row.serviceDate || "blank"}.`);
+          errors.push(`No matching claim/CPT found for Patient Acct No ${row.patientAcctNo || "blank"}, CPT ${cptCode || "blank"} and DOS ${formatDisplayDos(row.serviceDate)}.`);
         }
         const hasMultipleCandidateReview = errors.length === 0 && candidates.length > 1;
         if (hasMultipleCandidateReview) {
-          warnings.push(`Multiple matching claims found for Patient Acct No "${row.patientAcctNo || "blank"}", CPT ${cptCode || "blank"}, DOS ${row.serviceDate || "blank"}${row.payerName ? `, report payer "${row.payerName}"` : ""}. Review and choose the correct claim: ${describeCandidateClaims(candidates)}${candidates.length > 8 ? " | ..." : ""}.`);
+          warnings.push(`Multiple matching claims found for Patient Acct No "${row.patientAcctNo || "blank"}", CPT ${cptCode || "blank"}, DOS ${formatDisplayDos(row.serviceDate)}${row.payerName ? `, report payer "${row.payerName}"` : ""}. Review and choose the correct claim: ${describeCandidateClaims(candidates)}${candidates.length > 8 ? " | ..." : ""}.`);
         }
         if (errors.length === 0 && claim && !canAccessClaim(req, claim)) errors.push("Current user does not have access to the matched provider.");
         if (errors.length === 0 && claim && sheetsService.isPeriodClosed(claimPeriod(claim))) {

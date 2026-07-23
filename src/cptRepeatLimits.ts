@@ -1,4 +1,5 @@
 import { Claim, FeeSchedule } from "./types";
+import { formatDosDate } from "./dateFormatting";
 
 export type CptRepeatLine = {
   cpt?: string;
@@ -21,6 +22,11 @@ function yearFromDos(dos?: string) {
 
 function normalizeDos(value: unknown) {
   return normalizedCpt(value).slice(0, 10);
+}
+
+function displayDos(value: unknown) {
+  const dos = normalizeDos(value);
+  return dos ? formatDosDate(dos) : "blank";
 }
 
 function isMinimumSpacingCpt(cpt: string) {
@@ -84,7 +90,7 @@ export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedul
     if (count > max) {
       errors[index] = [
         ...(errors[index] || []),
-        `CPT ${cpt} can be used ${max} ${max === 1 ? "time" : "times"} per DOS. DOS ${dosForLine || dos || "blank"} has ${count}.`
+        `CPT ${cpt} can be used ${max} ${max === 1 ? "time" : "times"} per DOS. DOS ${displayDos(dosForLine || dos)} has ${count}.`
       ];
     }
   });
@@ -102,7 +108,7 @@ export function validateCptRepeatLimitsByLine(lines: CptRepeatLine[], feeSchedul
       [left.index, right.index].forEach(index => {
         errors[index] = [
           ...(errors[index] || []),
-          `CPT ${left.cpt} requires at least ${MIN_DAYS_BETWEEN_DOS} days between DOS dates. ${left.dos} and ${right.dos} are ${gap} day(s) apart.`
+          `CPT ${left.cpt} requires at least ${MIN_DAYS_BETWEEN_DOS} days between DOS dates. ${displayDos(left.dos)} and ${displayDos(right.dos)} are ${gap} day(s) apart.`
         ];
       });
     });
@@ -202,7 +208,7 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
     if (!conflict) return [];
     const gap = daysBetween(conflict.dos, candidate.dos) ?? 0;
     return [
-      `CPT ${candidate.cpt} requires at least ${MIN_DAYS_BETWEEN_DOS} days between DOS dates for patient ${patientId}. Existing/current DOS ${conflict.dos} and ${candidate.dos} are ${gap} day(s) apart.`
+      `CPT ${candidate.cpt} requires at least ${MIN_DAYS_BETWEEN_DOS} days between DOS dates for patient ${patientId}. Existing/current DOS ${displayDos(conflict.dos)} and ${displayDos(candidate.dos)} are ${gap} day(s) apart.`
     ];
   });
 
@@ -218,7 +224,7 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
     const max = getCptMaxPerDos(cpt, feeSchedules, dos);
     if (totalCount <= max) return [];
     return [
-      `CPT ${cpt} exceeds Max/DOS for patient ${patientId} on ${dos}. Max allowed: ${max}; existing plus current total: ${totalCount}.`
+      `CPT ${cpt} exceeds Max/DOS for patient ${patientId} on ${displayDos(dos)}. Max allowed: ${max}; existing plus current total: ${totalCount}.`
     ];
   });
 

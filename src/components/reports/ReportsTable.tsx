@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { ArrowUpDown } from "lucide-react";
 import { ReportRow, ReportView } from "../../reportsEngine";
 import { BillingOwnerBadge, PaymentReceiverBadge } from "./ReportComponents";
+import { formatDosDate } from "../../dateFormatting";
 
 const currency = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 const percent = (value: number | null) => value === null ? "N/A" : `${value.toFixed(1)}%`;
@@ -69,7 +70,7 @@ export function ReportsTable({ rows, view }: { rows: ReportRow[]; view: ReportVi
         <tbody className="divide-y divide-slate-100 text-slate-700">
           {sorted.map(row => (
             <tr key={row.key} className={`hover:bg-blue-50/30 ${view === "pending" && row.agingBucket === "91+ days" ? "bg-rose-50/30" : ""}`}>
-              <td className="p-3 font-mono">{row.date}</td>
+              <td className="p-3 font-mono">{formatDosDate(row.date)}</td>
               <td className="p-3 font-semibold text-slate-900">{row.payer}</td>
               <td className="p-3 font-semibold">{row.practice}</td>
               <td className="p-3">{row.serviceType}</td>

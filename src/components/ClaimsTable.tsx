@@ -37,6 +37,7 @@ import { useFeedback } from "./FeedbackProvider";
 import { useLanguage } from "./LanguageProvider";
 import { apiFetch } from "../apiClient";
 import { PENDING_ERA_ACTION } from "../serviceLineValidation";
+import { formatDosDate } from "../dateFormatting";
 import {
   CARC_CATALOG,
   RARC_CATALOG,
@@ -919,15 +920,7 @@ export function ClaimsTable({
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val);
   };
 
-  // Date of service formatter: YYYY-MM-DD -> MM-YY
-  const formatDos = (dateStr: string) => {
-    if (!dateStr) return "N/A";
-    const parts = dateStr.split("-");
-    if (parts.length !== 3) return dateStr;
-    const [year, month] = parts;
-    const shortYear = year.slice(-2);
-    return `${month}-${shortYear}`;
-  };
+  const formatDos = (dateStr: string) => formatDosDate(dateStr);
 
   const columnOptions: Array<{ id: ClaimTableColumnId; label: string; sort?: SortField }> = [
     { id: "patient", label: isEnglish ? "Patient" : "Paciente", sort: "patient_display_name_masked" },
@@ -984,7 +977,7 @@ export function ClaimsTable({
       downloadCsv(`ITERA_Claims_Worklist_${new Date().toISOString().slice(0, 10)}.csv`, sortedClaims.map(claim => ({
         patient: `${claim.patient_display_name_masked} (${claim.patient_id})`,
         provider: `${claim.provider_name} / ${claim.practice_name}`,
-        dos: claim.date_of_service_from,
+        dos: formatDosDate(claim.date_of_service_from),
         cpt: claim.cpt_hcpcs,
         billed: claim.billed_charge,
         billedBy: claim.billed_by,
@@ -998,7 +991,7 @@ export function ClaimsTable({
     downloadCsv(`ITERA_Claims_Worklist_CPT_${new Date().toISOString().slice(0, 10)}.csv`, sortedServiceLines.map(row => ({
       patient: `${row.claim.patient_display_name_masked} (${row.claim.patient_id})`,
       provider: `${row.claim.provider_name} / ${row.claim.practice_name}`,
-      dos: row.dos || row.claim.date_of_service_from,
+      dos: formatDosDate(row.dos || row.claim.date_of_service_from),
       cpt: row.cpt,
       billed: row.charged,
       billedBy: row.claim.billed_by,

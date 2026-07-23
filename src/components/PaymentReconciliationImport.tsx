@@ -7,6 +7,7 @@ import { useLanguage } from "./LanguageProvider";
 import { MultiSelectFilter } from "./MultiSelectFilter";
 import { PayerCombobox } from "./PayerCombobox";
 import { decodeMultiFilter, multiFilterIntersects, multiFilterMatches } from "../multiSelectFilters";
+import { formatDosDate } from "../dateFormatting";
 
 type ImportPayload = { rows?: Record<string, string>[]; fileName?: string; fileBase64?: string; retryRows?: number[] };
 
@@ -1512,7 +1513,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                         <p className="font-mono text-[10px] text-slate-400">{row.patientId || "-"}</p>
                       </td>
                       <td className="px-3 py-3 font-mono font-bold">{row.cptCode || "-"}</td>
-                      <td className="px-3 py-3 font-mono text-slate-500">{row.serviceDate || "-"}</td>
+                      <td className="px-3 py-3 font-mono text-slate-500">{formatDosDate(row.serviceDate)}</td>
                       <td className="px-3 py-3">
                         {row.payerMismatch ? (
                           <div className="min-w-[320px] space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
