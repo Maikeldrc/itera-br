@@ -34,6 +34,7 @@ type ImportSummary = {
   cptCodeCounts: Record<string, number>;
   totalBilledChargeImported: number;
   topRejectionReasons: { reason: string; count: number }[];
+  forcedImportedRows?: number;
 };
 
 type ImportResult = {
@@ -49,6 +50,7 @@ type ImportResult = {
     requestedClaims: number;
   };
   summary?: ImportSummary;
+  forcedImportedCount?: number;
 };
 
 export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportModalProps) {
@@ -344,6 +346,69 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     summary: result.summary || buildLocalImportSummary(result)
   });
 
+  const addCptCounts = (current: Record<string, number> = {}, next: Record<string, number> = {}) => {
+    const merged = { ...current };
+    Object.entries(next).forEach(([code, count]) => {
+      merged[code] = (merged[code] || 0) + Number(count || 0);
+    });
+    return merged;
+  };
+
+  const removeErrorsForRows = (errors: any[] = [], rows: number[]) => {
+    const targetRows = new Set(rows.map(row => Number(row)).filter(row => Number.isFinite(row) && row > 0));
+    return errors.filter(error => !targetRows.has(Number(error?.row)));
+  };
+
+  const mergeForcedImportResult = (previous: ImportResult | null, forced: ImportResult, forcedRows: number[]): ImportResult => {
+    if (!previous) return forced;
+    const remainingPreviousErrors = removeErrorsForRows(previous.errors || [], forcedRows);
+    const forcedErrors = forced.errors || [];
+    const mergedErrors = [...remainingPreviousErrors, ...forcedErrors];
+    const importedClaimIds = Array.from(new Set([...(previous.importedClaimIds || []), ...(forced.importedClaimIds || [])]));
+    const importedCount = Number(previous.importedCount || 0) + Number(forced.importedCount || 0);
+    const errorCount = mergedErrors.length || Math.max(0, Number(previous.errorCount || 0) - Number(forced.importedCount || 0)) + Number(forced.errorCount || 0);
+    const previousSummary = previous.summary || buildLocalImportSummary(previous);
+    const forcedSummary = forced.summary || buildLocalImportSummary(forced);
+    const totalRowsRead = previousSummary.totalRowsRead || forcedSummary.totalRowsRead;
+    const importedRows = Number(previousSummary.importedRows || previous.importedCount || 0) + Number(forcedSummary.importedRows || forced.importedCount || 0);
+    const rejectedRows = errorCount;
+    const accountedRows = importedRows + rejectedRows;
+    const allRowsAccounted = totalRowsRead > 0 ? accountedRows === totalRowsRead : forcedSummary.allRowsAccounted;
+    const forcedImportedRows = Number(previousSummary.forcedImportedRows || previous.forcedImportedCount || 0) + Number(forcedSummary.forcedImportedRows || forced.forcedImportedCount || forced.importedCount || 0);
+    const mergedSummary: ImportSummary = {
+      ...previousSummary,
+      totalRowsRead,
+      importedRows,
+      rejectedRows,
+      accountedRows,
+      allRowsAccounted,
+      uniquePatientsImported: allRowsAccounted && rejectedRows === 0
+        ? Math.max(previousSummary.uniquePatientsInFile, previousSummary.uniquePatientsImported, forcedSummary.uniquePatientsImported)
+        : Math.max(previousSummary.uniquePatientsImported, forcedSummary.uniquePatientsImported),
+      uniqueProvidersImported: Math.max(previousSummary.uniqueProvidersImported, forcedSummary.uniqueProvidersImported),
+      uniquePayersImported: Math.max(previousSummary.uniquePayersImported, forcedSummary.uniquePayersImported),
+      uniqueCptCodesImported: Math.max(previousSummary.uniqueCptCodesImported, forcedSummary.uniqueCptCodesImported),
+      totalCptUnitsImported: Number(previousSummary.totalCptUnitsImported || 0) + Number(forcedSummary.totalCptUnitsImported || 0),
+      cptCodeCounts: addCptCounts(previousSummary.cptCodeCounts, forcedSummary.cptCodeCounts),
+      totalBilledChargeImported: Number((Number(previousSummary.totalBilledChargeImported || 0) + Number(forcedSummary.totalBilledChargeImported || 0)).toFixed(2)),
+      topRejectionReasons: rejectedRows > 0 ? previousSummary.topRejectionReasons : [],
+      forcedImportedRows
+    };
+
+    return {
+      ...previous,
+      ...forced,
+      success: forced.success && errorCount === 0,
+      importedCount,
+      errorCount,
+      errors: mergedErrors,
+      importedClaimIds,
+      rollbackAvailable: importedClaimIds.length > 0,
+      forcedImportedCount: forcedImportedRows,
+      summary: mergedSummary
+    };
+  };
+
   const handleImportClick = async () => {
     if (!importBilledBy) {
       notify(
@@ -357,7 +422,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     await runImport(filePayload || parsedRows);
   };
 
-  const runImport = async (payload: ImportPayload) => {
+  const runImport = async (payload: ImportPayload, options?: { mergeForcedRows?: number[] }) => {
     setIsProcessing(true);
     startImportProgress();
     try {
@@ -370,7 +435,12 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         percent: 100,
         label: isEnglish ? "Import completed." : "Importación completada."
       });
-      setImportResult(normalizeImportResult(res));
+      const normalizedResult = normalizeImportResult(res);
+      if (options?.mergeForcedRows?.length) {
+        setImportResult(previous => mergeForcedImportResult(previous, normalizedResult, options.mergeForcedRows || []));
+      } else {
+        setImportResult(normalizedResult);
+      }
       setIsRollbackConfirmOpen(false);
       setRollbackProgress(null);
     } catch (err) {
@@ -617,7 +687,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         ...filePayload,
         retryRows: targetRows,
         forceImportRows: targetRows
-      });
+      }, { mergeForcedRows: targetRows });
       notify(
         isEnglish
           ? `${targetRows.length} rejected row(s) were imported and marked for service-line review.`
@@ -818,6 +888,13 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <div className="text-sm">
                 <h5 className="font-semibold mb-1">{isEnglish ? "Import Result" : "Resultado de Importación"}</h5>
                 <p>{isEnglish ? "Successfully imported" : "Importados correctamente"}: <span className="font-bold">{importResult.importedCount} claims</span></p>
+                {Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0) > 0 && (
+                  <p className="mt-1 text-xs text-emerald-700">
+                    {isEnglish
+                      ? `${Math.max(0, Number(importResult.importedCount || 0) - Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0))} imported without errors + ${Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0)} imported anyway and marked for review.`
+                      : `${Math.max(0, Number(importResult.importedCount || 0) - Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0))} importados sin errores + ${Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0)} importados de todos modos y marcados para revisión.`}
+                  </p>
+                )}
                 {importResult.errorCount > 0 && (
                   <p className="mt-1 font-semibold text-rose-700">{isEnglish ? "Rejected due to errors" : "Rechazados por errores"}: {importResult.errorCount} {isEnglish ? "records" : "registros"}.</p>
                 )}
@@ -1023,6 +1100,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 {[
                   [isEnglish ? "Rows read" : "Filas leídas", displayedSummary.totalRowsRead],
                   [isEnglish ? "Imported" : "Importadas", displayedSummary.importedRows],
+                  [isEnglish ? "Imported anyway" : "Importadas de todos modos", displayedSummary.forcedImportedRows || 0],
                   [isEnglish ? "Rejected" : "Rechazadas", displayedSummary.rejectedRows],
                   [isEnglish ? "Unique patients" : "Pacientes únicos", displayedSummary.uniquePatientsImported || displayedSummary.uniquePatientsInFile],
                   [isEnglish ? "Providers" : "Proveedores", displayedSummary.uniqueProvidersImported],
