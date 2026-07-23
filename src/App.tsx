@@ -47,7 +47,7 @@ import { ImportModal } from "./components/ImportModal";
 import { PremiumDashboard } from "./components/PremiumDashboard";
 import { ReportsPage } from "./components/reports/ReportsPage";
 import { RcmWorkQueue } from "./components/RcmWorkQueue";
-import { PaymentReconciliationImport } from "./components/PaymentReconciliationImport";
+import { PaymentReconciliationImport, PAYMENT_IMPORT_ANALYSIS_SESSION_KEY } from "./components/PaymentReconciliationImport";
 import { PayerCombobox } from "./components/PayerCombobox";
 import { MultiSelectFilter } from "./components/MultiSelectFilter";
 import { useFeedback } from "./components/FeedbackProvider";
@@ -2663,7 +2663,24 @@ export default function App() {
     setImportExceptionPage(1);
   };
 
-  const navigateToView = (view: ViewType, options: { keepRcmFilters?: boolean } = {}) => {
+  const navigateToView = async (view: ViewType, options: { keepRcmFilters?: boolean } = {}) => {
+    if (currentView === "payment-reconciliation-import" && view !== "payment-reconciliation-import") {
+      const hasSavedPaymentAnalysis = Boolean(window.sessionStorage.getItem(PAYMENT_IMPORT_ANALYSIS_SESSION_KEY));
+      if (hasSavedPaymentAnalysis) {
+        const keepAnalysis = await confirmAction({
+          title: isEnglish ? "Keep payment analysis?" : "¿Mantener análisis de pagos?",
+          message: isEnglish
+            ? "You have a payment import analysis in progress. Keep it so it is restored when you return to Payment Import, or discard it and continue."
+            : "Tiene un análisis de importación de pagos en curso. Manténgalo para restaurarlo cuando vuelva a Payment Import, o descártelo y continúe.",
+          confirmLabel: isEnglish ? "Keep analysis" : "Mantener análisis",
+          cancelLabel: isEnglish ? "Discard and leave" : "Descartar y salir",
+          tone: "primary"
+        });
+        if (!keepAnalysis) {
+          window.sessionStorage.removeItem(PAYMENT_IMPORT_ANALYSIS_SESSION_KEY);
+        }
+      }
+    }
     if (view !== "rcm-work-queue" || !options.keepRcmFilters) {
       setRcmQueueInitialFilters({});
     }

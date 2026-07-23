@@ -98,6 +98,26 @@ interface PaymentReconciliationImportProps {
   canApply?: boolean;
 }
 
+type PersistedPaymentImportAnalysis = {
+  savedAt: string;
+  fileName: string;
+  payload: ImportPayload | null;
+  schema: PaymentImportSchema | null;
+  mapping: PaymentImportMapping;
+  mappingExpanded: boolean;
+  templateName: string;
+  systemName: string;
+  selectedTemplateId: string;
+  acceptedPayerAssociations: Record<string, AcceptedPayerAssociation>;
+  result: PaymentImportResult;
+  resultSearch: string;
+  resultStatusFilter: string;
+  resultIssueFilter: string;
+  resultSort: { field: string; direction: "asc" | "desc" };
+};
+
+export const PAYMENT_IMPORT_ANALYSIS_SESSION_KEY = "itera.paymentImport.lastAnalysis.v1";
+
 const REQUIRED_COLUMNS = [
   "CPT Code",
   "Facility Name",
@@ -231,6 +251,8 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
   const [resultIssueFilter, setResultIssueFilter] = useState("all");
   const [resultSort, setResultSort] = useState<{ field: string; direction: "asc" | "desc" }>({ field: "row", direction: "asc" });
+  const [restoredFromSavedAnalysis, setRestoredFromSavedAnalysis] = useState(false);
+  const persistWarningShownRef = useRef(false);
 
   const abortRequests = () => {
     schemaRequestRef.current?.abort();
@@ -242,6 +264,89 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   };
 
   useEffect(() => () => abortRequests(), []);
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(PAYMENT_IMPORT_ANALYSIS_SESSION_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as PersistedPaymentImportAnalysis;
+      if (!saved?.result?.rows) return;
+      setFileName(saved.fileName || "");
+      setPayload(saved.payload || null);
+      setSchema(saved.schema || null);
+      setMapping(saved.mapping || {});
+      setMappingExpanded(saved.mappingExpanded ?? false);
+      setTemplateName(saved.templateName || "");
+      setSystemName(saved.systemName || "");
+      setSelectedTemplateId(saved.selectedTemplateId || "");
+      setAcceptedPayerAssociations(saved.acceptedPayerAssociations || {});
+      setResult(saved.result);
+      setResultSearch(saved.resultSearch || "");
+      setResultStatusFilter(saved.resultStatusFilter || "all");
+      setResultIssueFilter(saved.resultIssueFilter || "all");
+      setResultSort(saved.resultSort || { field: "row", direction: "asc" });
+      setRestoredFromSavedAnalysis(true);
+      notify(
+        isEnglish
+          ? "Last payment analysis restored. You can continue importing safe matches or start a new import."
+          : "Se restauró el último análisis de pagos. Puede continuar importando matches seguros o iniciar una nueva importación.",
+        "info"
+      );
+    } catch {
+      window.sessionStorage.removeItem(PAYMENT_IMPORT_ANALYSIS_SESSION_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!result) return;
+    try {
+      const snapshot: PersistedPaymentImportAnalysis = {
+        savedAt: new Date().toISOString(),
+        fileName,
+        payload,
+        schema,
+        mapping,
+        mappingExpanded,
+        templateName,
+        systemName,
+        selectedTemplateId,
+        acceptedPayerAssociations,
+        result,
+        resultSearch,
+        resultStatusFilter,
+        resultIssueFilter,
+        resultSort
+      };
+      window.sessionStorage.setItem(PAYMENT_IMPORT_ANALYSIS_SESSION_KEY, JSON.stringify(snapshot));
+    } catch {
+      if (!persistWarningShownRef.current) {
+        persistWarningShownRef.current = true;
+        notify(
+          isEnglish
+            ? "This analysis is too large to keep after leaving the page. Export or import before navigating away."
+            : "Este análisis es demasiado grande para conservarlo al salir de la página. Exporte o importe antes de navegar.",
+          "warning"
+        );
+      }
+    }
+  }, [
+    result,
+    fileName,
+    payload,
+    schema,
+    mapping,
+    mappingExpanded,
+    templateName,
+    systemName,
+    selectedTemplateId,
+    acceptedPayerAssociations,
+    resultSearch,
+    resultStatusFilter,
+    resultIssueFilter,
+    resultSort,
+    isEnglish,
+    notify
+  ]);
 
   const fetchWithTimeout = async (
     input: RequestInfo | URL,
@@ -274,6 +379,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
 
   const reset = () => {
     abortRequests();
+    window.sessionStorage.removeItem(PAYMENT_IMPORT_ANALYSIS_SESSION_KEY);
     setFileName("");
     setPayload(null);
     setSchema(null);
@@ -288,6 +394,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
     setResultStatusFilter("all");
     setResultIssueFilter("all");
     setProgress(null);
+    setRestoredFromSavedAnalysis(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -345,6 +452,8 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
   };
 
   const processFile = (file: File) => {
+    window.sessionStorage.removeItem(PAYMENT_IMPORT_ANALYSIS_SESSION_KEY);
+    setRestoredFromSavedAnalysis(false);
     setFileName(file.name);
     setResult(null);
     setAcceptedPayerAssociations({});
@@ -756,6 +865,34 @@ export function PaymentReconciliationImport({ onImported, canApply = true }: Pay
           <RefreshCw className="h-4 w-4" /> {isEnglish ? "New import" : "Nueva importación"}
         </button>
       </div>
+
+      {restoredFromSavedAnalysis && result && (
+        <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-primary-blue" />
+              <div>
+                <h3 className="text-sm font-bold text-dark-blue">
+                  {isEnglish ? "Saved analysis loaded" : "Análisis guardado cargado"}
+                </h3>
+                <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                  {isEnglish
+                    ? `Showing the last analysis for ${fileName || "the selected payment report"}. It remains available until you discard it or start a new import.`
+                    : `Mostrando el último análisis de ${fileName || "el reporte de pagos seleccionado"}. Se conserva hasta que lo descarte o inicie una nueva importación.`}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={reset}
+              disabled={isProcessing}
+              className="shrink-0 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-dark-blue hover:bg-blue-50 disabled:opacity-50"
+            >
+              {isEnglish ? "Discard saved analysis" : "Descartar análisis guardado"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-slate-700">
         <div className="flex gap-3">
