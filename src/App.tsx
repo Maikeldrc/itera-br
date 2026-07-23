@@ -4365,7 +4365,7 @@ export default function App() {
               </div>
 
               {/* Navigation Tabs */}
-              <div className="flex border-b border-slate-200 gap-1 overflow-x-auto pb-px">
+              <div className="grid max-w-full grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-xs sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 [&>button]:min-w-0 [&>button]:justify-start [&>button>span]:truncate">
                 <button
                   onClick={() => setSettingsTab("language")}
                   className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
