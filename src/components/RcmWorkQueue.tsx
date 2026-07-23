@@ -99,6 +99,8 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
   const [assignedToFilter, setAssignedToFilter] = useState(initialFilters?.assignedTo || "");
   const [sort, setSort] = useState<{ field: string; direction: "asc" | "desc" }>({ field: "dueDate", direction: "asc" });
   const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
 
   const rows = useMemo(() => claims.flatMap(parseLines), [claims]);
   const assignableUsers = users.filter(user => user.active);
@@ -122,6 +124,10 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
     setAssignedToFilter(initialFilters?.assignedTo || "");
     setSearch("");
   }, [initialFilters?.action, initialFilters?.provider, initialFilters?.payer, initialFilters?.status, initialFilters?.assignedTo]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, actionFilter, providerFilter, payerFilter, statusFilter, assignedToFilter, rowsPerPage]);
 
   const filteredRows = rows.filter(row => {
     const haystack = [
@@ -183,6 +189,11 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
 
   const pendingEra = rows.filter(row => row.nextAction === "Pending ERA").length;
   const overdue = rows.filter(row => row.dueDate && row.dueDate < new Date().toISOString().slice(0, 10)).length;
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / rowsPerPage));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const pageStart = sortedRows.length === 0 ? 0 : (safeCurrentPage - 1) * rowsPerPage + 1;
+  const pageEnd = Math.min(safeCurrentPage * rowsPerPage, sortedRows.length);
+  const paginatedRows = sortedRows.slice((safeCurrentPage - 1) * rowsPerPage, safeCurrentPage * rowsPerPage);
 
   const updateLineAssignment = async (row: QueueLine, assignedTo: string) => {
     let parsed: any[] = [];
@@ -297,7 +308,7 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
                   </td>
                 </tr>
               ) : (
-                sortedRows.map(row => {
+                paginatedRows.map(row => {
                   const assignedUser = users.find(user => user.user_id === row.assignedTo || user.email === row.assignedTo);
                   const assignmentMeta = [
                     row.dueDate ? `${isEnglish ? "Due" : "Vence"}: ${shortDate(row.dueDate)}` : "",
@@ -372,6 +383,53 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-4 py-3 md:flex-row md:items-center md:justify-between">
+          <p className="text-xs font-semibold text-slate-600">
+            {isEnglish ? "Showing" : "Mostrando"}{" "}
+            <span className="font-mono text-slate-900">{pageStart}</span>{" "}
+            {isEnglish ? "to" : "a"}{" "}
+            <span className="font-mono text-slate-900">{pageEnd}</span>{" "}
+            {isEnglish ? "of" : "de"}{" "}
+            <span className="font-mono text-slate-900">{sortedRows.length}</span>{" "}
+            {isEnglish ? "open actions" : "acciones abiertas"}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+              {isEnglish ? "Rows" : "Filas"}
+              <select
+                value={rowsPerPage}
+                onChange={(event) => {
+                  setRowsPerPage(Number(event.target.value));
+                  setCurrentPage(1);
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-bold text-slate-700 outline-none focus:border-primary-blue"
+              >
+                {[10, 25, 50, 100].map(option => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+              disabled={safeCurrentPage <= 1}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-primary-blue hover:text-primary-blue disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isEnglish ? "Previous" : "Anterior"}
+            </button>
+            <span className="rounded-lg bg-white px-3 py-1.5 font-mono text-xs font-bold text-slate-700">
+              {safeCurrentPage} / {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+              disabled={safeCurrentPage >= totalPages}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-primary-blue hover:text-primary-blue disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isEnglish ? "Next" : "Siguiente"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
