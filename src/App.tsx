@@ -56,7 +56,7 @@ import { useAuth } from "./auth";
 import { apiFetch, setApiTokenProvider } from "./apiClient";
 import { validateClaimCptRepeatLimitsAgainstExisting, validateCptRepeatLimits } from "./cptRepeatLimits";
 import { validateUniquePatientProvider } from "./patientRegistrationValidation";
-import { multiFilterMatches } from "./multiSelectFilters";
+import { encodeMultiFilter, multiFilterMatches } from "./multiSelectFilters";
 import {
   canUserAccessMenu,
   canUserPerformAction,
@@ -368,6 +368,13 @@ export default function App() {
   const [importExceptionRowsPerPage, setImportExceptionRowsPerPage] = useState(10);
   const [importExceptionSort, setImportExceptionSort] = useState<TableSortState>({ field: "created_at", direction: "desc" });
   const [isClearingImportExceptions, setIsClearingImportExceptions] = useState(false);
+  const [rcmQueueInitialFilters, setRcmQueueInitialFilters] = useState<{
+    action?: string;
+    provider?: string;
+    payer?: string;
+    status?: string;
+    assignedTo?: string;
+  }>({});
   const [closingMonth, setClosingMonth] = useState(false);
   const [closeMonthPeriod, setCloseMonthPeriod] = useState(() => new Date().toISOString().slice(0, 7));
   const [isImportingBankDeposits, setIsImportingBankDeposits] = useState(false);
@@ -2656,14 +2663,74 @@ export default function App() {
     setImportExceptionPage(1);
   };
 
+  const navigateToView = (view: ViewType, options: { keepRcmFilters?: boolean } = {}) => {
+    if (view !== "rcm-work-queue" || !options.keepRcmFilters) {
+      setRcmQueueInitialFilters({});
+    }
+    setCurrentView(view);
+    setSelectedClaimIds([]);
+    const nextPath = VIEW_PATHS[view];
+    if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
+  };
+
   // Clickable KPI card trigger helper
   const handleKPICardClick = (field: keyof FilterState, value: string) => {
     setFilters({
       ...INITIAL_FILTERS,
       [field]: value
     });
-    setCurrentView("claims");
-    if (window.location.pathname !== VIEW_PATHS.claims) window.history.pushState({}, "", VIEW_PATHS.claims);
+    navigateToView("claims");
+  };
+
+  const handleProductivityClaimsStatusClick = (status: string) => {
+    setFilters({ ...INITIAL_FILTERS, status });
+    navigateToView("claims");
+  };
+
+  const handleProductivityOpenBalanceClick = () => {
+    setFilters({
+      ...INITIAL_FILTERS,
+      status: encodeMultiFilter([
+        ClaimStatus.Draft,
+        ClaimStatus.Submitted,
+        ClaimStatus.Pending,
+        ClaimStatus.PartiallyPaid,
+        ClaimStatus.Denied,
+        ClaimStatus.Rejected,
+        ClaimStatus.BlockedByError,
+        ClaimStatus.Appealed,
+        ClaimStatus.Corrected,
+        ClaimStatus.ReadyToRebill,
+        ClaimStatus.Resubmitted
+      ])
+    });
+    navigateToView("claims");
+  };
+
+  const handleProductivityPaymentsClick = () => {
+    resetPaymentFilters();
+    navigateToView("payments");
+  };
+
+  const handleProductivityImportedRowsClick = () => {
+    setSettingsTab("operations");
+    navigateToView("settings");
+  };
+
+  const handleProductivityReviewTasksClick = () => {
+    resetImportExceptionFilters();
+    setImportExceptionStatusFilter("Open");
+    navigateToView("import-exceptions");
+  };
+
+  const handleProductivityTaskOwnerClick = (owner: string) => {
+    setRcmQueueInitialFilters({ assignedTo: owner || "Unassigned" });
+    navigateToView("rcm-work-queue", { keepRcmFilters: true });
+  };
+
+  const handleProductivityNextActionClick = (nextAction: string) => {
+    setRcmQueueInitialFilters({ action: nextAction });
+    navigateToView("rcm-work-queue", { keepRcmFilters: true });
   };
 
   const formatUSD = (val: number) => {
@@ -2890,12 +2957,7 @@ export default function App() {
       {/* Sidebar Section */}
       <Sidebar
         currentView={currentView}
-        onViewChange={(view) => {
-          setCurrentView(view);
-          setSelectedClaimIds([]);
-          const nextPath = VIEW_PATHS[view];
-          if (window.location.pathname !== nextPath) window.history.pushState({}, "", nextPath);
-        }}
+        onViewChange={navigateToView}
         currentUser={currentUser}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
@@ -3159,6 +3221,7 @@ export default function App() {
               onOpenClaim={(claim) => setSelectedClaim(claim)}
               onUpdateClaim={handleUpdateClaim}
               isEnglish={isEnglish}
+              initialFilters={rcmQueueInitialFilters}
             />
           )}
 
@@ -3572,22 +3635,22 @@ export default function App() {
               </div>
               <div className="grid gap-3 md:grid-cols-4">
                 {[
-                  [isEnglish ? "Total paid" : "Total pagado", `$${Number(operationsData?.metrics?.totalPaid || 0).toFixed(2)}`],
-                  [isEnglish ? "Open balance" : "Balance abierto", `$${Number(operationsData?.metrics?.totalBalance || 0).toFixed(2)}`],
-                  [isEnglish ? "Imported rows 30d" : "Filas importadas 30d", operationsData?.metrics?.importedRows30Days || 0],
-                  [isEnglish ? "Open review tasks" : "Tareas abiertas", operationsData?.health?.totals?.openReviewTasks || 0]
-                ].map(([label, value]) => (
-                  <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+                  { label: isEnglish ? "Total paid" : "Total pagado", value: `$${Number(operationsData?.metrics?.totalPaid || 0).toFixed(2)}`, onClick: handleProductivityPaymentsClick, title: isEnglish ? "Open Payment Control with the payment rows behind this total." : "Abrir Payment Control con las filas de pagos que componen este total." },
+                  { label: isEnglish ? "Open balance" : "Balance abierto", value: `$${Number(operationsData?.metrics?.totalBalance || 0).toFixed(2)}`, onClick: handleProductivityOpenBalanceClick, title: isEnglish ? "Open Claims Worklist filtered to claims that are not fully closed/paid." : "Abrir Claims Worklist filtrado a claims que no están completamente cerrados/pagados." },
+                  { label: isEnglish ? "Imported rows 30d" : "Filas importadas 30d", value: operationsData?.metrics?.importedRows30Days || 0, onClick: handleProductivityImportedRowsClick, title: isEnglish ? "Open Operations Center import history." : "Abrir historial de importaciones en Operations Center." },
+                  { label: isEnglish ? "Open review tasks" : "Tareas abiertas", value: operationsData?.health?.totals?.openReviewTasks || 0, onClick: handleProductivityReviewTasksClick, title: isEnglish ? "Open Import Exceptions filtered to open review tasks." : "Abrir Import Exceptions filtrado a tareas abiertas." }
+                ].map(({ label, value, onClick, title }) => (
+                  <button key={String(label)} type="button" onClick={onClick} title={title} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-xs transition hover:border-primary-blue hover:bg-blue-50/40 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-100">
                     <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</p>
                     <p className="mt-2 text-xl font-bold text-slate-900">{value}</p>
-                  </div>
+                  </button>
                 ))}
               </div>
               <div className="grid gap-5 xl:grid-cols-3">
                 {[
-                  { title: isEnglish ? "Tasks by owner" : "Tareas por responsable", rows: Object.entries(operationsData?.metrics?.taskCounts || {}) },
-                  { title: isEnglish ? "Claims by status" : "Claims por estado", rows: Object.entries(operationsData?.metrics?.statusCounts || {}) },
-                  { title: isEnglish ? "Next actions" : "Próximas acciones", rows: Object.entries(operationsData?.metrics?.nextActionCounts || {}) }
+                  { title: isEnglish ? "Tasks by owner" : "Tareas por responsable", rows: Object.entries(operationsData?.metrics?.taskCounts || {}), onClick: handleProductivityTaskOwnerClick },
+                  { title: isEnglish ? "Claims by status" : "Claims por estado", rows: Object.entries(operationsData?.metrics?.statusCounts || {}), onClick: handleProductivityClaimsStatusClick },
+                  { title: isEnglish ? "Next actions" : "Próximas acciones", rows: Object.entries(operationsData?.metrics?.nextActionCounts || {}), onClick: handleProductivityNextActionClick }
                 ].map(section => (
                   <div key={section.title} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
                     <div className="border-b border-slate-100 px-5 py-4">
@@ -3595,10 +3658,16 @@ export default function App() {
                     </div>
                     <div className="divide-y divide-slate-100">
                       {section.rows.slice(0, 12).map(([label, value]) => (
-                        <div key={String(label)} className="flex items-center justify-between gap-3 px-5 py-3 text-xs">
+                        <button
+                          key={String(label)}
+                          type="button"
+                          onClick={() => section.onClick(String(label))}
+                          title={isEnglish ? `Open matching rows for ${String(label)}` : `Abrir filas correspondientes a ${String(label)}`}
+                          className="flex w-full items-center justify-between gap-3 px-5 py-3 text-left text-xs transition hover:bg-blue-50/50 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-100"
+                        >
                           <span className="truncate font-semibold text-slate-700">{String(label)}</span>
                           <span className="rounded-md bg-blue-50 px-2 py-1 text-[10px] font-bold text-dark-blue">{String(value)}</span>
-                        </div>
+                        </button>
                       ))}
                       {section.rows.length === 0 && <div className="px-5 py-8 text-center text-xs font-semibold text-slate-400">-</div>}
                     </div>

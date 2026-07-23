@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ArrowUpRight, CalendarClock, ChevronDown, ChevronUp, Filter, Search, UserRound } from "lucide-react";
 import { Claim, User } from "../types";
 import { MultiSelectFilter } from "./MultiSelectFilter";
@@ -28,6 +28,13 @@ interface RcmWorkQueueProps {
   onOpenClaim: (claim: Claim) => void;
   onUpdateClaim: (updates: Partial<Claim>, targetClaimId?: string) => Promise<void>;
   isEnglish: boolean;
+  initialFilters?: {
+    action?: string;
+    provider?: string;
+    payer?: string;
+    status?: string;
+    assignedTo?: string;
+  };
 }
 
 const CLOSED_ACTIONS = new Set(["", "No action", "Close line"]);
@@ -83,21 +90,38 @@ function parseLines(claim: Claim): QueueLine[] {
     .filter(line => !CLOSED_ACTIONS.has(line.nextAction));
 }
 
-export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEnglish }: RcmWorkQueueProps) {
+export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEnglish, initialFilters }: RcmWorkQueueProps) {
   const [search, setSearch] = useState("");
-  const [actionFilter, setActionFilter] = useState("");
-  const [providerFilter, setProviderFilter] = useState("");
-  const [payerFilter, setPayerFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [actionFilter, setActionFilter] = useState(initialFilters?.action || "");
+  const [providerFilter, setProviderFilter] = useState(initialFilters?.provider || "");
+  const [payerFilter, setPayerFilter] = useState(initialFilters?.payer || "");
+  const [statusFilter, setStatusFilter] = useState(initialFilters?.status || "");
+  const [assignedToFilter, setAssignedToFilter] = useState(initialFilters?.assignedTo || "");
   const [sort, setSort] = useState<{ field: string; direction: "asc" | "desc" }>({ field: "dueDate", direction: "asc" });
   const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
 
   const rows = useMemo(() => claims.flatMap(parseLines), [claims]);
   const assignableUsers = users.filter(user => user.active);
+  const assignmentLabel = (assignedTo: string) => {
+    const normalized = textValue(assignedTo);
+    if (!normalized) return "Unassigned";
+    const user = users.find(item => item.user_id === normalized || item.email === normalized || item.name === normalized);
+    return user?.name || user?.email || normalized;
+  };
   const actions = Array.from(new Set(rows.map(row => row.nextAction))).sort();
   const providers = Array.from(new Set(rows.map(row => row.providerName).filter(Boolean))).sort();
   const payers = Array.from(new Set(rows.map(row => row.payerName).filter(Boolean))).sort();
   const statuses = Array.from(new Set(rows.map(row => row.status).filter(Boolean))).sort();
+  const assignees = Array.from(new Set(rows.map(row => assignmentLabel(row.assignedTo)).filter(Boolean))).sort();
+
+  useEffect(() => {
+    setActionFilter(initialFilters?.action || "");
+    setProviderFilter(initialFilters?.provider || "");
+    setPayerFilter(initialFilters?.payer || "");
+    setStatusFilter(initialFilters?.status || "");
+    setAssignedToFilter(initialFilters?.assignedTo || "");
+    setSearch("");
+  }, [initialFilters?.action, initialFilters?.provider, initialFilters?.payer, initialFilters?.status, initialFilters?.assignedTo]);
 
   const filteredRows = rows.filter(row => {
     const haystack = [
@@ -117,6 +141,7 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
     if (!multiFilterMatches(row.providerName, providerFilter)) return false;
     if (!multiFilterMatches(row.payerName, payerFilter)) return false;
     if (!multiFilterMatches(row.status, statusFilter)) return false;
+    if (!multiFilterMatches(assignmentLabel(row.assignedTo), assignedToFilter)) return false;
     return true;
   });
   const sortedRows = useMemo(() => {
@@ -210,7 +235,7 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
       </div>
 
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[2fr_repeat(4,minmax(0,1fr))]">
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[2fr_repeat(5,minmax(0,1fr))]">
           <label>
             <span className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
               <Search className="h-3.5 w-3.5" /> {isEnglish ? "Search" : "Buscar"}
@@ -226,7 +251,8 @@ export function RcmWorkQueue({ claims, users, onOpenClaim, onUpdateClaim, isEngl
             [isEnglish ? "Next Action" : "Próxima acción", actionFilter, setActionFilter, actions],
             [isEnglish ? "Provider" : "Provider", providerFilter, setProviderFilter, providers],
             [isEnglish ? "Payer" : "Payer", payerFilter, setPayerFilter, payers],
-            [isEnglish ? "Line Status" : "Estado línea", statusFilter, setStatusFilter, statuses]
+            [isEnglish ? "Line Status" : "Estado línea", statusFilter, setStatusFilter, statuses],
+            [isEnglish ? "Assigned To" : "Asignado a", assignedToFilter, setAssignedToFilter, assignees]
           ].map(([label, value, setter, options]) => (
             <label key={String(label)}>
               <span className="mb-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500">
