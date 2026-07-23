@@ -54,6 +54,11 @@ export function MultiSelectFilter({
     onChange(encodeMultiFilter(next));
   };
 
+  const closeMenu = () => {
+    setOpen(false);
+    setSearch("");
+  };
+
   return (
     <div ref={rootRef} className={`relative ${className}`}>
       <button
@@ -73,7 +78,7 @@ export function MultiSelectFilter({
       </button>
       {open && (
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-30" onClick={closeMenu} />
           <div className="absolute left-0 top-full z-40 mt-1 w-full min-w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
             <div className="relative mb-2">
               <Search className="absolute left-2 top-2 h-3.5 w-3.5 text-slate-400" />
@@ -87,14 +92,20 @@ export function MultiSelectFilter({
             <div className="mb-2 flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
               <button
                 type="button"
-                onClick={() => onChange("")}
+                onClick={() => {
+                  onChange("");
+                  closeMenu();
+                }}
                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-50"
               >
                 <X className="h-3 w-3" /> Clear
               </button>
               <button
                 type="button"
-                onClick={() => onChange(encodeMultiFilter(filteredOptions.map(option => option.value)))}
+                onClick={() => {
+                  onChange(encodeMultiFilter(filteredOptions.map(option => option.value)));
+                  closeMenu();
+                }}
                 className="rounded-md px-2 py-1 text-[10px] font-bold text-primary-blue hover:bg-blue-50"
               >
                 Select visible
@@ -124,6 +135,15 @@ export function MultiSelectFilter({
                   );
                 })
               )}
+            </div>
+            <div className="mt-2 border-t border-slate-100 pt-2">
+              <button
+                type="button"
+                onClick={closeMenu}
+                className="w-full rounded-lg bg-primary-blue px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-blue-600"
+              >
+                Done
+              </button>
             </div>
           </div>
         </>
