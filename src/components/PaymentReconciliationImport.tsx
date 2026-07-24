@@ -237,6 +237,8 @@ function summarizePaymentImportRows(rows: PaymentImportRow[], applied: boolean):
 const SCHEMA_ANALYSIS_TIMEOUT_MS = 45_000;
 const TEMPLATE_SAVE_TIMEOUT_MS = 45_000;
 const PAYMENT_ANALYSIS_TIMEOUT_MS = 180_000;
+const PAYMENT_IMPORT_CHUNK_SIZE = 50;
+const PAYMENT_IMPORT_CHUNK_DELAY_MS = 8_000;
 const REQUEST_ABORTED_MESSAGE = "__itera_request_aborted__";
 
 function requestTimeoutError(message: string) {
@@ -645,7 +647,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         const response = await apiFetch(`/api/payment-reconciliation-import/batches/${encodeURIComponent(batchId)}/process`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chunkSize: 100 })
+          body: JSON.stringify({ chunkSize: PAYMENT_IMPORT_CHUNK_SIZE })
         });
         data = await response.json();
         if (!response.ok) throw new Error((data as any).error || "Unable to process payment import batch.");
@@ -685,7 +687,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       });
       if (batch.status === "completed" || batch.status === "completed_with_errors") return data;
       if (batch.status === "failed") throw new Error(batch.error_message || "Payment import batch failed.");
-      await wait(2000);
+      await wait(PAYMENT_IMPORT_CHUNK_DELAY_MS);
     }
     throw new Error(isEnglish
       ? "Payment import is still running. You can return to this screen and check the batch status."

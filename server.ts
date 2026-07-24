@@ -3541,7 +3541,7 @@ async function startServer() {
         return res.json({ success: true, done: true, batch: updated, result: paymentImportResultFromBatch(updated, rows) });
       }
 
-      const chunkSize = Math.max(1, Math.min(200, Number(req.body?.chunkSize || 100)));
+      const chunkSize = Math.max(1, Math.min(100, Number(req.body?.chunkSize || 50)));
       const chunkRows = pendingRows.slice(0, chunkSize);
       await sheetsService.updatePaymentImportBatch(batch.batch_id, {
         status: "running",
