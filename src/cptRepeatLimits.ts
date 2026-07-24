@@ -200,6 +200,19 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
     .filter(existing => normalizedCpt(existing.patient_id) === patientId);
 
   const existingLines = otherPatientClaims.flatMap(existing => extractClaimCptRepeatLines(existing));
+  const exactDuplicateErrors = candidateLines.flatMap(candidate => {
+    const candidateCpt = normalizedCpt(candidate.cpt);
+    const candidateDos = normalizeDos(candidate.dos || claimDos);
+    if (!candidateCpt || !candidateDos) return [];
+    const existingMatch = existingLines.find(existingLine =>
+      normalizedCpt(existingLine.cpt) === candidateCpt &&
+      normalizeDos(existingLine.dos || claimDos) === candidateDos
+    );
+    if (!existingMatch || isPaidLine(existingMatch)) return [];
+    return [
+      `CPT ${candidateCpt} already exists for patient ${patientId} on ${displayDos(candidateDos)}. Duplicate patient/CPT/DOS service lines must be corrected before import.`
+    ];
+  });
   const paidDuplicateErrors = candidateLines.flatMap(candidate => {
     const candidateCpt = normalizedCpt(candidate.cpt);
     const candidateDos = normalizeDos(candidate.dos || claimDos);
@@ -259,5 +272,5 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
     ];
   });
 
-  return [...paidDuplicateErrors, ...spacingErrors, ...maxPerDosErrors];
+  return [...paidDuplicateErrors, ...exactDuplicateErrors, ...spacingErrors, ...maxPerDosErrors];
 }

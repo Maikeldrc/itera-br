@@ -354,7 +354,7 @@ export default function App() {
   const [newClaimLines, setNewClaimLines] = useState<NewClaimServiceLine[]>(() => [createBlankClaimServiceLine()]);
 
   // Fee Schedule management UI states
-  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "operations" | "import-templates" | "backups" | "data-cleanup" | "audit-log">("language");
+  const [settingsTab, setSettingsTab] = useState<"language" | "users" | "providers" | "payers" | "fee-schedules" | "contract-rules" | "validation-rules" | "operations" | "import-templates" | "backups" | "data-cleanup" | "audit-log">("language");
   const [backupConfig, setBackupConfig] = useState<BackupConfig | null>(null);
   const [backups, setBackups] = useState<BackupRecord[]>([]);
   const [operationsData, setOperationsData] = useState<any | null>(null);
@@ -390,6 +390,11 @@ export default function App() {
   const [backupFolderId, setBackupFolderId] = useState("");
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
   const [isSavingBackupSettings, setIsSavingBackupSettings] = useState(false);
+  const [customRuleName, setCustomRuleName] = useState("");
+  const [customRuleScope, setCustomRuleScope] = useState("Claims Import");
+  const [customRuleSeverity, setCustomRuleSeverity] = useState("Review");
+  const [customRuleDescription, setCustomRuleDescription] = useState("");
+  const [isSavingValidationRules, setIsSavingValidationRules] = useState(false);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [restoringBackupId, setRestoringBackupId] = useState("");
   const [backupToRestore, setBackupToRestore] = useState<BackupRecord | null>(null);
@@ -1311,6 +1316,124 @@ export default function App() {
     } else {
       notify(isEnglish ? "Unable to update setting." : "Error al actualizar ajuste.", "error");
     }
+  };
+
+  const validationRuleSetting = settings.find(setting => setting.setting_key === "VALIDATION_RULES_CONFIG")?.setting_value || "[]";
+  const customValidationRules = (() => {
+    try {
+      const parsed = JSON.parse(validationRuleSetting);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  })();
+  const systemValidationRules = [
+    {
+      id: "PATIENT_CPT_DOS_DUPLICATE",
+      name: isEnglish ? "Duplicate patient + CPT + DOS" : "Duplicado paciente + CPT + DOS",
+      scope: isEnglish ? "Claims Import, Manual Claim Create, Claim Edit" : "Importación de Claims, creación manual, edición",
+      severity: isEnglish ? "Blocking" : "Bloqueante",
+      status: isEnglish ? "Always on" : "Siempre activa",
+      description: isEnglish
+        ? "Blocks any imported or manually created service line when the same patient already has the same CPT on the same DOS in another claim."
+        : "Bloquea cualquier service line importado o creado manualmente cuando el mismo paciente ya tiene el mismo CPT en el mismo DOS en otro claim."
+    },
+    {
+      id: "PAID_CPT_DOS_DUPLICATE",
+      name: isEnglish ? "Paid duplicate protection" : "Protección contra duplicado pagado",
+      scope: isEnglish ? "Claims Import" : "Importación de Claims",
+      severity: isEnglish ? "Blocking" : "Bloqueante",
+      status: isEnglish ? "Always on" : "Siempre activa",
+      description: isEnglish
+        ? "Never allows Import anyway when a matching patient/CPT/DOS line already has payment activity or Paid status."
+        : "Nunca permite Import anyway cuando una línea paciente/CPT/DOS ya tiene actividad de pago o estado Paid."
+    },
+    {
+      id: "CPT_MIN_30_DAYS",
+      name: isEnglish ? "30-day minimum spacing for configured CPTs" : "Separación mínima de 30 días para CPT configurados",
+      scope: isEnglish ? "Claims Import, Manual Claim Create, Claim Edit" : "Importación de Claims, creación manual, edición",
+      severity: isEnglish ? "Recoverable review" : "Revisión recuperable",
+      status: isEnglish ? "Active" : "Activa",
+      description: isEnglish
+        ? "CPT 99454 and 99445 require at least 30 days between DOS dates. Recoverable imports are marked as billing errors for follow-up."
+        : "Los CPT 99454 y 99445 requieren al menos 30 días entre fechas DOS. Las importaciones recuperables se marcan como billing error para seguimiento."
+    },
+    {
+      id: "FEE_MAX_PER_DOS",
+      name: isEnglish ? "Fee Schedule Max per DOS" : "Máximo por DOS del Fee Schedule",
+      scope: isEnglish ? "Claims Import, Manual Claim Create, Claim Edit" : "Importación de Claims, creación manual, edición",
+      severity: isEnglish ? "Recoverable review" : "Revisión recuperable",
+      status: isEnglish ? "Active from Fee Schedule" : "Activa desde Fee Schedule",
+      description: isEnglish
+        ? "Uses the Max per DOS value configured for each CPT/year in FCSO-style CPT Fee Schedules."
+        : "Usa el valor Max per DOS configurado para cada CPT/año en FCSO-style CPT Fee Schedules."
+    },
+    {
+      id: "PAYER_PROVIDER_OUT_OF_NETWORK",
+      name: isEnglish ? "Payer out-of-network by provider" : "Payer fuera de red por provider",
+      scope: isEnglish ? "Claims Import" : "Importación de Claims",
+      severity: isEnglish ? "Blocking claim status" : "Estado bloqueante del claim",
+      status: isEnglish ? "Active from Payer Registry" : "Activa desde Payer Registry",
+      description: isEnglish
+        ? "If the imported payer is marked out-of-network for the provider, the claim is imported as Blocked by Error with the reason."
+        : "Si el payer importado está marcado fuera de red para el provider, el claim se importa como Blocked by Error con la causa."
+    }
+  ];
+
+  const saveValidationRulesConfig = async (rules: any[]) => {
+    setIsSavingValidationRules(true);
+    try {
+      const res = await apiFetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "VALIDATION_RULES_CONFIG", value: JSON.stringify(rules) })
+      });
+      if (!res.ok) throw new Error("Unable to save validation rules.");
+      notify(isEnglish ? "Validation rules updated." : "Reglas de validación actualizadas.", "success");
+      await fetchAllData({ showInitialLoading: false });
+    } catch (err: any) {
+      notify(`${isEnglish ? "Validation rules error" : "Error en reglas"}: ${err.message}`, "error");
+    } finally {
+      setIsSavingValidationRules(false);
+    }
+  };
+
+  const handleAddCustomValidationRule = async () => {
+    if (!customRuleName.trim() || !customRuleDescription.trim()) {
+      notify(isEnglish ? "Rule name and description are required." : "El nombre y la descripción de la regla son requeridos.", "warning");
+      return;
+    }
+    const nextRules = [
+      ...customValidationRules,
+      {
+        id: `CUSTOM-${Date.now()}`,
+        name: customRuleName.trim(),
+        scope: customRuleScope,
+        severity: customRuleSeverity,
+        status: "Active",
+        description: customRuleDescription.trim(),
+        created_at: new Date().toISOString(),
+        created_by: currentUser.email
+      }
+    ];
+    await saveValidationRulesConfig(nextRules);
+    setCustomRuleName("");
+    setCustomRuleDescription("");
+    setCustomRuleScope("Claims Import");
+    setCustomRuleSeverity("Review");
+  };
+
+  const handleToggleCustomValidationRule = async (ruleId: string) => {
+    const nextRules = customValidationRules.map(rule =>
+      rule.id === ruleId
+        ? { ...rule, status: rule.status === "Inactive" ? "Active" : "Inactive" }
+        : rule
+    );
+    await saveValidationRulesConfig(nextRules);
+  };
+
+  const handleDeleteCustomValidationRule = async (ruleId: string) => {
+    await saveValidationRulesConfig(customValidationRules.filter(rule => rule.id !== ruleId));
   };
 
   const loadBackups = async () => {
@@ -4527,6 +4650,19 @@ export default function App() {
                   <Sliders className="w-4 h-4" />
                   <span>{isEnglish ? "Contract Rules (Shares)" : "Reglas Contractuales (Shares)"}</span>
                 </button>
+                {currentUser.role === UserRole.Admin && (
+                  <button
+                    onClick={() => setSettingsTab("validation-rules")}
+                    className={`flex items-center gap-2 px-4 py-2.5 text-xs font-bold transition-all border-b-2 cursor-pointer whitespace-nowrap ${
+                      settingsTab === "validation-rules"
+                        ? "border-primary-blue text-primary-blue bg-blue-50/40 rounded-t-lg"
+                        : "border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50 rounded-t-lg"
+                    }`}
+                  >
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>{isEnglish ? "Validation Rules" : "Reglas de Validación"}</span>
+                  </button>
+                )}
                 {[UserRole.Admin, UserRole.BillingManager].includes(currentUser.role) && (
                   <button
                     onClick={() => setSettingsTab("operations")}
@@ -6299,6 +6435,209 @@ export default function App() {
                       <p className="text-[10px] text-slate-400 mt-1 leading-normal">
                         {isEnglish ? "Determines how physician balances are settled in monthly balance reports." : "Determina cómo se liquida el saldo a favor del médico en los reportes de balance mensuales."}
                       </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {settingsTab === "validation-rules" && currentUser.role === UserRole.Admin && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                    <div className="mb-4 flex items-start gap-3 border-b border-slate-100 pb-4">
+                      <div className="rounded-lg bg-blue-50 p-2 text-primary-blue">
+                        <ShieldAlert className="h-5 w-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900">
+                          {isEnglish ? "Validation Rule Management" : "Gestión de Reglas de Validación"}
+                        </h4>
+                        <p className="mt-1 max-w-4xl text-[11px] leading-relaxed text-slate-500">
+                          {isEnglish
+                            ? "Review system-enforced validations and maintain additional operational rules. Critical integrity rules are always active and cannot be disabled."
+                            : "Revise las validaciones aplicadas por el sistema y mantenga reglas operativas adicionales. Las reglas críticas de integridad están siempre activas y no se pueden desactivar."}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                      <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                        <h5 className="text-xs font-bold uppercase tracking-wide text-slate-700">
+                          {isEnglish ? "System-enforced rules" : "Reglas aplicadas por el sistema"}
+                        </h5>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-[980px] w-full text-left text-xs">
+                          <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                            <tr>
+                              <th className="px-4 py-3">{isEnglish ? "Rule" : "Regla"}</th>
+                              <th className="px-4 py-3">{isEnglish ? "Applies to" : "Se aplica en"}</th>
+                              <th className="px-4 py-3">{isEnglish ? "Severity" : "Severidad"}</th>
+                              <th className="px-4 py-3">{isEnglish ? "Status" : "Estado"}</th>
+                              <th className="px-4 py-3">{isEnglish ? "Description" : "Descripción"}</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {systemValidationRules.map(rule => (
+                              <tr key={rule.id} className="align-top hover:bg-slate-50/70">
+                                <td className="px-4 py-3">
+                                  <p className="font-bold text-slate-900">{rule.name}</p>
+                                  <p className="mt-1 font-mono text-[10px] text-slate-400">{rule.id}</p>
+                                </td>
+                                <td className="px-4 py-3 text-slate-700">{rule.scope}</td>
+                                <td className="px-4 py-3">
+                                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                                    rule.severity.toLowerCase().includes("block")
+                                      ? "bg-rose-50 text-rose-700"
+                                      : "bg-amber-50 text-amber-700"
+                                  }`}>
+                                    {rule.severity}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">
+                                    {rule.status}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 leading-relaxed text-slate-600">{rule.description}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
+                    <div className="mb-4 flex flex-col gap-2 border-b border-slate-100 pb-4 md:flex-row md:items-center md:justify-between">
+                      <div>
+                        <h5 className="text-sm font-bold text-slate-900">
+                          {isEnglish ? "Configurable rules" : "Reglas configurables"}
+                        </h5>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          {isEnglish
+                            ? "Register provider-specific or operational rules, define where they apply, and keep them active or inactive from Settings."
+                            : "Registre reglas específicas por provider u operativas, defina dónde aplican y manténgalas activas o inactivas desde Settings."}
+                        </p>
+                      </div>
+                      <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">
+                        {customValidationRules.length} {isEnglish ? "custom rule(s)" : "regla(s) configurables"}
+                      </span>
+                    </div>
+
+                    <div className="grid gap-3 lg:grid-cols-[1fr_180px_160px_1.2fr_auto]">
+                      <input
+                        value={customRuleName}
+                        onChange={e => setCustomRuleName(e.target.value)}
+                        placeholder={isEnglish ? "Rule name" : "Nombre de la regla"}
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                      />
+                      <select
+                        value={customRuleScope}
+                        onChange={e => setCustomRuleScope(e.target.value)}
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold"
+                      >
+                        <option>Claims Import</option>
+                        <option>Payment Import</option>
+                        <option>Manual Claim</option>
+                        <option>Claim Edit</option>
+                        <option>Reconciliation</option>
+                        <option>RCM Work Queue</option>
+                      </select>
+                      <select
+                        value={customRuleSeverity}
+                        onChange={e => setCustomRuleSeverity(e.target.value)}
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold"
+                      >
+                        <option value="Review">{isEnglish ? "Review" : "Revisión"}</option>
+                        <option value="Blocking">{isEnglish ? "Blocking" : "Bloqueante"}</option>
+                        <option value="Warning">{isEnglish ? "Warning" : "Advertencia"}</option>
+                      </select>
+                      <input
+                        value={customRuleDescription}
+                        onChange={e => setCustomRuleDescription(e.target.value)}
+                        placeholder={isEnglish ? "What should this rule check or document?" : "¿Qué debe revisar o documentar esta regla?"}
+                        className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddCustomValidationRule}
+                        disabled={isSavingValidationRules}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-blue px-3 py-2 text-xs font-bold text-white hover:bg-secondary-blue disabled:cursor-wait disabled:opacity-60"
+                      >
+                        <Plus className="h-4 w-4" />
+                        {isSavingValidationRules ? (isEnglish ? "Saving..." : "Guardando...") : (isEnglish ? "Add rule" : "Agregar regla")}
+                      </button>
+                    </div>
+
+                    <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="min-w-[920px] w-full text-left text-xs">
+                        <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
+                          <tr>
+                            <th className="px-4 py-3">{isEnglish ? "Rule" : "Regla"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Applies to" : "Se aplica en"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Severity" : "Severidad"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Status" : "Estado"}</th>
+                            <th className="px-4 py-3">{isEnglish ? "Description" : "Descripción"}</th>
+                            <th className="px-4 py-3 text-right">{isEnglish ? "Actions" : "Acciones"}</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {customValidationRules.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="px-4 py-8 text-center text-xs text-slate-400">
+                                {isEnglish ? "No configurable rules have been added yet." : "Todavía no se han agregado reglas configurables."}
+                              </td>
+                            </tr>
+                          ) : customValidationRules.map(rule => (
+                            <tr key={rule.id} className="align-top hover:bg-slate-50/70">
+                              <td className="px-4 py-3">
+                                <p className="font-bold text-slate-900">{rule.name}</p>
+                                <p className="mt-1 font-mono text-[10px] text-slate-400">{rule.id}</p>
+                              </td>
+                              <td className="px-4 py-3 text-slate-700">{rule.scope}</td>
+                              <td className="px-4 py-3">
+                                <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                                  String(rule.severity).toLowerCase().includes("block")
+                                    ? "bg-rose-50 text-rose-700"
+                                    : String(rule.severity).toLowerCase().includes("warn")
+                                      ? "bg-amber-50 text-amber-700"
+                                      : "bg-blue-50 text-primary-blue"
+                                }`}>
+                                  {rule.severity}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                                  rule.status === "Inactive" ? "bg-slate-100 text-slate-500" : "bg-emerald-50 text-emerald-700"
+                                }`}>
+                                  {rule.status === "Inactive" ? (isEnglish ? "Inactive" : "Inactiva") : (isEnglish ? "Active" : "Activa")}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 leading-relaxed text-slate-600">{rule.description}</td>
+                              <td className="px-4 py-3">
+                                <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleCustomValidationRule(rule.id)}
+                                    disabled={isSavingValidationRules}
+                                    className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+                                  >
+                                    {rule.status === "Inactive" ? (isEnglish ? "Activate" : "Activar") : (isEnglish ? "Deactivate" : "Desactivar")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteCustomValidationRule(rule.id)}
+                                    disabled={isSavingValidationRules}
+                                    className="rounded-lg border border-rose-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-rose-600 hover:bg-rose-50 disabled:cursor-wait disabled:opacity-60"
+                                  >
+                                    {isEnglish ? "Delete" : "Eliminar"}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 </div>

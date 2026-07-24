@@ -68,5 +68,24 @@ export function runCptRepeatLimitTests(): string[] {
     failures.push("Paid CPT/DOS duplicates should be rejected as non-importable.");
   }
 
+  const unpaidExistingClaim = {
+    claim_id: "CLM-UNPAID",
+    patient_id: "PAT-003",
+    date_of_service_from: "2026-06-15",
+    claim_status: "Draft",
+    paid_amount: 0,
+    service_lines_json: JSON.stringify([{ cpt: "99490", dos: "2026-06-15", units: 1, status: "Draft", paid: 0 }])
+  } as Partial<Claim>;
+  const duplicateUnpaidCandidate = {
+    claim_id: "CLM-DUP-UNPAID",
+    patient_id: "PAT-003",
+    date_of_service_from: "2026-06-15",
+    service_lines_json: JSON.stringify([{ cpt: "99490", dos: "2026-06-15", units: 1 }])
+  } as Partial<Claim>;
+  const exactDuplicateErrors = validateClaimCptRepeatLimitsAgainstExisting(duplicateUnpaidCandidate, feeSchedules, [unpaidExistingClaim]);
+  if (!exactDuplicateErrors.some(error => error.includes("Duplicate patient/CPT/DOS"))) {
+    failures.push("Exact patient/CPT/DOS duplicates should be rejected before import.");
+  }
+
   return failures;
 }
