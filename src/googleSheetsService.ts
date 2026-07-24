@@ -31,6 +31,16 @@ function safeSheetCell(value: unknown): string {
   return `${text.slice(0, GOOGLE_SHEETS_SAFE_CELL_LIMIT)}... [truncated ${text.length - GOOGLE_SHEETS_SAFE_CELL_LIMIT} chars to fit Google Sheets cell limit]`;
 }
 
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isGoogleSheetsQuotaError(err: any) {
+  const message = String(err?.message || err?.response?.data?.error?.message || "");
+  const status = Number(err?.code || err?.response?.status || err?.status || 0);
+  return status === 429 || /quota exceeded|rate limit|write requests per minute/i.test(message);
+}
+
 /**
  * Service to manage read/write operations to Google Sheets.
  * Falls back to an in-memory database with seed data only for local/demo mode.
@@ -152,20 +162,36 @@ export class GoogleSheetsService {
     this.reportFeeSchedules = [...SEED_REPORT_FEE_SCHEDULES];
   }
 
+  private async executeSheetsWrite<T>(operation: () => Promise<T>): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        return await operation();
+      } catch (err) {
+        lastError = err;
+        if (!isGoogleSheetsQuotaError(err) || attempt === 5) break;
+        const waitMs = Math.min(45000, 3000 * Math.pow(2, attempt));
+        console.warn(`Google Sheets quota reached. Retrying write in ${Math.round(waitMs / 1000)}s.`);
+        await sleep(waitMs);
+      }
+    }
+    throw lastError;
+  }
+
   /**
    * Helper to write a row to a sheet tab
    */
   private async appendRow(tabName: string, rowData: any[]) {
     if (!this.isConfigured) return;
     try {
-      await this.sheets.spreadsheets.values.append({
+      await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.append({
         spreadsheetId: this.sheetId,
         range: `${tabName}!A:A`,
         valueInputOption: "RAW",
         requestBody: {
           values: [rowData],
         },
-      });
+      }));
     } catch (err) {
       console.error(`Google Sheets: Failed to append row to ${tabName}`, err);
     }
@@ -173,14 +199,14 @@ export class GoogleSheetsService {
 
   private async appendRowsStrict(tabName: string, rows: any[][]) {
     if (!this.isConfigured || rows.length === 0) return;
-    await this.sheets.spreadsheets.values.append({
+    await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.append({
       spreadsheetId: this.sheetId,
       range: `${tabName}!A:A`,
       valueInputOption: "RAW",
       requestBody: {
         values: rows,
       },
-    });
+    }));
   }
 
   /**
@@ -190,20 +216,20 @@ export class GoogleSheetsService {
     if (!this.isConfigured) return;
     try {
       // Clear sheet
-      await this.sheets.spreadsheets.values.clear({
+      await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.clear({
         spreadsheetId: this.sheetId,
         range: `${tabName}!A:ZZ`,
-      });
+      }));
 
       // Write headers and data
-      await this.sheets.spreadsheets.values.update({
+      await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.update({
         spreadsheetId: this.sheetId,
         range: `${tabName}!A1`,
         valueInputOption: "RAW",
         requestBody: {
           values: [headers, ...rows],
         },
-      });
+      }));
     } catch (err) {
       console.error(`Google Sheets: Failed to overwrite tab ${tabName}`, err);
     }
@@ -212,10 +238,10 @@ export class GoogleSheetsService {
   private async clearTab(tabName: string) {
     if (!this.isConfigured) return;
     try {
-      await this.sheets.spreadsheets.values.clear({
+      await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.clear({
         spreadsheetId: this.sheetId,
         range: `${tabName}!A:ZZ`,
-      });
+      }));
     } catch (err) {
       console.error(`Google Sheets: Failed to clear tab ${tabName}`, err);
       throw err;
@@ -224,18 +250,18 @@ export class GoogleSheetsService {
 
   private async overwriteTabStrict(tabName: string, headers: string[], rows: any[][]) {
     if (!this.isConfigured) return;
-    await this.sheets.spreadsheets.values.clear({
+    await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.clear({
       spreadsheetId: this.sheetId,
       range: `${tabName}!A:ZZ`,
-    });
-    await this.sheets.spreadsheets.values.update({
+    }));
+    await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.update({
       spreadsheetId: this.sheetId,
       range: `${tabName}!A1`,
       valueInputOption: "RAW",
       requestBody: {
         values: [headers, ...rows],
       },
-    });
+    }));
   }
 
   /**
@@ -427,6 +453,53 @@ export class GoogleSheetsService {
     }
 
     return this.claims[index];
+  }
+
+  public async updateClaimsWithAuditBulk(updatedClaims: Claim[], operatorEmail: string): Promise<Claim[]> {
+    if (updatedClaims.length === 0) return [];
+    const now = new Date().toISOString();
+    const savedClaims: Claim[] = [];
+    const auditRecords: AuditLog[] = [];
+
+    for (const updatedClaim of updatedClaims) {
+      const index = this.claims.findIndex(c => c.claim_id === updatedClaim.claim_id);
+      if (index === -1) {
+        throw new Error(`Claim with ID ${updatedClaim.claim_id} not found.`);
+      }
+      const previous = this.claims[index];
+      const savedClaim = {
+        ...updatedClaim,
+        updated_at: now,
+        updated_by: operatorEmail
+      };
+      this.claims[index] = savedClaim;
+      savedClaims.push(savedClaim);
+
+      const diffs = getClaimDifferences(previous, savedClaim);
+      diffs.forEach((diff, diffIndex) => {
+        auditRecords.push({
+          audit_id: `AUD-${Date.now()}-${savedClaims.length}-${diffIndex}-${Math.floor(Math.random() * 1000)}`,
+          claim_id: savedClaim.claim_id,
+          action_type: "Update",
+          field_name: diff.field,
+          previous_value: String(diff.prev),
+          new_value: String(diff.curr),
+          reason: diff.reason || "Payment import batch update",
+          changed_by: operatorEmail,
+          changed_at: now
+        });
+      });
+    }
+
+    this.auditLogs.unshift(...auditRecords);
+    if (this.isConfigured) {
+      await this.overwriteTabStrict("Claims", CLAIMS_HEADERS, this.claims.map(c => mapObjectToRow("Claims", c)));
+      if (auditRecords.length > 0) {
+        await this.appendRowsStrict("Audit_Log", auditRecords.map(record => mapObjectToRow("Audit_Log", record)));
+      }
+    }
+
+    return savedClaims;
   }
 
   public async createClaim(newClaim: Claim, operatorEmail: string): Promise<Claim> {
@@ -758,6 +831,35 @@ export class GoogleSheetsService {
     }
 
     return paymentToAdd;
+  }
+
+  public async createPaymentsBulk(newPayments: Payment[]): Promise<Payment[]> {
+    if (newPayments.length === 0) return [];
+    const existingIds = new Set(this.payments.map(payment => String(payment.payment_id || "").toLowerCase()).filter(Boolean));
+    const batchIds = new Set<string>();
+    const now = new Date().toISOString();
+    const paymentsToAdd: Payment[] = [];
+
+    for (const payment of newPayments) {
+      const requestedPaymentId = payment.payment_id || "";
+      const normalizedId = requestedPaymentId.toLowerCase();
+      if (normalizedId && (existingIds.has(normalizedId) || batchIds.has(normalizedId))) continue;
+      const paymentToAdd = {
+        ...payment,
+        payment_id: requestedPaymentId || `PMT-${Date.now()}-${paymentsToAdd.length}`,
+        created_at: now,
+        updated_at: now
+      };
+      paymentsToAdd.push(paymentToAdd);
+      if (paymentToAdd.payment_id) batchIds.add(paymentToAdd.payment_id.toLowerCase());
+    }
+
+    if (paymentsToAdd.length === 0) return [];
+    this.payments.unshift(...paymentsToAdd);
+    if (this.isConfigured) {
+      await this.appendRowsStrict("Payments", paymentsToAdd.map(payment => mapObjectToRow("Payments", payment)));
+    }
+    return paymentsToAdd;
   }
 
   public async getNotes(): Promise<Note[]> {

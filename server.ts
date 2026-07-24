@@ -3047,6 +3047,8 @@ async function startServer() {
       const rejectedRows = analyzedRows.filter(row => row.status === "rejected");
       const importedPayments: Payment[] = [];
       const updatedClaims: Claim[] = [];
+      const claimsPendingSave: Claim[] = [];
+      const paymentsPendingSave: Payment[] = [];
 
       if (apply && readyRows.length > 0) {
         const rowsByClaim = readyRows.reduce<Record<string, typeof readyRows>>((acc, row) => {
@@ -3057,7 +3059,6 @@ async function startServer() {
         }, {});
 
         const claimEntries = Object.entries(rowsByClaim);
-        let processedClaimGroups = 0;
         for (const [claimId, claimRows] of claimEntries) {
           const claim = claims.find(item => item.claim_id === claimId);
           if (!claim) continue;
@@ -3196,8 +3197,7 @@ async function startServer() {
             continue;
           }
 
-          const savedClaim = await sheetsService.updateClaim(claimId, updated, operatorEmail);
-          updatedClaims.push(savedClaim);
+          claimsPendingSave.push(updated);
 
           for (const row of claimRows) {
             const effectivePaymentId = row.externalPaymentId || (batchId ? `PMT-IMP-${textValue(batchId)}-${row.rowNumber}` : "");
@@ -3210,33 +3210,30 @@ async function startServer() {
                 claim_id: claimId,
                 payment_date: row.paymentDate || new Date().toISOString().slice(0, 10),
                 payment_received_by: paymentReceivedBy === "Provider" ? "Provider" : "ITERA",
-                payer_name: row.payerName || savedClaim.payer_name,
+                payer_name: row.payerName || updated.payer_name,
                 amount: Number(row.payment || 0),
                 check_or_eft_number: row.checkNo || "",
                 era_id: "",
                 eob_id: row.paymentDate ? `EOB-${row.paymentDate}` : "",
                 payment_source: "Payment Import",
-                notes: `Imported from payer payment report "${textValue(fileName) || "Unknown file"}" row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.${row.payerAssociationAccepted ? ` Report payer "${row.reportPayerName}" was associated to current claim payer "${savedClaim.payer_name}" without changing claim insurance.` : ""}`,
+                notes: `Imported from payer payment report "${textValue(fileName) || "Unknown file"}" row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.${row.payerAssociationAccepted ? ` Report payer "${row.reportPayerName}" was associated to current claim payer "${updated.payer_name}" without changing claim insurance.` : ""}`,
                 created_at: "",
                 updated_at: ""
               };
-              const savedPayment = await sheetsService.createPayment(payment);
-              existingPaymentById.set(textValue(savedPayment.payment_id).toLowerCase(), savedPayment);
-              importedPayments.push(savedPayment);
+              paymentsPendingSave.push(payment);
+              existingPaymentById.set(textValue(payment.payment_id).toLowerCase(), payment);
             }
             row.status = "imported";
           }
-          processedClaimGroups++;
-          if (batchId) {
-            const importedSoFar = analyzedRows.filter(row => row.status === "imported").length;
-            const progress = Math.min(95, Math.max(10, Math.round((processedClaimGroups / Math.max(1, claimEntries.length)) * 90)));
-            await sheetsService.updatePaymentImportBatch(textValue(batchId), {
-              status: "running",
-              processed_rows: importedSoFar,
-              imported_rows: importedSoFar,
-              progress
-            });
-          }
+        }
+
+        if (claimsPendingSave.length > 0) {
+          const savedClaims = await sheetsService.updateClaimsWithAuditBulk(claimsPendingSave, operatorEmail);
+          updatedClaims.push(...savedClaims);
+        }
+        if (paymentsPendingSave.length > 0) {
+          const savedPayments = await sheetsService.createPaymentsBulk(paymentsPendingSave);
+          importedPayments.push(...savedPayments);
         }
       }
 
