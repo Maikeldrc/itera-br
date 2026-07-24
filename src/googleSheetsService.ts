@@ -5,7 +5,7 @@
 
 import { google } from "googleapis";
 import { Readable } from "stream";
-import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule, BackupRecord, JobRecord, ImportHistoryRecord, UserActivityLog, ReviewTask, NotificationRecord, BankDeposit, MonthlyCloseRecord, ImportMappingTemplate } from "./types";
+import { Claim, Payment, Note, AuditLog, Provider, Payer, User, Setting, FeeSchedule, EligibilityCoverage, ReportFeeSchedule, BackupRecord, JobRecord, ImportHistoryRecord, UserActivityLog, ReviewTask, NotificationRecord, BankDeposit, MonthlyCloseRecord, ImportMappingTemplate, PaymentImportBatch, PaymentImportBatchRow } from "./types";
 import { SEED_CLAIMS, SEED_PAYMENTS, SEED_NOTES, SEED_AUDIT_LOGS, SEED_PROVIDERS, SEED_PAYERS, SEED_USERS, SEED_SETTINGS, SEED_FEE_SCHEDULES, SEED_ELIGIBILITY_COVERAGE, SEED_REPORT_FEE_SCHEDULES } from "./seedData";
 import { normalizeUserAccess } from "./accessControl";
 
@@ -58,6 +58,8 @@ export class GoogleSheetsService {
   public bankDeposits: BankDeposit[] = [];
   public monthlyClosures: MonthlyCloseRecord[] = [];
   public importMappingTemplates: ImportMappingTemplate[] = [];
+  public paymentImportBatches: PaymentImportBatch[] = [];
+  public paymentImportBatchRows: PaymentImportBatchRow[] = [];
   private scheduledBackupInFlight = false;
 
   constructor() {
@@ -278,7 +280,9 @@ export class GoogleSheetsService {
         { name: "Notifications", headers: NOTIFICATIONS_HEADERS, seed: [] },
         { name: "Bank_Deposits", headers: BANK_DEPOSITS_HEADERS, seed: [] },
         { name: "Monthly_Closures", headers: MONTHLY_CLOSURES_HEADERS, seed: [] },
-        { name: "Import_Mapping_Templates", headers: IMPORT_MAPPING_TEMPLATE_HEADERS, seed: [] }
+        { name: "Import_Mapping_Templates", headers: IMPORT_MAPPING_TEMPLATE_HEADERS, seed: [] },
+        { name: "Payment_Import_Batches", headers: PAYMENT_IMPORT_BATCH_HEADERS, seed: [] },
+        { name: "Payment_Import_Batch_Rows", headers: PAYMENT_IMPORT_BATCH_ROW_HEADERS, seed: [] }
       ];
 
       for (const tab of requiredTabs) {
@@ -327,7 +331,7 @@ export class GoogleSheetsService {
   private async loadAllFromSheets() {
     if (!this.isConfigured) return;
 
-    const tabs = ["Claims", "Payments", "Notes", "Audit_Log", "Providers", "Payers", "Users", "Settings", "FeeSchedules", "Fee_Schedule", "Eligibility_Coverage", "Jobs", "Import_History", "User_Activity_Log", "Review_Tasks", "Notifications", "Bank_Deposits", "Monthly_Closures", "Import_Mapping_Templates"];
+    const tabs = ["Claims", "Payments", "Notes", "Audit_Log", "Providers", "Payers", "Users", "Settings", "FeeSchedules", "Fee_Schedule", "Eligibility_Coverage", "Jobs", "Import_History", "User_Activity_Log", "Review_Tasks", "Notifications", "Bank_Deposits", "Monthly_Closures", "Import_Mapping_Templates", "Payment_Import_Batches", "Payment_Import_Batch_Rows"];
     for (const tab of tabs) {
       try {
         const response = await this.sheets.spreadsheets.values.get({
@@ -360,6 +364,8 @@ export class GoogleSheetsService {
         if (tab === "Bank_Deposits") this.bankDeposits = mappedObjects as BankDeposit[];
         if (tab === "Monthly_Closures") this.monthlyClosures = mappedObjects as MonthlyCloseRecord[];
         if (tab === "Import_Mapping_Templates") this.importMappingTemplates = mappedObjects as ImportMappingTemplate[];
+        if (tab === "Payment_Import_Batches") this.paymentImportBatches = mappedObjects as PaymentImportBatch[];
+        if (tab === "Payment_Import_Batch_Rows") this.paymentImportBatchRows = mappedObjects as PaymentImportBatchRow[];
         if (tab === "Settings") await this.ensureDefaultSettings();
       } catch (err) {
         console.error(`Failed to load tab ${tab} from Google Sheets:`, err);
@@ -725,6 +731,11 @@ export class GoogleSheetsService {
   }
 
   public async createPayment(newPayment: Payment): Promise<Payment> {
+    const requestedPaymentId = newPayment.payment_id || "";
+    if (requestedPaymentId) {
+      const existing = this.payments.find(payment => String(payment.payment_id).toLowerCase() === String(requestedPaymentId).toLowerCase());
+      if (existing) return existing;
+    }
     const paymentToAdd = {
       ...newPayment,
       payment_id: newPayment.payment_id || `PMT-${Date.now()}`,
@@ -1410,7 +1421,9 @@ export class GoogleSheetsService {
       Review_Tasks: "reviewTasks",
       Notifications: "notifications",
       Bank_Deposits: "bankDeposits",
-      Monthly_Closures: "monthlyClosures"
+      Monthly_Closures: "monthlyClosures",
+      Payment_Import_Batches: "paymentImportBatches",
+      Payment_Import_Batch_Rows: "paymentImportBatchRows"
     };
     const key = collectionMap[tabName];
     if (key) {
@@ -1560,6 +1573,67 @@ export class GoogleSheetsService {
     };
     await this.overwriteOperationalRecords("Import_Mapping_Templates", this.importMappingTemplates);
     return this.importMappingTemplates[index];
+  }
+
+  public async createPaymentImportBatch(recordData: Partial<PaymentImportBatch>): Promise<PaymentImportBatch> {
+    const now = new Date().toISOString();
+    const record: PaymentImportBatch = {
+      batch_id: recordData.batch_id || `PIB-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      file_name: recordData.file_name || "",
+      status: recordData.status || "queued",
+      requested_by: recordData.requested_by || "system@itera.health",
+      requested_at: recordData.requested_at || now,
+      started_at: recordData.started_at || "",
+      completed_at: recordData.completed_at || "",
+      total_rows: Number(recordData.total_rows || 0),
+      processed_rows: Number(recordData.processed_rows || 0),
+      imported_rows: Number(recordData.imported_rows || 0),
+      review_rows: Number(recordData.review_rows || 0),
+      rejected_rows: Number(recordData.rejected_rows || 0),
+      failed_rows: Number(recordData.failed_rows || 0),
+      total_amount: Number(recordData.total_amount || 0),
+      progress: Number(recordData.progress || 0),
+      payload_json: recordData.payload_json || "{}",
+      summary_json: recordData.summary_json || "{}",
+      error_message: recordData.error_message || ""
+    };
+    return this.appendOperationalRecord("Payment_Import_Batches", record);
+  }
+
+  public async updatePaymentImportBatch(batchId: string, updates: Partial<PaymentImportBatch>): Promise<PaymentImportBatch | null> {
+    const index = this.paymentImportBatches.findIndex(batch => batch.batch_id === batchId);
+    if (index === -1) return null;
+    this.paymentImportBatches[index] = { ...this.paymentImportBatches[index], ...updates };
+    await this.overwriteOperationalRecords("Payment_Import_Batches", this.paymentImportBatches);
+    return this.paymentImportBatches[index];
+  }
+
+  public async getPaymentImportBatch(batchId: string): Promise<PaymentImportBatch | null> {
+    return this.paymentImportBatches.find(batch => batch.batch_id === batchId) || null;
+  }
+
+  public async createPaymentImportBatchRows(rows: PaymentImportBatchRow[]): Promise<PaymentImportBatchRow[]> {
+    if (rows.length === 0) return [];
+    this.paymentImportBatchRows.push(...rows);
+    if (this.isConfigured) {
+      await this.overwriteOperationalRecords("Payment_Import_Batch_Rows", this.paymentImportBatchRows);
+    }
+    return rows;
+  }
+
+  public async replacePaymentImportBatchRows(batchId: string, rows: PaymentImportBatchRow[]): Promise<PaymentImportBatchRow[]> {
+    this.paymentImportBatchRows = [
+      ...this.paymentImportBatchRows.filter(row => row.batch_id !== batchId),
+      ...rows
+    ];
+    await this.overwriteOperationalRecords("Payment_Import_Batch_Rows", this.paymentImportBatchRows);
+    return rows;
+  }
+
+  public async getPaymentImportBatchRows(batchId: string): Promise<PaymentImportBatchRow[]> {
+    return this.paymentImportBatchRows
+      .filter(row => row.batch_id === batchId)
+      .sort((a, b) => Number(a.row_number) - Number(b.row_number));
   }
 
   public async createReviewTask(recordData: Partial<ReviewTask>): Promise<ReviewTask> {
@@ -2106,6 +2180,18 @@ const IMPORT_MAPPING_TEMPLATE_HEADERS = [
   "updated_at", "active"
 ];
 
+const PAYMENT_IMPORT_BATCH_HEADERS = [
+  "batch_id", "file_name", "status", "requested_by", "requested_at", "started_at",
+  "completed_at", "total_rows", "processed_rows", "imported_rows", "review_rows",
+  "rejected_rows", "failed_rows", "total_amount", "progress", "payload_json",
+  "summary_json", "error_message"
+];
+
+const PAYMENT_IMPORT_BATCH_ROW_HEADERS = [
+  "batch_id", "row_number", "row_key", "status", "claim_id", "cpt_code", "dos",
+  "payment_amount", "payment_id", "row_json", "issue_json", "updated_at"
+];
+
 const BACKUP_RESTORE_TABS = [
   "Claims",
   "Payments",
@@ -2125,7 +2211,9 @@ const BACKUP_RESTORE_TABS = [
   "Notifications",
   "Bank_Deposits",
   "Monthly_Closures",
-  "Import_Mapping_Templates"
+  "Import_Mapping_Templates",
+  "Payment_Import_Batches",
+  "Payment_Import_Batch_Rows"
 ];
 
 function getHeadersForTab(tabName: string): string[] {
@@ -2149,6 +2237,8 @@ function getHeadersForTab(tabName: string): string[] {
   if (tabName === "Bank_Deposits") return BANK_DEPOSITS_HEADERS;
   if (tabName === "Monthly_Closures") return MONTHLY_CLOSURES_HEADERS;
   if (tabName === "Import_Mapping_Templates") return IMPORT_MAPPING_TEMPLATE_HEADERS;
+  if (tabName === "Payment_Import_Batches") return PAYMENT_IMPORT_BATCH_HEADERS;
+  if (tabName === "Payment_Import_Batch_Rows") return PAYMENT_IMPORT_BATCH_ROW_HEADERS;
   return [];
 }
 

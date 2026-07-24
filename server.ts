@@ -14,7 +14,7 @@ import { GoogleSheetsService } from "./src/googleSheetsService";
 import { calculateClaimFinancials, validateClaim } from "./src/reconciliationEngine";
 import { runReconciliationEngineTests } from "./src/reconciliationEngine.test";
 import { runReportsEngineTests } from "./src/reportsEngine.test";
-import { Claim, Payment, Note, ClaimStatus, ClaimClassification, ErrorCategory, Payer, User, UserRole } from "./src/types";
+import { Claim, Payment, Note, ClaimStatus, ClaimClassification, ErrorCategory, Payer, User, UserRole, PaymentImportBatchRow } from "./src/types";
 import { generateClaimId } from "./src/claimId";
 import { validateClaimCptRepeatLimits, validateClaimCptRepeatLimitsAgainstExisting } from "./src/cptRepeatLimits";
 import { validateUniquePatientProvider } from "./src/patientRegistrationValidation";
@@ -813,6 +813,91 @@ function hasTrackedImportRepeatError(claim: Partial<Claim>, message: string) {
 
 function filterTrackedImportRepeatErrors(claim: Partial<Claim>, errors: string[]) {
   return errors.filter(error => !hasTrackedImportRepeatError(claim, error));
+}
+
+function paymentImportBatchRowFromResult(batchId: string, row: any): PaymentImportBatchRow {
+  const issues = [...(Array.isArray(row.errors) ? row.errors : []), ...(Array.isArray(row.warnings) ? row.warnings : [])];
+  return {
+    batch_id: batchId,
+    row_number: Number(row.rowNumber || 0),
+    row_key: `${batchId}:${Number(row.rowNumber || 0)}`,
+    status: row.status === "imported"
+      ? "imported"
+      : row.status === "needs_review"
+        ? "needs_review"
+        : row.status === "payment_activity"
+          ? "payment_activity"
+          : row.status === "rejected"
+            ? "rejected"
+            : "pending",
+    claim_id: textValue(row.claimId),
+    cpt_code: textValue(row.cptCode),
+    dos: textValue(row.serviceDate),
+    payment_amount: Number(row.payment || 0),
+    payment_id: textValue(row.externalPaymentId || row.paymentId),
+    row_json: JSON.stringify(row),
+    issue_json: JSON.stringify(issues),
+    updated_at: new Date().toISOString()
+  };
+}
+
+function paymentImportResultFromBatch(batch: any, rows: PaymentImportBatchRow[]) {
+  const parsedRows = rows.map(row => {
+    try {
+      const parsed = JSON.parse(row.row_json || "{}");
+      return {
+        ...parsed,
+        rowNumber: Number(parsed.rowNumber || row.row_number),
+        status: row.status === "pending" || row.status === "processing" || row.status === "failed" ? "rejected" : row.status,
+        claimId: parsed.claimId || row.claim_id,
+        cptCode: parsed.cptCode || row.cpt_code,
+        serviceDate: parsed.serviceDate || row.dos,
+        payment: Number(parsed.payment ?? row.payment_amount ?? 0),
+        errors: Array.isArray(parsed.errors) ? parsed.errors : [],
+        warnings: Array.isArray(parsed.warnings) ? parsed.warnings : []
+      };
+    } catch {
+      return {
+        rowNumber: Number(row.row_number || 0),
+        status: row.status === "imported" ? "imported" : "rejected",
+        claimId: row.claim_id,
+        patientId: "",
+        patientName: "",
+        cptCode: row.cpt_code,
+        serviceDate: row.dos,
+        paymentDate: "",
+        payerName: "",
+        payment: Number(row.payment_amount || 0),
+        errors: row.status === "failed" ? [batch.error_message || "Payment import row failed."] : [],
+        warnings: []
+      };
+    }
+  });
+  const summary = (() => {
+    try {
+      return JSON.parse(batch.summary_json || "{}");
+    } catch {
+      return {};
+    }
+  })();
+  return {
+    applied: true,
+    importedCount: Number(batch.imported_rows || parsedRows.filter((row: any) => row.status === "imported").length),
+    updatedClaims: Number(summary.updatedClaims || 0),
+    summary: {
+      totalRowsRead: Number(batch.total_rows || parsedRows.length),
+      readyToImport: Number(summary.readyToImport || 0),
+      importedRows: Number(batch.imported_rows || 0),
+      needsReviewRows: Number(batch.review_rows || 0),
+      paymentActivityRows: Number(summary.paymentActivityRows || 0),
+      rejectedRows: Number(batch.rejected_rows || 0),
+      matchedClaims: Number(summary.matchedClaims || 0),
+      matchedCptCodes: Number(summary.matchedCptCodes || 0),
+      totalPaymentInFile: Number(batch.total_amount || summary.totalPaymentInFile || 0),
+      totalPaymentImported: Number(summary.totalPaymentImported || 0)
+    },
+    rows: parsedRows
+  };
 }
 
 function parseAllowedOrigins() {
@@ -2688,10 +2773,10 @@ async function startServer() {
     }
   });
 
-  app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+  const handlePaymentReconciliationImport = async (req: AppRequest, res: express.Response) => {
     try {
       const operatorEmail = getOperatorEmail(req);
-      const { rows, fileBase64, apply, fileName, mapping, acceptedPayerAssociations, retryRows, importBilledBy } = req.body;
+      const { rows, fileBase64, apply, fileName, mapping, acceptedPayerAssociations, retryRows, importBilledBy, batchId } = req.body;
       const paymentImportBilledBy: "ITERA" | "Provider" | "Unknown" =
         importBilledBy === "Provider" ? "Provider" : importBilledBy === "ITERA" ? "ITERA" : "Unknown";
       const importRows = fileBase64 ? parseUploadedTableRows(fileBase64, textValue(fileName)) : rows;
@@ -2895,7 +2980,9 @@ async function startServer() {
           return acc;
         }, {});
 
-        for (const [claimId, claimRows] of Object.entries(rowsByClaim)) {
+        const claimEntries = Object.entries(rowsByClaim);
+        let processedClaimGroups = 0;
+        for (const [claimId, claimRows] of claimEntries) {
           const claim = claims.find(item => item.claim_id === claimId);
           if (!claim) continue;
           let serviceLines = parseServiceLines(claim);
@@ -3037,15 +3124,16 @@ async function startServer() {
           updatedClaims.push(savedClaim);
 
           for (const row of claimRows) {
-            const existingPayment = row.externalPaymentId
-              ? existingPaymentById.get(row.externalPaymentId.toLowerCase()) || null
+            const effectivePaymentId = row.externalPaymentId || (batchId ? `PMT-IMP-${textValue(batchId)}-${row.rowNumber}` : "");
+            const existingPayment = effectivePaymentId
+              ? existingPaymentById.get(effectivePaymentId.toLowerCase()) || null
               : null;
             if (!existingPayment || existingPayment.claim_id !== claimId) {
               const payment: Payment = {
-                payment_id: row.externalPaymentId || `PMT-IMP-${Date.now()}-${row.rowNumber}`,
+                payment_id: effectivePaymentId || `PMT-IMP-${Date.now()}-${row.rowNumber}`,
                 claim_id: claimId,
                 payment_date: row.paymentDate || new Date().toISOString().slice(0, 10),
-                payment_received_by: paymentReceivedBy,
+                payment_received_by: paymentReceivedBy === "Provider" ? "Provider" : "ITERA",
                 payer_name: row.payerName || savedClaim.payer_name,
                 amount: Number(row.payment || 0),
                 check_or_eft_number: row.checkNo || "",
@@ -3061,6 +3149,17 @@ async function startServer() {
               importedPayments.push(savedPayment);
             }
             row.status = "imported";
+          }
+          processedClaimGroups++;
+          if (batchId) {
+            const importedSoFar = analyzedRows.filter(row => row.status === "imported").length;
+            const progress = Math.min(95, Math.max(10, Math.round((processedClaimGroups / Math.max(1, claimEntries.length)) * 90)));
+            await sheetsService.updatePaymentImportBatch(textValue(batchId), {
+              status: "running",
+              processed_rows: importedSoFar,
+              imported_rows: importedSoFar,
+              progress
+            });
           }
         }
       }
@@ -3148,6 +3247,26 @@ async function startServer() {
         });
       }
 
+      if (apply && batchId) {
+        await sheetsService.replacePaymentImportBatchRows(
+          textValue(batchId),
+          resultRows.map(row => paymentImportBatchRowFromResult(textValue(batchId), row))
+        );
+        await sheetsService.updatePaymentImportBatch(textValue(batchId), {
+          status: summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0 ? "completed_with_errors" : "completed",
+          completed_at: new Date().toISOString(),
+          processed_rows: resultRows.length,
+          imported_rows: summary.importedRows,
+          review_rows: summary.needsReviewRows + summary.paymentActivityRows,
+          rejected_rows: summary.rejectedRows,
+          failed_rows: 0,
+          total_amount: summary.totalPaymentInFile,
+          progress: 100,
+          summary_json: JSON.stringify({ ...summary, updatedClaims: updatedClaims.length }),
+          error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
+        });
+      }
+
       res.json({
         success: summary.rejectedRows === 0 && summary.needsReviewRows === 0 && summary.paymentActivityRows === 0,
         applied: Boolean(apply),
@@ -3157,7 +3276,138 @@ async function startServer() {
         rows: resultRows
       });
     } catch (err: any) {
+      const batchId = textValue(req.body?.batchId);
+      if (batchId) {
+        await sheetsService.updatePaymentImportBatch(batchId, {
+          status: "failed",
+          completed_at: new Date().toISOString(),
+          progress: 100,
+          error_message: err.message || "Payment reconciliation import failed."
+        }).catch(() => null);
+      }
       res.status(500).json({ error: err.message || "Payment reconciliation import failed." });
+    }
+  };
+
+  app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), handlePaymentReconciliationImport);
+
+  const runPaymentImportBatch = async (batchId: string, payload: any, appUser: User | undefined) => {
+    await sheetsService.updatePaymentImportBatch(batchId, {
+      status: "running",
+      started_at: new Date().toISOString(),
+      progress: 5,
+      error_message: ""
+    });
+    const fakeReq = {
+      body: { ...payload, apply: true, batchId },
+      appUser
+    } as AppRequest;
+    const fakeRes: any = {
+      statusCode: 200,
+      status(code: number) {
+        this.statusCode = code;
+        return this;
+      },
+      json(data: any) {
+        if (this.statusCode >= 400) {
+          throw new Error(data?.error || "Payment import batch failed.");
+        }
+        return data;
+      }
+    };
+    try {
+      await handlePaymentReconciliationImport(fakeReq, fakeRes as express.Response);
+    } catch (err: any) {
+      await sheetsService.updatePaymentImportBatch(batchId, {
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        progress: 100,
+        error_message: err.message || "Payment import batch failed."
+      });
+    }
+  };
+
+  app.post("/api/payment-reconciliation-import/start", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const { fileName, analysisRows } = req.body;
+      const rowsForBatch = Array.isArray(analysisRows) ? analysisRows : [];
+      const batch = await sheetsService.createPaymentImportBatch({
+        file_name: textValue(fileName),
+        status: "queued",
+        requested_by: operatorEmail,
+        total_rows: rowsForBatch.length,
+        processed_rows: 0,
+        imported_rows: 0,
+        review_rows: 0,
+        rejected_rows: 0,
+        failed_rows: 0,
+        total_amount: Number(rowsForBatch.reduce((sum: number, row: any) => sum + Number(row.payment || 0), 0).toFixed(2)),
+        progress: 0,
+        payload_json: JSON.stringify({ ...req.body, analysisRows: undefined })
+      });
+      if (rowsForBatch.length > 0) {
+        await sheetsService.createPaymentImportBatchRows(rowsForBatch.map((row: any) => ({
+          ...paymentImportBatchRowFromResult(batch.batch_id, row),
+          status: row.status === "ready"
+            ? "pending"
+            : row.status === "needs_review"
+              ? "needs_review"
+              : row.status === "payment_activity"
+                ? "payment_activity"
+                : row.status === "rejected"
+                  ? "rejected"
+                  : "pending"
+        })));
+      }
+      setTimeout(() => {
+        runPaymentImportBatch(batch.batch_id, req.body, req.appUser).catch(err => {
+          console.error("Payment import batch failed:", err);
+        });
+      }, 0);
+      res.status(202).json({ success: true, batchId: batch.batch_id, status: batch.status });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Unable to start payment import batch." });
+    }
+  });
+
+  app.get("/api/payment-reconciliation-import/batches/:batchId", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const batch = await sheetsService.getPaymentImportBatch(req.params.batchId);
+      if (!batch) return res.status(404).json({ error: "Payment import batch not found." });
+      const rows = await sheetsService.getPaymentImportBatchRows(req.params.batchId);
+      res.json({
+        success: true,
+        batch,
+        rows,
+        result: paymentImportResultFromBatch(batch, rows)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Unable to load payment import batch." });
+    }
+  });
+
+  app.post("/api/payment-reconciliation-import/batches/:batchId/resume", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const batch = await sheetsService.getPaymentImportBatch(req.params.batchId);
+      if (!batch) return res.status(404).json({ error: "Payment import batch not found." });
+      const rows = await sheetsService.getPaymentImportBatchRows(req.params.batchId);
+      const pendingRows = rows
+        .filter(row => !["imported", "needs_review", "payment_activity", "rejected"].includes(String(row.status)))
+        .map(row => Number(row.row_number))
+        .filter(row => Number.isFinite(row) && row > 0);
+      if (pendingRows.length === 0) {
+        return res.json({ success: true, batchId: batch.batch_id, status: batch.status, message: "No pending rows to resume." });
+      }
+      const payload = JSON.parse(batch.payload_json || "{}");
+      setTimeout(() => {
+        runPaymentImportBatch(batch.batch_id, { ...payload, retryRows: pendingRows }, req.appUser).catch(err => {
+          console.error("Payment import batch resume failed:", err);
+        });
+      }, 0);
+      res.status(202).json({ success: true, batchId: batch.batch_id, status: "running", pendingRows: pendingRows.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Unable to resume payment import batch." });
     }
   });
 

@@ -91,6 +91,21 @@ type PaymentImportResult = {
   rows: PaymentImportRow[];
 };
 
+type PaymentImportBatchStatus = {
+  batch: {
+    batch_id: string;
+    status: string;
+    progress: number;
+    processed_rows: number;
+    total_rows: number;
+    imported_rows: number;
+    review_rows: number;
+    rejected_rows: number;
+    error_message: string;
+  };
+  result: PaymentImportResult;
+};
+
 type ImportProgressState = {
   mode: "analyze" | "import";
   percent: number;
@@ -222,7 +237,6 @@ function summarizePaymentImportRows(rows: PaymentImportRow[], applied: boolean):
 const SCHEMA_ANALYSIS_TIMEOUT_MS = 45_000;
 const TEMPLATE_SAVE_TIMEOUT_MS = 45_000;
 const PAYMENT_ANALYSIS_TIMEOUT_MS = 180_000;
-const PAYMENT_IMPORT_TIMEOUT_MS = 180_000;
 const REQUEST_ABORTED_MESSAGE = "__itera_request_aborted__";
 
 function requestTimeoutError(message: string) {
@@ -583,6 +597,37 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     }
   };
 
+  const waitForPaymentImportBatch = async (batchId: string, steps: string[]) => {
+    const maxAttempts = 360;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const response = await apiFetch(`/api/payment-reconciliation-import/batches/${encodeURIComponent(batchId)}`);
+      const data: PaymentImportBatchStatus = await response.json();
+      if (!response.ok) throw new Error((data as any).error || "Unable to load payment import batch.");
+      const batch = data.batch;
+      const progress = Math.max(5, Math.min(100, Number(batch.progress || 0)));
+      const runningStep = progress >= 90 ? 4 : progress >= 65 ? 3 : progress >= 35 ? 2 : 1;
+      setProgress({
+        mode: "import",
+        percent: progress,
+        label: batch.status === "failed"
+          ? (isEnglish ? "Payment import failed." : "La importación de pagos falló.")
+          : batch.status === "completed" || batch.status === "completed_with_errors"
+            ? (isEnglish ? "Payment import completed." : "Importación de pagos completada.")
+            : `${isEnglish ? "Processing batch" : "Procesando lote"} ${batch.processed_rows || 0}/${batch.total_rows || 0}`,
+        steps: steps.map((step, stepIndex) => ({
+          label: step,
+          status: stepIndex < runningStep ? "done" : stepIndex === runningStep ? "running" : "pending"
+        }))
+      });
+      if (batch.status === "completed" || batch.status === "completed_with_errors") return data;
+      if (batch.status === "failed") throw new Error(batch.error_message || "Payment import batch failed.");
+      await wait(2000);
+    }
+    throw new Error(isEnglish
+      ? "Payment import is still running. You can return to this screen and check the batch status."
+      : "La importación de pagos sigue corriendo. Puede volver a esta pantalla y revisar el estado del lote.");
+  };
+
   const submit = async (apply: boolean) => {
     if (!payload) {
       notify(isEnglish ? "Select a payment report first." : "Seleccione primero un reporte de pagos.", "warning");
@@ -628,32 +673,49 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     try {
       await wait(150);
       setStep(1, apply ? 24 : 36);
-      const response = await fetchWithTimeout(
-        "/api/payment-reconciliation-import",
-        {
+      let data: PaymentImportResult;
+      if (apply) {
+        const startResponse = await apiFetch("/api/payment-reconciliation-import/start", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             ...payload,
-            apply,
+            apply: true,
             mapping: schema ? mapping : undefined,
             importBilledBy,
-            acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
+            acceptedPayerAssociations: Object.values(acceptedPayerAssociations),
+            analysisRows: result?.rows || []
           })
-        },
-        apply ? PAYMENT_IMPORT_TIMEOUT_MS : PAYMENT_ANALYSIS_TIMEOUT_MS,
-        apply
-          ? (isEnglish
-            ? "Payment import is taking too long. No confirmation was received; refresh before retrying to avoid duplicate work."
-            : "La importación de pagos está tardando demasiado. No se recibió confirmación; refresque antes de reintentar para evitar duplicados.")
-          : (isEnglish
+        });
+        const started = await startResponse.json();
+        if (!startResponse.ok) throw new Error(started.error || "Payment import batch could not be started.");
+        setStep(2, 42, isEnglish ? `Batch ${started.batchId} started` : `Lote ${started.batchId} iniciado`);
+        const completedBatch = await waitForPaymentImportBatch(started.batchId, steps);
+        data = completedBatch.result;
+      } else {
+        const response = await fetchWithTimeout(
+          "/api/payment-reconciliation-import",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...payload,
+              apply,
+              mapping: schema ? mapping : undefined,
+              importBilledBy,
+              acceptedPayerAssociations: Object.values(acceptedPayerAssociations)
+            })
+          },
+          PAYMENT_ANALYSIS_TIMEOUT_MS,
+          isEnglish
             ? "Payment analysis is taking too long. Try again with a smaller file or saved mapping template."
-            : "El análisis de pagos está tardando demasiado. Intente nuevamente con un archivo más pequeño o una plantilla guardada."),
-        processRequestRef
-      );
-      setStep(apply ? 2 : 2, apply ? 52 : 70);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Payment import failed.");
+            : "El análisis de pagos está tardando demasiado. Intente nuevamente con un archivo más pequeño o una plantilla guardada.",
+          processRequestRef
+        );
+        setStep(2, 70);
+        data = await response.json();
+        if (!response.ok) throw new Error((data as any).error || "Payment import failed.");
+      }
       setStep(apply ? 3 : 3, apply ? 76 : 92);
       setResult(data);
       if (apply) {

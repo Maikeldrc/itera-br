@@ -353,6 +353,42 @@ export interface ImportMappingTemplate {
   active: boolean;
 }
 
+export interface PaymentImportBatch {
+  batch_id: string;
+  file_name: string;
+  status: "queued" | "running" | "completed" | "completed_with_errors" | "failed";
+  requested_by: string;
+  requested_at: string;
+  started_at: string;
+  completed_at: string;
+  total_rows: number;
+  processed_rows: number;
+  imported_rows: number;
+  review_rows: number;
+  rejected_rows: number;
+  failed_rows: number;
+  total_amount: number;
+  progress: number;
+  payload_json: string;
+  summary_json: string;
+  error_message: string;
+}
+
+export interface PaymentImportBatchRow {
+  batch_id: string;
+  row_number: number;
+  row_key: string;
+  status: "pending" | "processing" | "imported" | "needs_review" | "payment_activity" | "rejected" | "failed";
+  claim_id: string;
+  cpt_code: string;
+  dos: string;
+  payment_amount: number;
+  payment_id: string;
+  row_json: string;
+  issue_json: string;
+  updated_at: string;
+}
+
 export interface FeeSchedule {
   id: string;
   cpt_code: string;
