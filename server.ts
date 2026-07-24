@@ -687,6 +687,40 @@ function isForceImportEligibleError(message: string) {
   return /requires at least 30 days between DOS dates|exceeds Max\/DOS|can be used .* per DOS/i.test(message);
 }
 
+function isNeverForceImportEligibleError(message: string) {
+  return /already exists for patient .* duplicate patient\/CPT\/DOS|already exists as paid for patient|paid duplicate service lines cannot be imported/i.test(message);
+}
+
+function canForceImportValidationErrors(errors: string[]) {
+  return errors.length > 0 &&
+    errors.every(error => isForceImportEligibleError(error)) &&
+    !errors.some(error => isNeverForceImportEligibleError(error));
+}
+
+function systemValidationRuleIsActive(settings: any[], ruleId: string) {
+  if (["PATIENT_CPT_DOS_DUPLICATE", "PAID_CPT_DOS_DUPLICATE"].includes(ruleId)) return true;
+  const raw = settings.find(setting => textValue(setting.setting_key) === "VALIDATION_SYSTEM_RULES_CONFIG")?.setting_value;
+  if (!raw) return true;
+  try {
+    const parsed = JSON.parse(String(raw));
+    return parsed?.[ruleId]?.active !== false;
+  } catch {
+    return true;
+  }
+}
+
+function applySystemValidationRuleSettings(errors: string[], settings: any[]) {
+  return errors.filter(error => {
+    if (/requires at least 30 days between DOS dates/i.test(error)) {
+      return systemValidationRuleIsActive(settings, "CPT_MIN_30_DAYS");
+    }
+    if (/exceeds Max\/DOS|can be used .* per DOS/i.test(error)) {
+      return systemValidationRuleIsActive(settings, "FEE_MAX_PER_DOS");
+    }
+    return true;
+  });
+}
+
 function markClaimAsForcedImportError(claim: Claim, validationErrors: string[], sourceRowNumber: number): Claim {
   const affectedCpts = new Set<string>();
   validationErrors.forEach(error => {
@@ -1482,12 +1516,13 @@ async function startServer() {
       // Validate
       const validationErrors = validateClaim(calculated);
       validationErrors.push(...validateUniquePatientProvider(calculated, claims));
-      validationErrors.push(...validateClaimCptRepeatLimits(calculated, await sheetsService.getFeeSchedules()));
-      validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+      const feeSchedules = await sheetsService.getFeeSchedules();
+      validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimits(calculated, feeSchedules), settings));
+      validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimitsAgainstExisting(
         calculated,
-        await sheetsService.getFeeSchedules(),
+        feeSchedules,
         claims
-      ));
+      ), settings));
       if (validationErrors.length > 0) {
         return res.status(400).json({ error: "Validation failed", details: validationErrors });
       }
@@ -1549,16 +1584,16 @@ async function startServer() {
       const feeSchedules = await sheetsService.getFeeSchedules();
       validationErrors.push(...filterTrackedImportRepeatErrors(
         calculated,
-        validateClaimCptRepeatLimits(calculated, feeSchedules)
+        applySystemValidationRuleSettings(validateClaimCptRepeatLimits(calculated, feeSchedules), settings)
       ));
       validationErrors.push(...filterTrackedImportRepeatErrors(
         calculated,
-        validateClaimCptRepeatLimitsAgainstExisting(
+        applySystemValidationRuleSettings(validateClaimCptRepeatLimitsAgainstExisting(
           calculated,
           feeSchedules,
           claims,
           req.params.id
-        )
+        ), settings)
       ));
       if (validationErrors.length > 0) {
         return res.status(400).json({ error: "Validation failed", details: validationErrors });
@@ -1647,13 +1682,14 @@ async function startServer() {
           }
 
           const validationErrors = validateClaim(recomputed);
-          validationErrors.push(...validateClaimCptRepeatLimits(recomputed, await sheetsService.getFeeSchedules()));
-          validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+          const feeSchedules = await sheetsService.getFeeSchedules();
+          validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimits(recomputed, feeSchedules), settings));
+          validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimitsAgainstExisting(
             recomputed,
-            await sheetsService.getFeeSchedules(),
+            feeSchedules,
             sheetsService.claims,
             id
-          ));
+          ), settings));
           if (validationErrors.length > 0) {
             return res.status(400).json({
               error: `Validation failed for claim ${id}`,
@@ -2290,14 +2326,14 @@ async function startServer() {
 
           const calculated = calculateClaimFinancials(claimObj, reconciliationConfig);
           const validationErrors = validateClaim(calculated);
-          validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
-          validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+          validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimits(calculated, feeSchedules), settings));
+          validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimitsAgainstExisting(
             calculated,
             feeSchedules,
             [...existingClaims, ...claimsToImport]
-          ));
+          ), settings));
           if (validationErrors.length > 0) {
-            const canForceImport = forceImportRowSet.has(sourceRowNumber) && validationErrors.every(isForceImportEligibleError);
+            const canForceImport = forceImportRowSet.has(sourceRowNumber) && canForceImportValidationErrors(validationErrors);
             if (canForceImport) {
               const forcedClaim = markClaimAsForcedImportError(calculated, validationErrors, sourceRowNumber);
               claimsToImport.push(forcedClaim);
@@ -2305,7 +2341,7 @@ async function startServer() {
             } else {
               errors.push({ row: sourceRowNumber, claimId: calculated.claim_id, errors: validationErrors, sourceRow: row });
             }
-          } else if (isPayerOutOfNetworkForProvider(payer, provider)) {
+          } else if (systemValidationRuleIsActive(settings, "PAYER_PROVIDER_OUT_OF_NETWORK") && isPayerOutOfNetworkForProvider(payer, provider)) {
             claimsToImport.push(markClaimAsOutOfNetwork(calculated, payer!, provider!));
           } else {
             claimsToImport.push(calculated);
@@ -2375,14 +2411,14 @@ async function startServer() {
         if (sheetsService.isPeriodClosed(claimPeriod(calculated))) {
           validationErrors.push(`Period ${claimPeriod(calculated)} is closed. Reopen the period before importing this claim.`);
         }
-        validationErrors.push(...validateClaimCptRepeatLimits(calculated, feeSchedules));
-        validationErrors.push(...validateClaimCptRepeatLimitsAgainstExisting(
+        validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimits(calculated, feeSchedules), settings));
+        validationErrors.push(...applySystemValidationRuleSettings(validateClaimCptRepeatLimitsAgainstExisting(
           calculated,
           feeSchedules,
           [...existingClaims, ...claimsToImport]
-        ));
+        ), settings));
         if (validationErrors.length > 0) {
-          const canForceImport = forceImportRowSet.has(sourceRowNumber) && validationErrors.every(isForceImportEligibleError);
+          const canForceImport = forceImportRowSet.has(sourceRowNumber) && canForceImportValidationErrors(validationErrors);
           if (canForceImport) {
             const forcedClaim = markClaimAsForcedImportError(calculated, validationErrors, sourceRowNumber);
             claimsToImport.push(forcedClaim);
@@ -2400,7 +2436,7 @@ async function startServer() {
             equivalentExternalCode(payer.payer_id, calculated.payer_id) ||
             equivalentExternalCode(payer.payer_name, calculated.payer_name)
           );
-          if (isPayerOutOfNetworkForProvider(claimPayer, claimProvider || calculated)) {
+          if (systemValidationRuleIsActive(settings, "PAYER_PROVIDER_OUT_OF_NETWORK") && isPayerOutOfNetworkForProvider(claimPayer, claimProvider || calculated)) {
             claimsToImport.push(markClaimAsOutOfNetwork(calculated, claimPayer || calculated, claimProvider || calculated));
           } else {
             claimsToImport.push(calculated);

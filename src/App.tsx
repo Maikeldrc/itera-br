@@ -408,6 +408,7 @@ export default function App() {
   const [customRuleScope, setCustomRuleScope] = useState("Claims Import");
   const [customRuleSeverity, setCustomRuleSeverity] = useState("Review");
   const [customRuleDescription, setCustomRuleDescription] = useState("");
+  const [editingCustomRuleId, setEditingCustomRuleId] = useState("");
   const [isSavingValidationRules, setIsSavingValidationRules] = useState(false);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [restoringBackupId, setRestoringBackupId] = useState("");
@@ -920,12 +921,12 @@ export default function App() {
       );
       return;
     }
-    const cptRepeatErrors = validateCptRepeatLimits(normalizedLines, feeSchedules, newDos);
+    const cptRepeatErrors = applyActiveSystemValidationRules(validateCptRepeatLimits(normalizedLines, feeSchedules, newDos));
     if (cptRepeatErrors.length > 0) {
       await stopWithMessage(cptRepeatErrors[0], "warning");
       return;
     }
-    const existingRepeatErrors = validateClaimCptRepeatLimitsAgainstExisting(
+    const existingRepeatErrors = applyActiveSystemValidationRules(validateClaimCptRepeatLimitsAgainstExisting(
       {
         patient_id: newPatientId.trim(),
         date_of_service_from: newDos,
@@ -934,7 +935,7 @@ export default function App() {
       feeSchedules,
       claims,
       claimBeingEdited?.claim_id
-    );
+    ));
     if (existingRepeatErrors.length > 0) {
       await stopWithMessage(existingRepeatErrors[0], "warning");
       return;
@@ -1341,13 +1342,23 @@ export default function App() {
       return [];
     }
   })();
+  const systemValidationRuleSetting = settings.find(setting => setting.setting_key === "VALIDATION_SYSTEM_RULES_CONFIG")?.setting_value || "{}";
+  const systemValidationRuleOverrides: Record<string, { active?: boolean; updated_at?: string; updated_by?: string }> = (() => {
+    try {
+      const parsed = JSON.parse(systemValidationRuleSetting);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  })();
+  const criticalSystemValidationRuleIds = new Set(["PATIENT_CPT_DOS_DUPLICATE", "PAID_CPT_DOS_DUPLICATE"]);
   const systemValidationRules = [
     {
       id: "PATIENT_CPT_DOS_DUPLICATE",
       name: isEnglish ? "Duplicate patient + CPT + DOS" : "Duplicado paciente + CPT + DOS",
       scope: isEnglish ? "Claims Import, Manual Claim Create, Claim Edit" : "Importación de Claims, creación manual, edición",
       severity: isEnglish ? "Blocking" : "Bloqueante",
-      status: isEnglish ? "Always on" : "Siempre activa",
+      editableIn: "",
       description: isEnglish
         ? "Blocks any imported or manually created service line when the same patient already has the same CPT on the same DOS in another claim."
         : "Bloquea cualquier service line importado o creado manualmente cuando el mismo paciente ya tiene el mismo CPT en el mismo DOS en otro claim."
@@ -1357,7 +1368,7 @@ export default function App() {
       name: isEnglish ? "Paid duplicate protection" : "Protección contra duplicado pagado",
       scope: isEnglish ? "Claims Import" : "Importación de Claims",
       severity: isEnglish ? "Blocking" : "Bloqueante",
-      status: isEnglish ? "Always on" : "Siempre activa",
+      editableIn: "",
       description: isEnglish
         ? "Never allows Import anyway when a matching patient/CPT/DOS line already has payment activity or Paid status."
         : "Nunca permite Import anyway cuando una línea paciente/CPT/DOS ya tiene actividad de pago o estado Paid."
@@ -1367,7 +1378,7 @@ export default function App() {
       name: isEnglish ? "30-day minimum spacing for configured CPTs" : "Separación mínima de 30 días para CPT configurados",
       scope: isEnglish ? "Claims Import, Manual Claim Create, Claim Edit" : "Importación de Claims, creación manual, edición",
       severity: isEnglish ? "Recoverable review" : "Revisión recuperable",
-      status: isEnglish ? "Active" : "Activa",
+      editableIn: "",
       description: isEnglish
         ? "CPT 99454 and 99445 require at least 30 days between DOS dates. Recoverable imports are marked as billing errors for follow-up."
         : "Los CPT 99454 y 99445 requieren al menos 30 días entre fechas DOS. Las importaciones recuperables se marcan como billing error para seguimiento."
@@ -1377,7 +1388,7 @@ export default function App() {
       name: isEnglish ? "Fee Schedule Max per DOS" : "Máximo por DOS del Fee Schedule",
       scope: isEnglish ? "Claims Import, Manual Claim Create, Claim Edit" : "Importación de Claims, creación manual, edición",
       severity: isEnglish ? "Recoverable review" : "Revisión recuperable",
-      status: isEnglish ? "Active from Fee Schedule" : "Activa desde Fee Schedule",
+      editableIn: "fee-schedules",
       description: isEnglish
         ? "Uses the Max per DOS value configured for each CPT/year in FCSO-style CPT Fee Schedules."
         : "Usa el valor Max per DOS configurado para cada CPT/año en FCSO-style CPT Fee Schedules."
@@ -1387,12 +1398,58 @@ export default function App() {
       name: isEnglish ? "Payer out-of-network by provider" : "Payer fuera de red por provider",
       scope: isEnglish ? "Claims Import" : "Importación de Claims",
       severity: isEnglish ? "Blocking claim status" : "Estado bloqueante del claim",
-      status: isEnglish ? "Active from Payer Registry" : "Activa desde Payer Registry",
+      editableIn: "payers",
       description: isEnglish
         ? "If the imported payer is marked out-of-network for the provider, the claim is imported as Blocked by Error with the reason."
         : "Si el payer importado está marcado fuera de red para el provider, el claim se importa como Blocked by Error con la causa."
     }
-  ];
+  ].map(rule => {
+    const locked = criticalSystemValidationRuleIds.has(rule.id);
+    const active = locked ? true : systemValidationRuleOverrides[rule.id]?.active !== false;
+    return {
+      ...rule,
+      locked,
+      active,
+      status: locked
+        ? (isEnglish ? "Always on" : "Siempre activa")
+        : active
+          ? (isEnglish ? "Active" : "Activa")
+          : (isEnglish ? "Inactive" : "Inactiva")
+    };
+  });
+
+  const isSystemValidationRuleActive = (ruleId: string) => {
+    if (criticalSystemValidationRuleIds.has(ruleId)) return true;
+    return systemValidationRuleOverrides[ruleId]?.active !== false;
+  };
+
+  const applyActiveSystemValidationRules = (errors: string[]) => errors.filter(error => {
+    if (/requires at least 30 days between DOS dates/i.test(error)) {
+      return isSystemValidationRuleActive("CPT_MIN_30_DAYS");
+    }
+    if (/exceeds Max\/DOS|can be used .* per DOS/i.test(error)) {
+      return isSystemValidationRuleActive("FEE_MAX_PER_DOS");
+    }
+    return true;
+  });
+
+  const saveSystemValidationRulesConfig = async (overrides: Record<string, any>) => {
+    setIsSavingValidationRules(true);
+    try {
+      const res = await apiFetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "VALIDATION_SYSTEM_RULES_CONFIG", value: JSON.stringify(overrides) })
+      });
+      if (!res.ok) throw new Error("Unable to save system validation rules.");
+      notify(isEnglish ? "System validation rules updated." : "Reglas de validación del sistema actualizadas.", "success");
+      await fetchAllData({ showInitialLoading: false });
+    } catch (err: any) {
+      notify(`${isEnglish ? "System rules error" : "Error en reglas del sistema"}: ${err.message}`, "error");
+    } finally {
+      setIsSavingValidationRules(false);
+    }
+  };
 
   const saveValidationRulesConfig = async (rules: any[]) => {
     setIsSavingValidationRules(true);
@@ -1417,24 +1474,85 @@ export default function App() {
       notify(isEnglish ? "Rule name and description are required." : "El nombre y la descripción de la regla son requeridos.", "warning");
       return;
     }
-    const nextRules = [
-      ...customValidationRules,
-      {
-        id: `CUSTOM-${Date.now()}`,
-        name: customRuleName.trim(),
-        scope: customRuleScope,
-        severity: customRuleSeverity,
-        status: "Active",
-        description: customRuleDescription.trim(),
-        created_at: new Date().toISOString(),
-        created_by: currentUser.email
-      }
-    ];
+    const rulePayload = {
+      id: editingCustomRuleId || `CUSTOM-${Date.now()}`,
+      name: customRuleName.trim(),
+      scope: customRuleScope,
+      severity: customRuleSeverity,
+      status: customValidationRules.find(rule => rule.id === editingCustomRuleId)?.status || "Active",
+      description: customRuleDescription.trim(),
+      created_at: customValidationRules.find(rule => rule.id === editingCustomRuleId)?.created_at || new Date().toISOString(),
+      created_by: customValidationRules.find(rule => rule.id === editingCustomRuleId)?.created_by || currentUser.email,
+      updated_at: new Date().toISOString(),
+      updated_by: currentUser.email
+    };
+    const nextRules = editingCustomRuleId
+      ? customValidationRules.map(rule => rule.id === editingCustomRuleId ? rulePayload : rule)
+      : [
+        ...customValidationRules,
+        {
+          ...rulePayload,
+          id: `CUSTOM-${Date.now()}`,
+          status: "Active"
+        }
+      ];
     await saveValidationRulesConfig(nextRules);
+    setEditingCustomRuleId("");
     setCustomRuleName("");
     setCustomRuleDescription("");
     setCustomRuleScope("Claims Import");
     setCustomRuleSeverity("Review");
+  };
+
+  const handleStartEditCustomValidationRule = (rule: any) => {
+    setEditingCustomRuleId(rule.id);
+    setCustomRuleName(rule.name || "");
+    setCustomRuleScope(rule.scope || "Claims Import");
+    setCustomRuleSeverity(rule.severity || "Review");
+    setCustomRuleDescription(rule.description || "");
+  };
+
+  const handleCancelEditCustomValidationRule = () => {
+    setEditingCustomRuleId("");
+    setCustomRuleName("");
+    setCustomRuleDescription("");
+    setCustomRuleScope("Claims Import");
+    setCustomRuleSeverity("Review");
+  };
+
+  const handleToggleSystemValidationRule = async (ruleId: string) => {
+    const rule = systemValidationRules.find(item => item.id === ruleId);
+    if (!rule || rule.locked) {
+      notify(
+        isEnglish
+          ? "This integrity rule is locked and cannot be disabled."
+          : "Esta regla de integridad está bloqueada y no se puede desactivar.",
+        "warning"
+      );
+      return;
+    }
+    await saveSystemValidationRulesConfig({
+      ...systemValidationRuleOverrides,
+      [ruleId]: {
+        ...(systemValidationRuleOverrides[ruleId] || {}),
+        active: !rule.active,
+        updated_at: new Date().toISOString(),
+        updated_by: currentUser.email
+      }
+    });
+  };
+
+  const handleOpenSystemRuleEditor = (rule: any) => {
+    if (rule.editableIn) {
+      setSettingsTab(rule.editableIn as "payers" | "fee-schedules");
+      return;
+    }
+    notify(
+      isEnglish
+        ? "This rule is enforced by system logic. Only its active state can be managed here when it is not locked."
+        : "Esta regla se aplica por lógica del sistema. Solo su estado activo se puede gestionar aquí cuando no está bloqueada.",
+      "info"
+    );
   };
 
   const handleToggleCustomValidationRule = async (ruleId: string) => {
@@ -1447,6 +1565,7 @@ export default function App() {
   };
 
   const handleDeleteCustomValidationRule = async (ruleId: string) => {
+    if (editingCustomRuleId === ruleId) handleCancelEditCustomValidationRule();
     await saveValidationRulesConfig(customValidationRules.filter(rule => rule.id !== ruleId));
   };
 
@@ -6576,7 +6695,7 @@ export default function App() {
                         </h5>
                       </div>
                       <div className="overflow-x-auto">
-                        <table className="min-w-[980px] w-full text-left text-xs">
+                        <table className="min-w-[1120px] w-full text-left text-xs">
                           <thead className="bg-slate-50 text-[10px] uppercase tracking-wider text-slate-500">
                             <tr>
                               <th className="px-4 py-3">{isEnglish ? "Rule" : "Regla"}</th>
@@ -6584,6 +6703,7 @@ export default function App() {
                               <th className="px-4 py-3">{isEnglish ? "Severity" : "Severidad"}</th>
                               <th className="px-4 py-3">{isEnglish ? "Status" : "Estado"}</th>
                               <th className="px-4 py-3">{isEnglish ? "Description" : "Descripción"}</th>
+                              <th className="px-4 py-3 text-right">{isEnglish ? "Actions" : "Acciones"}</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -6604,11 +6724,50 @@ export default function App() {
                                   </span>
                                 </td>
                                 <td className="px-4 py-3">
-                                  <span className="rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-bold text-emerald-700">
+                                  <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${
+                                    rule.locked
+                                      ? "bg-blue-50 text-primary-blue"
+                                      : rule.active
+                                        ? "bg-emerald-50 text-emerald-700"
+                                        : "bg-slate-100 text-slate-500"
+                                  }`}>
                                     {rule.status}
                                   </span>
                                 </td>
                                 <td className="px-4 py-3 leading-relaxed text-slate-600">{rule.description}</td>
+                                <td className="px-4 py-3">
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleToggleSystemValidationRule(rule.id)}
+                                      disabled={isSavingValidationRules || rule.locked}
+                                      className={`rounded-lg border px-2.5 py-1.5 text-[10px] font-bold disabled:cursor-not-allowed disabled:opacity-60 ${
+                                        rule.locked
+                                          ? "border-blue-100 bg-blue-50 text-primary-blue"
+                                          : rule.active
+                                            ? "border-amber-200 bg-white text-amber-700 hover:bg-amber-50"
+                                            : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"
+                                      }`}
+                                      title={rule.locked
+                                        ? (isEnglish ? "Critical duplicate-protection rules cannot be disabled." : "Las reglas críticas contra duplicados no se pueden desactivar.")
+                                        : ""}
+                                    >
+                                      {rule.locked
+                                        ? (isEnglish ? "Locked" : "Bloqueada")
+                                        : rule.active
+                                          ? (isEnglish ? "Deactivate" : "Desactivar")
+                                          : (isEnglish ? "Activate" : "Activar")}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenSystemRuleEditor(rule)}
+                                      disabled={isSavingValidationRules}
+                                      className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+                                    >
+                                      {rule.editableIn ? (isEnglish ? "Edit source" : "Editar fuente") : (isEnglish ? "Details" : "Detalles")}
+                                    </button>
+                                  </div>
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -6674,10 +6833,26 @@ export default function App() {
                         disabled={isSavingValidationRules}
                         className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-blue px-3 py-2 text-xs font-bold text-white hover:bg-secondary-blue disabled:cursor-wait disabled:opacity-60"
                       >
-                        <Plus className="h-4 w-4" />
-                        {isSavingValidationRules ? (isEnglish ? "Saving..." : "Guardando...") : (isEnglish ? "Add rule" : "Agregar regla")}
+                        {editingCustomRuleId ? <Edit2 className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                        {isSavingValidationRules
+                          ? (isEnglish ? "Saving..." : "Guardando...")
+                          : editingCustomRuleId
+                            ? (isEnglish ? "Update rule" : "Actualizar regla")
+                            : (isEnglish ? "Add rule" : "Agregar regla")}
                       </button>
                     </div>
+                    {editingCustomRuleId && (
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleCancelEditCustomValidationRule}
+                          disabled={isSavingValidationRules}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-slate-50 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          {isEnglish ? "Cancel edit" : "Cancelar edición"}
+                        </button>
+                      </div>
+                    )}
 
                     <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
                       <table className="min-w-[920px] w-full text-left text-xs">
@@ -6726,6 +6901,14 @@ export default function App() {
                               <td className="px-4 py-3 leading-relaxed text-slate-600">{rule.description}</td>
                               <td className="px-4 py-3">
                                 <div className="flex justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditCustomValidationRule(rule)}
+                                    disabled={isSavingValidationRules}
+                                    className="rounded-lg border border-blue-200 bg-white px-2.5 py-1.5 text-[10px] font-bold text-primary-blue hover:bg-blue-50 disabled:cursor-wait disabled:opacity-60"
+                                  >
+                                    {isEnglish ? "Edit" : "Editar"}
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => handleToggleCustomValidationRule(rule.id)}

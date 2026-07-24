@@ -642,6 +642,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     (importResult?.errors || [])
       .filter(err => {
         const messages = Array.isArray(err.errors) ? err.errors : [String(err.errors || "")].filter(Boolean);
+        const hasNeverForceImportError = messages.some(message =>
+          /already exists for patient .* duplicate patient\/CPT\/DOS|already exists as paid for patient|paid duplicate service lines cannot be imported/i.test(String(message))
+        );
+        if (hasNeverForceImportError) return false;
         return messages.length > 0 && messages.every(message =>
           /requires at least 30 days between DOS dates|exceeds Max\/DOS|can be used .* per DOS/i.test(String(message))
         );
