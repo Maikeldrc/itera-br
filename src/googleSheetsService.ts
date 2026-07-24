@@ -23,6 +23,14 @@ function hasMeaningfulAuditLog(log: Partial<AuditLog>) {
   ].some(value => String(value ?? "").trim() !== "");
 }
 
+const GOOGLE_SHEETS_SAFE_CELL_LIMIT = 49000;
+
+function safeSheetCell(value: unknown): string {
+  const text = String(value ?? "");
+  if (text.length <= GOOGLE_SHEETS_SAFE_CELL_LIMIT) return text;
+  return `${text.slice(0, GOOGLE_SHEETS_SAFE_CELL_LIMIT)}... [truncated ${text.length - GOOGLE_SHEETS_SAFE_CELL_LIMIT} chars to fit Google Sheets cell limit]`;
+}
+
 /**
  * Service to manage read/write operations to Google Sheets.
  * Falls back to an in-memory database with seed data only for local/demo mode.
@@ -2289,6 +2297,6 @@ function mapObjectToRow(tabName: string, obj: any): any[] {
   return headers.map(h => {
     const val = obj[h];
     if (val === undefined || val === null) return "";
-    return String(val);
+    return safeSheetCell(val);
   });
 }

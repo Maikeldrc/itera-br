@@ -815,8 +815,61 @@ function filterTrackedImportRepeatErrors(claim: Partial<Claim>, errors: string[]
   return errors.filter(error => !hasTrackedImportRepeatError(claim, error));
 }
 
+function compactObjectForStoredJson(value: unknown, maxValueLength = 500) {
+  if (!value || typeof value !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, raw]) => {
+      const text = textValue(raw);
+      return [key, text.length > maxValueLength ? `${text.slice(0, maxValueLength)}...` : text];
+    })
+  );
+}
+
+function compactPaymentImportResultRow(row: any) {
+  const keepKeys = [
+    "rowNumber",
+    "status",
+    "claimId",
+    "patientId",
+    "patientName",
+    "patientAcctNo",
+    "cptCode",
+    "serviceDate",
+    "paymentDate",
+    "reportPayerName",
+    "payerName",
+    "payerId",
+    "claimNo",
+    "externalPaymentId",
+    "paymentId",
+    "checkNo",
+    "payment",
+    "payerPayment",
+    "patientPayment",
+    "allowedAmount",
+    "contractualAdjustment",
+    "coinsurance",
+    "deductible",
+    "copay",
+    "balance",
+    "responsibleParty",
+    "matchedBy",
+    "matchedClaimIds",
+    "billingOwner"
+  ];
+  const compact: Record<string, unknown> = {};
+  for (const key of keepKeys) {
+    if (row[key] !== undefined && row[key] !== null) compact[key] = row[key];
+  }
+  compact.errors = Array.isArray(row.errors) ? row.errors.map((item: unknown) => textValue(item).slice(0, 1000)) : [];
+  compact.warnings = Array.isArray(row.warnings) ? row.warnings.map((item: unknown) => textValue(item).slice(0, 1000)) : [];
+  compact.sourceRow = compactObjectForStoredJson(row.sourceRow, 500);
+  return compact;
+}
+
 function paymentImportBatchRowFromResult(batchId: string, row: any): PaymentImportBatchRow {
   const issues = [...(Array.isArray(row.errors) ? row.errors : []), ...(Array.isArray(row.warnings) ? row.warnings : [])];
+  const compactRow = compactPaymentImportResultRow(row);
   return {
     batch_id: batchId,
     row_number: Number(row.rowNumber || 0),
@@ -835,7 +888,7 @@ function paymentImportBatchRowFromResult(batchId: string, row: any): PaymentImpo
     dos: textValue(row.serviceDate),
     payment_amount: Number(row.payment || 0),
     payment_id: textValue(row.externalPaymentId || row.paymentId),
-    row_json: JSON.stringify(row),
+    row_json: JSON.stringify(compactRow),
     issue_json: JSON.stringify(issues),
     updated_at: new Date().toISOString()
   };
@@ -3194,7 +3247,7 @@ async function startServer() {
           row: row.rowNumber,
           claimId: row.claimId || row.patientId || "",
           errors: row.errors || [],
-          sourceRow: row.sourceRow || {},
+          sourceRow: compactObjectForStoredJson(row.sourceRow, 500),
           normalized: {
             patientAcctNo: row.patientAcctNo || "",
             patientName: row.patientName || "",
