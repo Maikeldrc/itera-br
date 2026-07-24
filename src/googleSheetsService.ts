@@ -283,6 +283,12 @@ export class GoogleSheetsService {
     }
   }
 
+  public async reloadFromGoogleSheets() {
+    if (!this.isConfigured) return;
+    await this.bootstrapSheetsIfEmpty();
+    await this.loadAllFromSheets();
+  }
+
   /**
    * Create missing tabs. In production, write headers only; seed data requires USE_SEED_DATA=true.
    */
@@ -458,21 +464,26 @@ export class GoogleSheetsService {
   public async updateClaimsWithAuditBulk(updatedClaims: Claim[], operatorEmail: string): Promise<Claim[]> {
     if (updatedClaims.length === 0) return [];
     const now = new Date().toISOString();
+    if (this.isConfigured) {
+      await this.reloadFromGoogleSheets();
+    }
     const savedClaims: Claim[] = [];
     const auditRecords: AuditLog[] = [];
+    const nextClaims = [...this.claims];
 
     for (const updatedClaim of updatedClaims) {
-      const index = this.claims.findIndex(c => c.claim_id === updatedClaim.claim_id);
+      const index = nextClaims.findIndex(c => c.claim_id === updatedClaim.claim_id);
       if (index === -1) {
         throw new Error(`Claim with ID ${updatedClaim.claim_id} not found.`);
       }
-      const previous = this.claims[index];
+      const previous = nextClaims[index];
       const savedClaim = {
+        ...previous,
         ...updatedClaim,
         updated_at: now,
         updated_by: operatorEmail
       };
-      this.claims[index] = savedClaim;
+      nextClaims[index] = savedClaim;
       savedClaims.push(savedClaim);
 
       const diffs = getClaimDifferences(previous, savedClaim);
@@ -491,14 +502,15 @@ export class GoogleSheetsService {
       });
     }
 
-    this.auditLogs.unshift(...auditRecords);
     if (this.isConfigured) {
-      await this.overwriteTabStrict("Claims", CLAIMS_HEADERS, this.claims.map(c => mapObjectToRow("Claims", c)));
+      await this.overwriteTabStrict("Claims", CLAIMS_HEADERS, nextClaims.map(c => mapObjectToRow("Claims", c)));
       if (auditRecords.length > 0) {
         await this.appendRowsStrict("Audit_Log", auditRecords.map(record => mapObjectToRow("Audit_Log", record)));
       }
     }
 
+    this.claims = nextClaims;
+    this.auditLogs.unshift(...auditRecords);
     return savedClaims;
   }
 
@@ -835,6 +847,9 @@ export class GoogleSheetsService {
 
   public async createPaymentsBulk(newPayments: Payment[]): Promise<Payment[]> {
     if (newPayments.length === 0) return [];
+    if (this.isConfigured) {
+      await this.reloadFromGoogleSheets();
+    }
     const existingIds = new Set(this.payments.map(payment => String(payment.payment_id || "").toLowerCase()).filter(Boolean));
     const batchIds = new Set<string>();
     const now = new Date().toISOString();
@@ -855,10 +870,10 @@ export class GoogleSheetsService {
     }
 
     if (paymentsToAdd.length === 0) return [];
-    this.payments.unshift(...paymentsToAdd);
     if (this.isConfigured) {
       await this.appendRowsStrict("Payments", paymentsToAdd.map(payment => mapObjectToRow("Payments", payment)));
     }
+    this.payments.unshift(...paymentsToAdd);
     return paymentsToAdd;
   }
 

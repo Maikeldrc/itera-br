@@ -352,6 +352,29 @@ function existingPaymentActivityMessage(claim: Partial<Claim>, line: any, cptCod
   return `Matched claim ${claim.claim_id || "unknown"} CPT ${cptCode || textValue(line?.cpt) || "unknown"}${lineDos ? ` DOS ${formatDisplayDos(lineDos)}` : ""} already has payment activity (${details.join(", ")}). It was not overwritten.`;
 }
 
+function paymentImportGeneratedPaymentId(batchId: unknown, rowNumber: unknown) {
+  const normalizedBatchId = textValue(batchId);
+  const normalizedRowNumber = Number(rowNumber || 0);
+  return normalizedBatchId && normalizedRowNumber > 0 ? `PMT-IMP-${normalizedBatchId}-${normalizedRowNumber}` : "";
+}
+
+function paymentImportRowVerified(row: any, claims: Claim[], payments: Payment[]) {
+  const claim = claims.find(item => item.claim_id === row.claimId && !item.deleted_flag);
+  if (!claim) return false;
+  const paymentId = textValue(row._effectivePaymentId || row.externalPaymentId || row.paymentId);
+  const paymentExists = Boolean(paymentId && payments.some(payment =>
+    textValue(payment.payment_id).toLowerCase() === paymentId.toLowerCase() &&
+    payment.claim_id === claim.claim_id
+  ));
+  const serviceLines = parseServiceLines(claim);
+  const matchingLine = serviceLines.find(line =>
+    textValue(line?.cpt) === textValue(row.cptCode) &&
+    serviceLineMatchesDos(line, claim, row.serviceDate) &&
+    linePaymentTotal(line) > 0
+  );
+  return Boolean(paymentExists && matchingLine);
+}
+
 function serviceLineDos(line: any, claim: Partial<Claim>) {
   return textValue(line?.dos || claim.date_of_service_from || claim.date_of_service_to).slice(0, 10);
 }
@@ -882,7 +905,9 @@ function paymentImportBatchRowFromResult(batchId: string, row: any): PaymentImpo
           ? "payment_activity"
           : row.status === "rejected"
             ? "rejected"
-            : "pending",
+            : row.status === "failed"
+              ? "failed"
+              : "pending",
     claim_id: textValue(row.claimId),
     cpt_code: textValue(row.cptCode),
     dos: textValue(row.serviceDate),
@@ -2973,7 +2998,7 @@ async function startServer() {
         const unpaidLineIndex = sameCptLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
         const lineIndex = unpaidLineIndex ?? sameCptLineIndexes[0] ?? -1;
         const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
-        const batchGeneratedPaymentId = batchId ? `PMT-IMP-${textValue(batchId)}-${row.rowNumber}` : "";
+        const batchGeneratedPaymentId = paymentImportGeneratedPaymentId(batchId, row.rowNumber);
         const lookupPaymentId = row.externalPaymentId || batchGeneratedPaymentId;
         const existingPayment = lookupPaymentId
           ? existingPaymentById.get(lookupPaymentId.toLowerCase()) || null
@@ -2983,7 +3008,8 @@ async function startServer() {
           batchId &&
           batchGeneratedPaymentId &&
           existingPayment &&
-          textValue(existingPayment.payment_id).toLowerCase() === batchGeneratedPaymentId.toLowerCase()
+          textValue(existingPayment.payment_id).toLowerCase() === batchGeneratedPaymentId.toLowerCase() &&
+          linePaymentTotal(targetLine) > 0
         );
 
         if (errors.length === 0 && candidates.length === 0) {
@@ -3215,7 +3241,8 @@ async function startServer() {
           claimsPendingSave.push(updated);
 
           for (const row of claimRows) {
-            const effectivePaymentId = row.externalPaymentId || (batchId ? `PMT-IMP-${textValue(batchId)}-${row.rowNumber}` : "");
+            const effectivePaymentId = row.externalPaymentId || paymentImportGeneratedPaymentId(batchId, row.rowNumber);
+            row._effectivePaymentId = effectivePaymentId;
             const existingPayment = effectivePaymentId
               ? existingPaymentById.get(effectivePaymentId.toLowerCase()) || null
               : null;
@@ -3238,18 +3265,30 @@ async function startServer() {
               paymentsPendingSave.push(payment);
               existingPaymentById.set(textValue(payment.payment_id).toLowerCase(), payment);
             }
-            row.status = "imported";
           }
         }
 
-        if (claimsPendingSave.length > 0) {
-          const savedClaims = await sheetsService.updateClaimsWithAuditBulk(claimsPendingSave, operatorEmail);
-          updatedClaims.push(...savedClaims);
-        }
         if (paymentsPendingSave.length > 0) {
           const savedPayments = await sheetsService.createPaymentsBulk(paymentsPendingSave);
           importedPayments.push(...savedPayments);
         }
+        if (claimsPendingSave.length > 0) {
+          const savedClaims = await sheetsService.updateClaimsWithAuditBulk(claimsPendingSave, operatorEmail);
+          updatedClaims.push(...savedClaims);
+        }
+        await sheetsService.reloadFromGoogleSheets();
+        const verifiedClaims = await sheetsService.getClaims();
+        const verifiedPayments = await sheetsService.getPayments();
+        readyRows.forEach(row => {
+          const verified = paymentImportRowVerified(row, verifiedClaims, verifiedPayments);
+          if (verified) {
+            row.status = "imported";
+            row.errors = [];
+          } else if (row.status === "ready") {
+            row.status = "failed";
+            row.errors = ["Payment import row was not fully confirmed in Google Sheets. Retry this batch to continue from this row without duplicating completed payments."];
+          }
+        });
       }
 
       const resultRows = analyzedRows;
@@ -3384,6 +3423,7 @@ async function startServer() {
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), handlePaymentReconciliationImport);
 
   const processPaymentImportBatchChunk = async (batchId: string, payload: any, appUser: User | undefined, rowNumbers: number[]) => {
+    await sheetsService.reloadFromGoogleSheets();
     const fakeReq = {
       body: { ...payload, apply: true, batchId, retryRows: rowNumbers, suppressBatchFailure: true },
       appUser
@@ -3449,6 +3489,7 @@ async function startServer() {
 
   app.post("/api/payment-reconciliation-import/batches/:batchId/process", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
+      await sheetsService.reloadFromGoogleSheets();
       const batch = await sheetsService.getPaymentImportBatch(req.params.batchId);
       if (!batch) return res.status(404).json({ error: "Payment import batch not found." });
       let rows = await sheetsService.getPaymentImportBatchRows(batch.batch_id);
@@ -3477,7 +3518,7 @@ async function startServer() {
         return res.json({ success: true, done: true, batch: updated, result: paymentImportResultFromBatch(updated, rows) });
       }
 
-      const chunkSize = Math.max(1, Math.min(100, Number(req.body?.chunkSize || 50)));
+      const chunkSize = Math.max(1, Math.min(200, Number(req.body?.chunkSize || 100)));
       const chunkRows = pendingRows.slice(0, chunkSize);
       await sheetsService.updatePaymentImportBatch(batch.batch_id, {
         status: "running",
@@ -3488,6 +3529,7 @@ async function startServer() {
       const payload = JSON.parse(batch.payload_json || "{}");
       await processPaymentImportBatchChunk(batch.batch_id, payload, req.appUser, chunkRows);
 
+      await sheetsService.reloadFromGoogleSheets();
       rows = await sheetsService.getPaymentImportBatchRows(batch.batch_id);
       const remainingPending = rows.filter(row => row.status === "pending" || row.status === "failed").length;
       const summary = summarizePaymentImportBatchRows(rows);

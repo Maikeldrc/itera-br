@@ -606,17 +606,17 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         const response = await apiFetch(`/api/payment-reconciliation-import/batches/${encodeURIComponent(batchId)}/process`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chunkSize: 20 })
+          body: JSON.stringify({ chunkSize: 100 })
         });
         data = await response.json();
         if (!response.ok) throw new Error((data as any).error || "Unable to process payment import batch.");
         transientFailures = 0;
       } catch (err: any) {
         transientFailures++;
-        if (transientFailures > 8) {
+        if (transientFailures > 20) {
           throw new Error(err.message || "Unable to process payment import batch.");
         }
-        const waitMs = Math.min(30000, 3000 * transientFailures);
+        const waitMs = Math.min(60000, 5000 * transientFailures);
         setProgress(current => current ? {
           ...current,
           label: isEnglish
