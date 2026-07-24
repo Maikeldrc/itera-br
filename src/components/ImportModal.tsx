@@ -18,6 +18,7 @@ interface ImportModalProps {
 
 type ImportBillingOwner = "Unknown" | "ITERA" | "Provider";
 type ClaimImportMode = "ready" | "force" | "all_eligible";
+type ClaimImportDecision = "ready" | "all_eligible" | "problems";
 type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: ImportBillingOwner; apply?: boolean; importMode?: ClaimImportMode };
 
 type ImportSummary = {
@@ -77,6 +78,8 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
   const [importedReadyRows, setImportedReadyRows] = useState(0);
   const [importedProblemRows, setImportedProblemRows] = useState(0);
   const [importedForcedRows, setImportedForcedRows] = useState<number[]>([]);
+  const [selectedImportDecision, setSelectedImportDecision] = useState<ClaimImportDecision>("ready");
+  const [pendingImportConfirmation, setPendingImportConfirmation] = useState<ClaimImportDecision | "">("");
   const [rollbackProgress, setRollbackProgress] = useState<{ percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const correctedFileInputRef = useRef<HTMLInputElement>(null);
@@ -108,6 +111,8 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
     setImportedReadyRows(0);
     setImportedProblemRows(0);
     setImportedForcedRows([]);
+    setSelectedImportDecision("ready");
+    setPendingImportConfirmation("");
     setRollbackProgress(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -130,6 +135,8 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
     setImportedReadyRows(0);
     setImportedProblemRows(0);
     setImportedForcedRows([]);
+    setSelectedImportDecision("ready");
+    setPendingImportConfirmation("");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -438,6 +445,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const handleImportClick = async () => {
+    if (isAnalysisResult) {
+      await executeSelectedImportDecision();
+      return;
+    }
     await runImport(filePayload || parsedRows, { apply: false });
   };
 
@@ -632,6 +643,21 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const importedForcedRowSet = new Set(importedForcedRows);
   const remainingForcedImportEligibleRows = forcedImportEligibleRows.filter(row => !importedForcedRowSet.has(row));
   const remainingReadyToImportCount = Math.max(0, readyToImportCount - importedReadyRows);
+  const selectedImportCount = selectedImportDecision === "ready"
+    ? remainingReadyToImportCount
+    : selectedImportDecision === "all_eligible"
+      ? remainingReadyToImportCount + remainingForcedImportEligibleRows.length
+      : remainingForcedImportEligibleRows.length;
+  const selectedImportHasProblemRows = selectedImportDecision === "problems"
+    || (selectedImportDecision === "all_eligible" && remainingForcedImportEligibleRows.length > 0);
+  const selectedImportDecisionLabel = selectedImportDecision === "ready"
+    ? (isEnglish ? `Import ${selectedImportCount} ready row(s)` : `Importar ${selectedImportCount} fila(s) lista(s)`)
+    : selectedImportDecision === "all_eligible"
+      ? (isEnglish ? `Import ${selectedImportCount} eligible row(s)` : `Importar ${selectedImportCount} fila(s) elegibles`)
+      : (isEnglish ? `Import ${selectedImportCount} problem row(s)` : `Importar ${selectedImportCount} fila(s) con problemas`);
+  const selectedImportConfirmationLabel = selectedImportDecision === "all_eligible"
+    ? (isEnglish ? `Confirm import ${selectedImportCount} eligible row(s)` : `Confirmar importación de ${selectedImportCount} fila(s) elegibles`)
+    : (isEnglish ? `Confirm import ${selectedImportCount} problem row(s)` : `Confirmar importación de ${selectedImportCount} fila(s) con problemas`);
 
   const escapeCsvValue = (value: unknown) => {
     const text = String(value ?? "");
@@ -755,6 +781,29 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       setIsForceImporting(false);
       setForceImportingRow(null);
     }
+  };
+
+  const chooseImportDecision = (decision: ClaimImportDecision) => {
+    setSelectedImportDecision(decision);
+    setPendingImportConfirmation("");
+  };
+
+  const executeSelectedImportDecision = async () => {
+    if (!isAnalysisResult || selectedImportCount <= 0 || isProcessing || isRollingBack || isForceImporting) return;
+    if (selectedImportHasProblemRows && pendingImportConfirmation !== selectedImportDecision) {
+      setPendingImportConfirmation(selectedImportDecision);
+      return;
+    }
+    setPendingImportConfirmation("");
+    if (selectedImportDecision === "ready") {
+      await handleImportReadyRowsOnly();
+      return;
+    }
+    if (selectedImportDecision === "all_eligible") {
+      await handleImportAllEligibleRows();
+      return;
+    }
+    await handleForceImportRejectedRows();
   };
 
   return (
@@ -1018,41 +1067,60 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 <div className="grid w-full gap-2 md:grid-cols-3 lg:max-w-4xl">
                   <button
                     type="button"
-                    onClick={handleImportReadyRowsOnly}
+                    onClick={() => chooseImportDecision("ready")}
                     disabled={isProcessing || isRollingBack || remainingReadyToImportCount <= 0}
-                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-left text-xs font-bold text-emerald-800 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-55"
+                    className={`rounded-xl border px-3 py-3 text-left text-xs font-bold shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                      selectedImportDecision === "ready"
+                        ? "border-emerald-400 bg-emerald-50 text-emerald-900 ring-2 ring-emerald-100"
+                        : "border-emerald-200 bg-white text-emerald-800 hover:bg-emerald-50"
+                    }`}
                   >
                     <span className="block text-[10px] uppercase tracking-wide text-emerald-600">{isEnglish ? "Clean rows" : "Filas limpias"}</span>
                     {remainingReadyToImportCount > 0
-                      ? (isEnglish ? `Import ${remainingReadyToImportCount} ready row(s)` : `Importar ${remainingReadyToImportCount} fila(s) lista(s)`)
+                      ? (isEnglish ? `${remainingReadyToImportCount} ready row(s)` : `${remainingReadyToImportCount} fila(s) lista(s)`)
                       : (isEnglish ? `${importedReadyRows} ready row(s) imported` : `${importedReadyRows} fila(s) lista(s) importadas`)}
                   </button>
                   <button
                     type="button"
-                    onClick={handleImportAllEligibleRows}
+                    onClick={() => chooseImportDecision("all_eligible")}
                     disabled={isProcessing || isRollingBack || (remainingReadyToImportCount <= 0 && remainingForcedImportEligibleRows.length <= 0)}
-                    className="rounded-xl border border-primary-blue bg-blue-50 px-3 py-3 text-left text-xs font-bold text-dark-blue shadow-sm hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-55"
+                    className={`rounded-xl border px-3 py-3 text-left text-xs font-bold shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                      selectedImportDecision === "all_eligible"
+                        ? "border-primary-blue bg-blue-50 text-dark-blue ring-2 ring-blue-100"
+                        : "border-blue-200 bg-white text-dark-blue hover:bg-blue-50"
+                    }`}
                   >
                     <span className="block text-[10px] uppercase tracking-wide text-primary-blue">{isEnglish ? "All eligible" : "Todas elegibles"}</span>
                     {remainingReadyToImportCount > 0 || remainingForcedImportEligibleRows.length > 0
                       ? (isEnglish
-                        ? `Import ${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} eligible row(s)`
-                        : `Importar ${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} fila(s) elegibles`)
+                        ? `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} eligible row(s)`
+                        : `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} fila(s) elegibles`)
                       : (isEnglish ? "All eligible rows imported" : "Todas las filas elegibles importadas")}
                   </button>
                   <button
                     type="button"
-                    onClick={() => handleForceImportRejectedRows()}
+                    onClick={() => chooseImportDecision("problems")}
                     disabled={isProcessing || isRollingBack || isForceImporting || forceImportingRow !== null || remainingForcedImportEligibleRows.length <= 0}
-                    className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-left text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-55"
+                    className={`rounded-xl border px-3 py-3 text-left text-xs font-bold shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-55 ${
+                      selectedImportDecision === "problems"
+                        ? "border-amber-400 bg-amber-50 text-amber-900 ring-2 ring-amber-100"
+                        : "border-amber-300 bg-white text-amber-800 hover:bg-amber-50"
+                    }`}
                   >
                     <span className="block text-[10px] uppercase tracking-wide text-amber-700">{isEnglish ? "Problem rows" : "Filas con problemas"}</span>
                     {remainingForcedImportEligibleRows.length > 0
-                      ? (isEnglish ? `Import ${remainingForcedImportEligibleRows.length} problem row(s) only` : `Importar solo ${remainingForcedImportEligibleRows.length} fila(s) con problemas`)
+                      ? (isEnglish ? `${remainingForcedImportEligibleRows.length} problem row(s) only` : `Solo ${remainingForcedImportEligibleRows.length} fila(s) con problemas`)
                       : (isEnglish ? `${importedProblemRows} problem row(s) imported` : `${importedProblemRows} fila(s) con problemas importadas`)}
                   </button>
                 </div>
               </div>
+              {pendingImportConfirmation === selectedImportDecision && selectedImportHasProblemRows && (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+                  {isEnglish
+                    ? "This selection includes problem rows. Click the bottom import button again to confirm that those service lines should be imported and marked for review."
+                    : "Esta selección incluye filas con problemas. Haga clic nuevamente en el botón inferior para confirmar que esos service lines deben importarse y marcarse para revisión."}
+                </div>
+              )}
             </div>
           )}
 
@@ -1149,15 +1217,18 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   </button>
                   {remainingForcedImportEligibleRows.length > 0 && (
                     <button
-                      onClick={() => handleForceImportRejectedRows()}
+                      onClick={() => {
+                        chooseImportDecision("problems");
+                        importResultRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      }}
                       disabled={isProcessing || isForceImporting || forceImportingRow !== null}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
                       title={isEnglish
                         ? "Import only rows with recoverable CPT/DOS rule conflicts and mark them for user review."
                         : "Importa solo filas con conflictos recuperables de reglas CPT/DOS y las marca para revisión."}
                     >
-                      {isForceImporting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                      {isEnglish ? "Import problem rows" : "Importar filas con problemas"}
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {isEnglish ? "Select problem rows" : "Seleccionar filas con problemas"}
                     </button>
                   )}
                 </div>
@@ -1357,12 +1428,14 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           </button>
           <button
             onClick={handleImportClick}
-            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized || isAnalysisResult}
+            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized || (isAnalysisResult && selectedImportCount <= 0)}
             className="bg-primary-blue hover:bg-secondary-blue disabled:bg-slate-300 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md"
             title={importAlreadyFinalized
               ? (isEnglish ? "This import batch is finalized. Close this window to start a new import." : "Este lote de importación ya finalizó. Cierre esta ventana para iniciar una nueva importación.")
               : isAnalysisResult
-                ? (isEnglish ? "Use the import decision actions above." : "Use las acciones de decisión de importación de arriba.")
+                ? (selectedImportCount <= 0
+                  ? (isEnglish ? "No rows remain for the selected import decision." : "No quedan filas para la decisión de importación seleccionada.")
+                  : (isEnglish ? "Import the selected decision." : "Importar la decisión seleccionada."))
               : undefined}
           >
             {isProcessing
@@ -1372,7 +1445,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 : importCompletedSuccessfully
                 ? (isEnglish ? "Import Completed" : "Importación completada")
                 : isAnalysisResult
-                ? (isEnglish ? "Use import decision above" : "Use la decisión de arriba")
+                ? (selectedImportCount <= 0
+                  ? (isEnglish ? "Selected import completed" : "Importación seleccionada completada")
+                  : pendingImportConfirmation === selectedImportDecision && selectedImportHasProblemRows
+                    ? selectedImportConfirmationLabel
+                    : selectedImportDecisionLabel)
                 : (filePayload ? (isEnglish ? "Analyze file" : "Analizar archivo") : `${isEnglish ? "Analyze" : "Analizar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>
         </div>
