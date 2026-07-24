@@ -2112,6 +2112,9 @@ async function startServer() {
       const operatorEmail = getOperatorEmail(req);
       const { rows, fileBase64, retryRows, fileName, forceImportRows, importBilledBy } = req.body;
       const shouldApplyImport = req.body?.apply !== false;
+      const importMode = ["ready", "force", "all_eligible"].includes(textValue(req.body?.importMode))
+        ? textValue(req.body?.importMode)
+        : "ready";
       const batchBilledBy: "ITERA" | "Provider" | "Unknown" =
         importBilledBy === "Provider" ? "Provider" : importBilledBy === "ITERA" ? "ITERA" : "Unknown";
       const retryRowSet = Array.isArray(retryRows)
@@ -2410,18 +2413,19 @@ async function startServer() {
         importedClaims = await sheetsService.createClaimsBulk(claimsToImport, operatorEmail);
       }
 
-      const summary = summarizeImport(importRows, shouldApplyImport ? importedClaims : claimsToImport, errors);
+      const responseErrors = shouldApplyImport && importMode === "ready" ? [] : errors;
+      const summary = summarizeImport(importRows, shouldApplyImport ? importedClaims : claimsToImport, responseErrors);
       (summary as any).forcedImportedRows = forcedImportClaims.length;
       (summary as any).readyRows = claimsToImport.length;
       (summary as any).analysisOnly = !shouldApplyImport;
       if (shouldApplyImport) {
         await sheetsService.createJob({
           job_type: retryRowSet ? "Claims corrected rows import" : "Claims import",
-          status: errors.length > 0 ? "failed" : "completed",
+          status: responseErrors.length > 0 ? "failed" : "completed",
           requested_by: operatorEmail,
           progress: 100,
           summary_json: JSON.stringify(summary),
-          error_message: errors.length > 0 ? `${errors.length} rejected row(s)` : ""
+          error_message: responseErrors.length > 0 ? `${responseErrors.length} rejected row(s)` : ""
         });
         await sheetsService.createImportHistory({
           import_type: retryRowSet ? "Claims corrected rows" : "Claims",
@@ -2429,28 +2433,28 @@ async function startServer() {
           requested_by: operatorEmail,
           total_rows: Number(summary.totalRowsRead || importRows.length || 0),
           imported_rows: importedClaims.length,
-          rejected_rows: errors.length,
+          rejected_rows: responseErrors.length,
           review_rows: 0,
           total_amount: Number(summary.totalBilledChargeImported || 0),
           summary_json: JSON.stringify(summary),
-          status: errors.length > 0 ? "Completed with errors" : "Completed"
+          status: responseErrors.length > 0 ? "Completed with errors" : "Completed"
         });
         await sheetsService.addUserActivityLog({
           user_email: operatorEmail,
           action: retryRowSet ? "Import corrected claim rows" : "Import claims",
           entity_type: "Import",
           entity_id: textValue(fileName),
-          metadata_json: JSON.stringify({ importedCount: importedClaims.length, errorCount: errors.length, forcedImportedCount: forcedImportClaims.length })
+          metadata_json: JSON.stringify({ importedCount: importedClaims.length, errorCount: responseErrors.length, forcedImportedCount: forcedImportClaims.length, importMode })
         });
       }
 
       res.json({
-        success: errors.length === 0 && summary.allRowsAccounted,
+        success: responseErrors.length === 0 && (shouldApplyImport || summary.allRowsAccounted),
         analysisOnly: !shouldApplyImport,
         readyCount: claimsToImport.length,
         importedCount: shouldApplyImport ? importedClaims.length : 0,
-        errorCount: errors.length,
-        errors: errors,
+        errorCount: responseErrors.length,
+        errors: responseErrors,
         importedClaimIds: shouldApplyImport ? importedClaims.map(claim => claim.claim_id) : [],
         forcedImportedCount: shouldApplyImport ? forcedImportClaims.length : 0,
         rollbackAvailable: shouldApplyImport && importedClaims.length > 0,

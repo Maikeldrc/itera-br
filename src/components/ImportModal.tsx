@@ -17,7 +17,8 @@ interface ImportModalProps {
 }
 
 type ImportBillingOwner = "Unknown" | "ITERA" | "Provider";
-type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: ImportBillingOwner; apply?: boolean };
+type ClaimImportMode = "ready" | "force" | "all_eligible";
+type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: ImportBillingOwner; apply?: boolean; importMode?: ClaimImportMode };
 
 type ImportSummary = {
   totalRowsRead: number;
@@ -73,6 +74,9 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
   const [isRollingBack, setIsRollingBack] = useState(false);
   const [isForceImporting, setIsForceImporting] = useState(false);
   const [forceImportingRow, setForceImportingRow] = useState<number | null>(null);
+  const [importedReadyRows, setImportedReadyRows] = useState(0);
+  const [importedProblemRows, setImportedProblemRows] = useState(0);
+  const [importedForcedRows, setImportedForcedRows] = useState<number[]>([]);
   const [rollbackProgress, setRollbackProgress] = useState<{ percent: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const correctedFileInputRef = useRef<HTMLInputElement>(null);
@@ -101,6 +105,9 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
     setIsRollingBack(false);
     setIsForceImporting(false);
     setForceImportingRow(null);
+    setImportedReadyRows(0);
+    setImportedProblemRows(0);
+    setImportedForcedRows([]);
     setRollbackProgress(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -120,6 +127,9 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
     setImportProgress(null);
     setIsRollbackConfirmOpen(false);
     setRollbackProgress(null);
+    setImportedReadyRows(0);
+    setImportedProblemRows(0);
+    setImportedForcedRows([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -363,22 +373,34 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     return errors.filter(error => !targetRows.has(Number(error?.row)));
   };
 
-  const mergeForcedImportResult = (previous: ImportResult | null, forced: ImportResult, forcedRows: number[]): ImportResult => {
-    if (!previous) return forced;
+  const mergeImportActionResult = (
+    previous: ImportResult | null,
+    next: ImportResult,
+    options: { forcedRows?: number[]; readyRowsImported?: number } = {}
+  ): ImportResult => {
+    const forcedRows = options.forcedRows || [];
+    if (!previous) return next;
     const remainingPreviousErrors = removeErrorsForRows(previous.errors || [], forcedRows);
-    const forcedErrors = forced.errors || [];
+    const forcedErrors = next.errors || [];
     const mergedErrors = [...remainingPreviousErrors, ...forcedErrors];
-    const importedClaimIds = Array.from(new Set([...(previous.importedClaimIds || []), ...(forced.importedClaimIds || [])]));
-    const importedCount = Number(previous.importedCount || 0) + Number(forced.importedCount || 0);
-    const errorCount = mergedErrors.length || Math.max(0, Number(previous.errorCount || 0) - Number(forced.importedCount || 0)) + Number(forced.errorCount || 0);
+    const importedClaimIds = Array.from(new Set([...(previous.importedClaimIds || []), ...(next.importedClaimIds || [])]));
+    const importedCount = Number(previous.importedCount || 0) + Number(next.importedCount || 0);
+    const errorCount = mergedErrors.length;
     const previousSummary = previous.summary || buildLocalImportSummary(previous);
-    const forcedSummary = forced.summary || buildLocalImportSummary(forced);
-    const totalRowsRead = previousSummary.totalRowsRead || forcedSummary.totalRowsRead;
-    const importedRows = Number(previousSummary.importedRows || previous.importedCount || 0) + Number(forcedSummary.importedRows || forced.importedCount || 0);
+    const nextSummary = next.summary || buildLocalImportSummary(next);
+    const previousWasAnalysis = Boolean(previous.analysisOnly || previousSummary.analysisOnly);
+    const previousHasPhysicalImports = Number(previous.importedCount || 0) > 0;
+    const previousImportedRows = previousHasPhysicalImports ? Number(previousSummary.importedRows || previous.importedCount || 0) : 0;
+    const previousForcedRows = previousHasPhysicalImports ? Number(previousSummary.forcedImportedRows || previous.forcedImportedCount || 0) : 0;
+    const previousCptCounts = previousHasPhysicalImports ? previousSummary.cptCodeCounts : {};
+    const previousImportedCharge = previousHasPhysicalImports ? Number(previousSummary.totalBilledChargeImported || 0) : 0;
+    const previousImportedUnits = previousHasPhysicalImports ? Number(previousSummary.totalCptUnitsImported || 0) : 0;
+    const totalRowsRead = previousSummary.totalRowsRead || nextSummary.totalRowsRead;
+    const importedRows = previousImportedRows + Number(nextSummary.importedRows || next.importedCount || 0);
     const rejectedRows = errorCount;
     const accountedRows = importedRows + rejectedRows;
-    const allRowsAccounted = totalRowsRead > 0 ? accountedRows === totalRowsRead : forcedSummary.allRowsAccounted;
-    const forcedImportedRows = Number(previousSummary.forcedImportedRows || previous.forcedImportedCount || 0) + Number(forcedSummary.forcedImportedRows || forced.forcedImportedCount || forced.importedCount || 0);
+    const allRowsAccounted = totalRowsRead > 0 ? accountedRows === totalRowsRead : nextSummary.allRowsAccounted;
+    const forcedImportedRows = previousForcedRows + Number(nextSummary.forcedImportedRows || next.forcedImportedCount || 0);
     const mergedSummary: ImportSummary = {
       ...previousSummary,
       totalRowsRead,
@@ -387,22 +409,24 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       accountedRows,
       allRowsAccounted,
       uniquePatientsImported: allRowsAccounted && rejectedRows === 0
-        ? Math.max(previousSummary.uniquePatientsInFile, previousSummary.uniquePatientsImported, forcedSummary.uniquePatientsImported)
-        : Math.max(previousSummary.uniquePatientsImported, forcedSummary.uniquePatientsImported),
-      uniqueProvidersImported: Math.max(previousSummary.uniqueProvidersImported, forcedSummary.uniqueProvidersImported),
-      uniquePayersImported: Math.max(previousSummary.uniquePayersImported, forcedSummary.uniquePayersImported),
-      uniqueCptCodesImported: Math.max(previousSummary.uniqueCptCodesImported, forcedSummary.uniqueCptCodesImported),
-      totalCptUnitsImported: Number(previousSummary.totalCptUnitsImported || 0) + Number(forcedSummary.totalCptUnitsImported || 0),
-      cptCodeCounts: addCptCounts(previousSummary.cptCodeCounts, forcedSummary.cptCodeCounts),
-      totalBilledChargeImported: Number((Number(previousSummary.totalBilledChargeImported || 0) + Number(forcedSummary.totalBilledChargeImported || 0)).toFixed(2)),
+        ? Math.max(previousSummary.uniquePatientsInFile, previousSummary.uniquePatientsImported, nextSummary.uniquePatientsImported)
+        : Math.max(previousSummary.uniquePatientsImported, nextSummary.uniquePatientsImported),
+      uniqueProvidersImported: Math.max(previousSummary.uniqueProvidersImported, nextSummary.uniqueProvidersImported),
+      uniquePayersImported: Math.max(previousSummary.uniquePayersImported, nextSummary.uniquePayersImported),
+      uniqueCptCodesImported: Math.max(previousSummary.uniqueCptCodesImported, nextSummary.uniqueCptCodesImported),
+      totalCptUnitsImported: previousImportedUnits + Number(nextSummary.totalCptUnitsImported || 0),
+      cptCodeCounts: addCptCounts(previousCptCounts, nextSummary.cptCodeCounts),
+      totalBilledChargeImported: Number((previousImportedCharge + Number(nextSummary.totalBilledChargeImported || 0)).toFixed(2)),
       topRejectionReasons: rejectedRows > 0 ? previousSummary.topRejectionReasons : [],
-      forcedImportedRows
+      forcedImportedRows,
+      analysisOnly: previousWasAnalysis
     };
 
     return {
       ...previous,
-      ...forced,
-      success: forced.success && errorCount === 0,
+      ...next,
+      success: errorCount === 0,
+      analysisOnly: previousWasAnalysis,
       importedCount,
       errorCount,
       errors: mergedErrors,
@@ -414,21 +438,56 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const handleImportClick = async () => {
-    if (importResult?.analysisOnly) {
-      await runImport(filePayload || parsedRows, { apply: true });
-      return;
-    }
     await runImport(filePayload || parsedRows, { apply: false });
   };
 
-  const runImport = async (payload: ImportPayload, options?: { mergeForcedRows?: number[]; apply?: boolean }) => {
+  const handleImportReadyRowsOnly = async () => {
+    if (readyToImportCount <= 0 || importedReadyRows > 0) return;
+    const result = await runImport(filePayload || parsedRows, {
+      apply: true,
+      importMode: "ready",
+      readyRowsImported: readyToImportCount
+    });
+    setImportedReadyRows(current => current + Number(result?.importedCount || 0));
+  };
+
+  const handleImportAllEligibleRows = async () => {
+    const remainingReadyRows = Math.max(0, readyToImportCount - importedReadyRows);
+    const remainingForcedRows = forcedImportEligibleRows.filter(row => !importedForcedRowSet.has(row));
+    if (remainingReadyRows <= 0 && remainingForcedRows.length <= 0) return;
+    let readyImported = 0;
+    let forcedImported = 0;
+    if (remainingReadyRows > 0) {
+      const readyResult = await runImport(filePayload || parsedRows, {
+        apply: true,
+        importMode: "ready",
+        readyRowsImported: remainingReadyRows
+      });
+      readyImported = Number(readyResult?.importedCount || 0);
+    }
+    if (remainingForcedRows.length > 0) {
+      const forcedResult = await runImport(filePayload
+        ? { ...filePayload, retryRows: remainingForcedRows, forceImportRows: remainingForcedRows }
+        : { rows: parsedRows, retryRows: remainingForcedRows, forceImportRows: remainingForcedRows }, {
+        apply: true,
+        importMode: "force",
+        mergeForcedRows: remainingForcedRows
+      });
+      forcedImported = Number(forcedResult?.forcedImportedCount || forcedResult?.importedCount || 0);
+    }
+    setImportedReadyRows(current => current + readyImported);
+    setImportedProblemRows(current => current + forcedImported);
+    setImportedForcedRows(current => Array.from(new Set([...current, ...remainingForcedRows])));
+  };
+
+  const runImport = async (payload: ImportPayload, options?: { mergeForcedRows?: number[]; readyRowsImported?: number; apply?: boolean; importMode?: ClaimImportMode }) => {
     setIsProcessing(true);
     startImportProgress();
     try {
       const shouldApply = options?.apply !== false;
       const importPayload = Array.isArray(payload)
-        ? { rows: payload, fileName: file?.name || "", importBilledBy, apply: shouldApply }
-        : { ...payload, importBilledBy, apply: shouldApply };
+        ? { rows: payload, fileName: file?.name || "", importBilledBy, apply: shouldApply, importMode: options?.importMode || "ready" }
+        : { ...payload, importBilledBy, apply: shouldApply, importMode: options?.importMode || "ready" };
       const res = await onImport(importPayload);
       clearProgressTimer();
       setImportProgress({
@@ -438,13 +497,17 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           : (isEnglish ? "Analysis completed. No data has been written." : "Análisis completado. No se ha escrito ningún dato.")
       });
       const normalizedResult = normalizeImportResult(res);
-      if (options?.mergeForcedRows?.length) {
-        setImportResult(previous => mergeForcedImportResult(previous, normalizedResult, options.mergeForcedRows || []));
+      if (shouldApply && (options?.mergeForcedRows?.length || options?.readyRowsImported)) {
+        setImportResult(previous => mergeImportActionResult(previous, normalizedResult, {
+          forcedRows: options.mergeForcedRows || [],
+          readyRowsImported: options.readyRowsImported || 0
+        }));
       } else {
-        setImportResult(normalizedResult);
+      setImportResult(normalizedResult);
       }
       setIsRollbackConfirmOpen(false);
       setRollbackProgress(null);
+      return normalizedResult;
     } catch (err) {
       console.error(err);
       clearProgressTimer();
@@ -461,6 +524,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         summary: buildLocalImportSummary({ importedCount: 0, errorCount: 1 }, message)
       });
       notify(isEnglish ? "File import failed." : "Error al importar el archivo.", "error");
+      return null;
     } finally {
       setIsProcessing(false);
     }
@@ -565,6 +629,9 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       .filter((row): row is number => Number.isFinite(row) && row > 0)
   ));
   const forcedImportEligibleRowSet = new Set(forcedImportEligibleRows);
+  const importedForcedRowSet = new Set(importedForcedRows);
+  const remainingForcedImportEligibleRows = forcedImportEligibleRows.filter(row => !importedForcedRowSet.has(row));
+  const remainingReadyToImportCount = Math.max(0, readyToImportCount - importedReadyRows);
 
   const escapeCsvValue = (value: unknown) => {
     const text = String(value ?? "");
@@ -663,22 +730,25 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const handleForceImportRejectedRows = async (rowNumber?: number) => {
-    const targetRows = rowNumber ? [rowNumber] : forcedImportEligibleRows;
-    if (!filePayload || targetRows.length === 0 || isProcessing || isForceImporting || forceImportingRow !== null) return;
+    const targetRows = rowNumber ? [rowNumber] : remainingForcedImportEligibleRows;
+    if (targetRows.length === 0 || isProcessing || isForceImporting || forceImportingRow !== null) return;
     setIsForceImporting(true);
     setForceImportingRow(rowNumber || null);
     try {
-      await runImport({
-        ...filePayload,
-        retryRows: targetRows,
-        forceImportRows: targetRows
-      }, { mergeForcedRows: targetRows });
-      notify(
-        isEnglish
-          ? `${targetRows.length} rejected row(s) were imported and marked for service-line review.`
-          : `${targetRows.length} fila(s) rechazada(s) fueron importadas y marcadas para revisión de service line.`,
-        "success"
-      );
+      const result = await runImport(filePayload
+        ? { ...filePayload, retryRows: targetRows, forceImportRows: targetRows }
+        : { rows: parsedRows, retryRows: targetRows, forceImportRows: targetRows }, { mergeForcedRows: targetRows, importMode: "force" });
+      const importedCount = Number(result?.forcedImportedCount || result?.importedCount || 0);
+      if (importedCount > 0) {
+        setImportedForcedRows(current => Array.from(new Set([...current, ...targetRows])));
+        setImportedProblemRows(current => current + importedCount);
+        notify(
+          isEnglish
+            ? `${importedCount} rejected row(s) were imported and marked for service-line review.`
+            : `${importedCount} fila(s) rechazada(s) fueron importadas y marcadas para revisión de service line.`,
+          "success"
+        );
+      }
     } catch {
       // runImport already surfaces the failure state.
     } finally {
@@ -932,6 +1002,60 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             </div>
           )}
 
+          {isAnalysisResult && displayedSummary && (
+            <div className="rounded-xl border border-blue-100 bg-white p-4 shadow-sm">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900">
+                    {isEnglish ? "Import decision" : "Decisión de importación"}
+                  </h4>
+                  <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
+                    {isEnglish
+                      ? "Choose exactly which group to write to Google Sheets. The preflight analysis remains visible so the full file context is not lost after a partial import."
+                      : "Seleccione exactamente qué grupo escribir en Google Sheets. El análisis previo se mantiene visible para no perder el contexto completo del archivo después de una importación parcial."}
+                  </p>
+                </div>
+                <div className="grid w-full gap-2 md:grid-cols-3 lg:max-w-4xl">
+                  <button
+                    type="button"
+                    onClick={handleImportReadyRowsOnly}
+                    disabled={isProcessing || isRollingBack || remainingReadyToImportCount <= 0}
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3 text-left text-xs font-bold text-emerald-800 shadow-sm hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <span className="block text-[10px] uppercase tracking-wide text-emerald-600">{isEnglish ? "Clean rows" : "Filas limpias"}</span>
+                    {remainingReadyToImportCount > 0
+                      ? (isEnglish ? `Import ${remainingReadyToImportCount} ready row(s)` : `Importar ${remainingReadyToImportCount} fila(s) lista(s)`)
+                      : (isEnglish ? `${importedReadyRows} ready row(s) imported` : `${importedReadyRows} fila(s) lista(s) importadas`)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImportAllEligibleRows}
+                    disabled={isProcessing || isRollingBack || (remainingReadyToImportCount <= 0 && remainingForcedImportEligibleRows.length <= 0)}
+                    className="rounded-xl border border-primary-blue bg-blue-50 px-3 py-3 text-left text-xs font-bold text-dark-blue shadow-sm hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <span className="block text-[10px] uppercase tracking-wide text-primary-blue">{isEnglish ? "All eligible" : "Todas elegibles"}</span>
+                    {remainingReadyToImportCount > 0 || remainingForcedImportEligibleRows.length > 0
+                      ? (isEnglish
+                        ? `Import ${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} eligible row(s)`
+                        : `Importar ${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} fila(s) elegibles`)
+                      : (isEnglish ? "All eligible rows imported" : "Todas las filas elegibles importadas")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleForceImportRejectedRows()}
+                    disabled={isProcessing || isRollingBack || isForceImporting || forceImportingRow !== null || remainingForcedImportEligibleRows.length <= 0}
+                    className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-3 text-left text-xs font-bold text-amber-800 shadow-sm hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-55"
+                  >
+                    <span className="block text-[10px] uppercase tracking-wide text-amber-700">{isEnglish ? "Problem rows" : "Filas con problemas"}</span>
+                    {remainingForcedImportEligibleRows.length > 0
+                      ? (isEnglish ? `Import ${remainingForcedImportEligibleRows.length} problem row(s) only` : `Importar solo ${remainingForcedImportEligibleRows.length} fila(s) con problemas`)
+                      : (isEnglish ? `${importedProblemRows} problem row(s) imported` : `${importedProblemRows} fila(s) con problemas importadas`)}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {rollbackAvailable && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1023,7 +1147,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     <RefreshCw className="w-3.5 h-3.5" />
                     {isEnglish ? "Upload corrected file" : "Cargar archivo corregido"}
                   </button>
-                  {filePayload && forcedImportEligibleRows.length > 0 && (
+                  {remainingForcedImportEligibleRows.length > 0 && (
                     <button
                       onClick={() => handleForceImportRejectedRows()}
                       disabled={isProcessing || isForceImporting || forceImportingRow !== null}
@@ -1033,16 +1157,16 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                         : "Importa solo filas con conflictos recuperables de reglas CPT/DOS y las marca para revisión."}
                     >
                       {isForceImporting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                      {isEnglish ? "Import anyway" : "Importar de todos modos"}
+                      {isEnglish ? "Import problem rows" : "Importar filas con problemas"}
                     </button>
                   )}
                 </div>
               </div>
-              {filePayload && forcedImportEligibleRows.length > 0 && (
+              {forcedImportEligibleRows.length > 0 && (
                 <div className="border-b border-amber-100 bg-amber-50 px-4 py-2 text-[11px] font-semibold text-amber-800">
                   {isEnglish
-                    ? `${forcedImportEligibleRows.length} rejected row(s) can be imported anyway. The claim and affected service line will be marked as an error so users must resolve it in Claims Worklist.`
-                    : `${forcedImportEligibleRows.length} fila(s) rechazada(s) se pueden importar de todos modos. El claim y el service line afectado quedarán marcados como error para que el usuario lo resuelva en Claims Worklist.`}
+                    ? `${remainingForcedImportEligibleRows.length} of ${forcedImportEligibleRows.length} rejected row(s) remain eligible to import anyway. Imported problem rows are marked as errors so users must resolve them in Claims Worklist.`
+                    : `${remainingForcedImportEligibleRows.length} de ${forcedImportEligibleRows.length} fila(s) rechazada(s) siguen elegibles para importar de todos modos. Las filas problemáticas importadas quedan marcadas como error para resolverlas en Claims Worklist.`}
                 </div>
               )}
               <div className="max-h-72 overflow-auto">
@@ -1059,7 +1183,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   <tbody className="divide-y divide-slate-100">
                     {importErrorRows.map(item => {
                       const rowNumber = Number(item.row);
-                      const canForceRow = filePayload && forcedImportEligibleRowSet.has(rowNumber);
+                      const canForceRow = forcedImportEligibleRowSet.has(rowNumber);
+                      const rowAlreadyForced = importedForcedRowSet.has(rowNumber);
                       const isThisRowImporting = forceImportingRow === rowNumber;
                       return (
                         <tr key={item.key} className="hover:bg-slate-50/80">
@@ -1072,11 +1197,13 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                               <button
                                 type="button"
                                 onClick={() => handleForceImportRejectedRows(rowNumber)}
-                                disabled={isProcessing || isForceImporting || forceImportingRow !== null}
+                                disabled={rowAlreadyForced || isProcessing || isForceImporting || forceImportingRow !== null}
                                 className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[10px] font-bold text-amber-800 hover:bg-amber-100 disabled:cursor-wait disabled:opacity-60"
                               >
                                 {isThisRowImporting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <AlertTriangle className="h-3.5 w-3.5" />}
-                                {isEnglish ? "Import anyway" : "Importar de todos modos"}
+                                {rowAlreadyForced
+                                  ? (isEnglish ? "Imported" : "Importada")
+                                  : (isEnglish ? "Import anyway" : "Importar de todos modos")}
                               </button>
                             ) : (
                               <span className="text-[10px] font-semibold text-slate-300">-</span>
@@ -1106,6 +1233,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   [isEnglish ? "Rows read" : "Filas leídas", displayedSummary.totalRowsRead],
                   [isAnalysisResult ? (isEnglish ? "Ready" : "Listas") : (isEnglish ? "Imported" : "Importadas"), isAnalysisResult ? readyToImportCount : displayedSummary.importedRows],
                   [isAnalysisResult ? (isEnglish ? "Import-anyway eligible" : "Elegibles para importar de todos modos") : (isEnglish ? "Imported anyway" : "Importadas de todos modos"), isAnalysisResult ? forcedImportEligibleRows.length : (displayedSummary.forcedImportedRows || 0)],
+                  ...(isAnalysisResult && (importedReadyRows > 0 || importedProblemRows > 0) ? [
+                    [isEnglish ? "Ready imported" : "Listas importadas", importedReadyRows],
+                    [isEnglish ? "Problem imported" : "Con problemas importadas", importedProblemRows]
+                  ] : []),
                   [isEnglish ? "Rejected" : "Rechazadas", displayedSummary.rejectedRows],
                   [isEnglish ? "Unique patients" : "Pacientes únicos", displayedSummary.uniquePatientsImported || displayedSummary.uniquePatientsInFile],
                   [isEnglish ? "Providers" : "Proveedores", displayedSummary.uniqueProvidersImported],
@@ -1226,10 +1357,12 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           </button>
           <button
             onClick={handleImportClick}
-            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized || (isAnalysisResult && readyToImportCount <= 0)}
+            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized || isAnalysisResult}
             className="bg-primary-blue hover:bg-secondary-blue disabled:bg-slate-300 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md"
             title={importAlreadyFinalized
               ? (isEnglish ? "This import batch is finalized. Close this window to start a new import." : "Este lote de importación ya finalizó. Cierre esta ventana para iniciar una nueva importación.")
+              : isAnalysisResult
+                ? (isEnglish ? "Use the import decision actions above." : "Use las acciones de decisión de importación de arriba.")
               : undefined}
           >
             {isProcessing
@@ -1239,7 +1372,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 : importCompletedSuccessfully
                 ? (isEnglish ? "Import Completed" : "Importación completada")
                 : isAnalysisResult
-                ? (isEnglish ? `Import ${readyToImportCount} ready row(s)` : `Importar ${readyToImportCount} fila(s) lista(s)`)
+                ? (isEnglish ? "Use import decision above" : "Use la decisión de arriba")
                 : (filePayload ? (isEnglish ? "Analyze file" : "Analizar archivo") : `${isEnglish ? "Analyze" : "Analizar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>
         </div>

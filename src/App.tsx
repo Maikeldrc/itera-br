@@ -1250,7 +1250,7 @@ export default function App() {
   };
 
   // Import claims CSV handler
-  const handleImportCSV = async (payload: any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; apply?: boolean }) => {
+  const handleImportCSV = async (payload: any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: "Unknown" | "ITERA" | "Provider"; importMode?: "ready" | "force" | "all_eligible"; apply?: boolean }) => {
     const res = await apiFetch("/api/import-csv", {
       method: "POST",
       headers: {
