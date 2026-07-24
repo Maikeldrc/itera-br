@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, FileSpreadsheet, RefreshCw, Save, SlidersHorizontal, Upload, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, FileDown, FileSpreadsheet, RefreshCw, Save, SlidersHorizontal, Upload, XCircle } from "lucide-react";
+import * as XLSX from "xlsx";
 import { apiFetch } from "../apiClient";
 import { Payer } from "../types";
 import { useFeedback } from "./FeedbackProvider";
@@ -993,6 +994,47 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       : String(aValue || "").localeCompare(String(bValue || ""), undefined, { numeric: true, sensitivity: "base" });
     return resultSort.direction === "asc" ? result : -result;
   });
+  const exportPaymentImportRowsToExcel = () => {
+    if (sortedResultRows.length === 0) {
+      notify(
+        isEnglish ? "There are no payment import rows to export." : "No hay filas de importación de pagos para exportar.",
+        "warning"
+      );
+      return;
+    }
+    const statusLabel = (status: PaymentImportRow["status"]) => STATUS_TEXT[status]?.(isEnglish) || status;
+    const worksheetRows = sortedResultRows.map(row => ({
+      Row: row.rowNumber,
+      Status: statusLabel(row.status),
+      Claim: row.claimId || "",
+      "Patient ID": row.patientId || "",
+      Patient: row.patientName || "",
+      CPT: row.cptCode || "",
+      DOS: formatDosDate(row.serviceDate),
+      "Payment Date": formatDosDate(row.paymentDate),
+      "Claim Payer": row.claimPayerName || "",
+      "Report Payer": row.reportPayerName || row.payerName || "",
+      "Displayed Payer": row.payerName || "",
+      "Payer Mismatch": row.payerMismatch ? "Yes" : "No",
+      "Payer Association Accepted": row.payerAssociationAccepted ? "Yes" : "No",
+      "Suggested Payer ID": row.suggestedPayerId || "",
+      "Suggested Payer": row.suggestedPayerName || "",
+      Payment: Number(row.payment || 0),
+      Errors: row.errors.join("; "),
+      Warnings: row.warnings.join("; ")
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(worksheetRows);
+    worksheet["!cols"] = [
+      { wch: 8 }, { wch: 18 }, { wch: 28 }, { wch: 16 }, { wch: 24 }, { wch: 10 }, { wch: 12 }, { wch: 14 },
+      { wch: 28 }, { wch: 28 }, { wch: 28 }, { wch: 16 }, { wch: 24 }, { wch: 18 }, { wch: 28 }, { wch: 12 },
+      { wch: 60 }, { wch: 60 }
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Payment Import");
+    const statusSuffix = resultStatusFilter === "all" ? "all" : decodeMultiFilter(resultStatusFilter).join("-");
+    const safeFileName = (fileName || "payment-import").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "_").slice(0, 80);
+    XLSX.writeFile(workbook, `ITERA_Payment_Import_${safeFileName}_${statusSuffix}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
   const sortableResultHeader = (label: React.ReactNode, field: string, className = "px-3 py-3") => (
     <th
       className={`${className} cursor-pointer select-none hover:bg-slate-100`}
@@ -1486,8 +1528,20 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                         : "Esta es una validación previa. Todavía no se ha escrito información de claims ni pagos.")}
                   </p>
                 </div>
-                <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-600">
-                  {isEnglish ? "Showing" : "Mostrando"} {filteredResultRows.length} {isEnglish ? "of" : "de"} {resultRows.length}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-600">
+                    {isEnglish ? "Showing" : "Mostrando"} {filteredResultRows.length} {isEnglish ? "of" : "de"} {resultRows.length}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={exportPaymentImportRowsToExcel}
+                    disabled={sortedResultRows.length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-white px-3 py-2 text-[11px] font-bold text-emerald-700 shadow-sm hover:bg-emerald-50 disabled:opacity-50"
+                    title={isEnglish ? "Export the current filtered and sorted table to Excel." : "Exportar la tabla filtrada y ordenada actual a Excel."}
+                  >
+                    <FileDown className="h-3.5 w-3.5" />
+                    {isEnglish ? "Export Excel" : "Exportar Excel"}
+                  </button>
                 </div>
               </div>
               <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(260px,1.3fr)_180px_220px_auto]">

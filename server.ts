@@ -3058,34 +3058,34 @@ async function startServer() {
         rejectedRowDetails
       };
 
-      const importHistory = await sheetsService.createImportHistory({
-        import_type: apply ? "Payment Import applied" : "Payment Import analysis",
-        file_name: textValue(fileName),
-        requested_by: operatorEmail,
-        total_rows: summary.totalRowsRead,
-        imported_rows: summary.importedRows,
-        rejected_rows: summary.rejectedRows,
-        review_rows: summary.needsReviewRows + summary.paymentActivityRows,
-        total_amount: summary.totalPaymentInFile,
-        summary_json: JSON.stringify(summary),
-        status: apply ? "Applied" : "Analyzed"
-      });
-      await sheetsService.createJob({
-        job_type: apply ? "Payment Import" : "Payment Import analysis",
-        status: summary.rejectedRows > 0 ? "failed" : "completed",
-        requested_by: operatorEmail,
-        progress: 100,
-        summary_json: JSON.stringify(summary),
-        error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
-      });
       await sheetsService.addUserActivityLog({
         user_email: operatorEmail,
         action: apply ? "Apply payment import" : "Analyze payment import",
         entity_type: "Import",
-        entity_id: importHistory.import_id,
+        entity_id: textValue(fileName) || "Payment Import analysis",
         metadata_json: JSON.stringify({ fileName: textValue(fileName), summary })
       });
       if (apply) {
+        const importHistory = await sheetsService.createImportHistory({
+          import_type: "Payment Import applied",
+          file_name: textValue(fileName),
+          requested_by: operatorEmail,
+          total_rows: summary.totalRowsRead,
+          imported_rows: summary.importedRows,
+          rejected_rows: summary.rejectedRows,
+          review_rows: summary.needsReviewRows + summary.paymentActivityRows,
+          total_amount: summary.totalPaymentInFile,
+          summary_json: JSON.stringify(summary),
+          status: "Applied"
+        });
+        await sheetsService.createJob({
+          job_type: "Payment Import",
+          status: summary.rejectedRows > 0 ? "failed" : "completed",
+          requested_by: operatorEmail,
+          progress: 100,
+          summary_json: JSON.stringify(summary),
+          error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
+        });
         const reviewCandidates = resultRows.filter(row => row.status === "needs_review" || row.status === "payment_activity" || row.status === "rejected");
         for (const row of reviewCandidates.slice(0, 100)) {
           await sheetsService.createReviewTask({
@@ -3099,6 +3099,13 @@ async function startServer() {
             due_date: ""
           });
         }
+        await sheetsService.addUserActivityLog({
+          user_email: operatorEmail,
+          action: "Record payment import exceptions",
+          entity_type: "Import",
+          entity_id: importHistory.import_id,
+          metadata_json: JSON.stringify({ fileName: textValue(fileName), reviewTasksCreated: Math.min(reviewCandidates.length, 100) })
+        });
       }
 
       res.json({
@@ -3107,7 +3114,7 @@ async function startServer() {
         importedCount: resultRows.filter(row => row.status === "imported").length,
         updatedClaims: updatedClaims.length,
         summary,
-        rows: resultRows.slice(0, 500)
+        rows: resultRows
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Payment reconciliation import failed." });
