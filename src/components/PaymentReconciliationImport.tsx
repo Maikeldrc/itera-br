@@ -600,7 +600,11 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
   const waitForPaymentImportBatch = async (batchId: string, steps: string[]) => {
     const maxAttempts = 360;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const response = await apiFetch(`/api/payment-reconciliation-import/batches/${encodeURIComponent(batchId)}`);
+      const response = await apiFetch(`/api/payment-reconciliation-import/batches/${encodeURIComponent(batchId)}/process`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chunkSize: 50 })
+      });
       const data: PaymentImportBatchStatus = await response.json();
       if (!response.ok) throw new Error((data as any).error || "Unable to load payment import batch.");
       const batch = data.batch;

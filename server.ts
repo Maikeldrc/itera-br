@@ -900,6 +900,29 @@ function paymentImportResultFromBatch(batch: any, rows: PaymentImportBatchRow[])
   };
 }
 
+function summarizePaymentImportBatchRows(rows: PaymentImportBatchRow[]) {
+  const parsedRows = rows.map(row => {
+    try {
+      return JSON.parse(row.row_json || "{}");
+    } catch {
+      return {};
+    }
+  });
+  return {
+    totalRowsRead: rows.length,
+    readyToImport: rows.filter(row => row.status === "pending" || row.status === "imported").length,
+    importedRows: rows.filter(row => row.status === "imported").length,
+    needsReviewRows: rows.filter(row => row.status === "needs_review").length,
+    paymentActivityRows: rows.filter(row => row.status === "payment_activity").length,
+    rejectedRows: rows.filter(row => row.status === "rejected" || row.status === "failed").length,
+    matchedClaims: new Set(rows.map(row => row.claim_id).filter(Boolean)).size,
+    matchedCptCodes: new Set(rows.map(row => row.cpt_code).filter(Boolean)).size,
+    totalPaymentInFile: Number(rows.reduce((sum, row) => sum + Number(row.payment_amount || 0), 0).toFixed(2)),
+    totalPaymentImported: Number(rows.filter(row => row.status === "imported").reduce((sum, row) => sum + Number(row.payment_amount || 0), 0).toFixed(2)),
+    updatedClaims: new Set(parsedRows.map((row: any) => row.claimId).filter(Boolean)).size
+  };
+}
+
 function parseAllowedOrigins() {
   const configured = (process.env.ALLOWED_ORIGIN || process.env.ALLOWED_ORIGINS || "")
     .split(",")
@@ -3197,14 +3220,16 @@ async function startServer() {
         rejectedRowDetails
       };
 
-      await sheetsService.addUserActivityLog({
-        user_email: operatorEmail,
-        action: apply ? "Apply payment import" : "Analyze payment import",
-        entity_type: "Import",
-        entity_id: textValue(fileName) || "Payment Import analysis",
-        metadata_json: JSON.stringify({ fileName: textValue(fileName), summary })
-      });
-      if (apply) {
+      if (!batchId) {
+        await sheetsService.addUserActivityLog({
+          user_email: operatorEmail,
+          action: apply ? "Apply payment import" : "Analyze payment import",
+          entity_type: "Import",
+          entity_id: textValue(fileName) || "Payment Import analysis",
+          metadata_json: JSON.stringify({ fileName: textValue(fileName), summary })
+        });
+      }
+      if (apply && !batchId) {
         const importHistory = await sheetsService.createImportHistory({
           import_type: "Payment Import applied",
           file_name: textValue(fileName),
@@ -3248,20 +3273,24 @@ async function startServer() {
       }
 
       if (apply && batchId) {
-        await sheetsService.replacePaymentImportBatchRows(
-          textValue(batchId),
-          resultRows.map(row => paymentImportBatchRowFromResult(textValue(batchId), row))
-        );
+        const batchRows = resultRows.map(row => paymentImportBatchRowFromResult(textValue(batchId), row));
+        if (retryRowSet.size > 0) {
+          await sheetsService.upsertPaymentImportBatchRows(batchRows);
+        } else {
+          await sheetsService.replacePaymentImportBatchRows(textValue(batchId), batchRows);
+        }
         await sheetsService.updatePaymentImportBatch(textValue(batchId), {
-          status: summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0 ? "completed_with_errors" : "completed",
+          status: retryRowSet.size > 0
+            ? "running"
+            : (summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0 ? "completed_with_errors" : "completed"),
           completed_at: new Date().toISOString(),
-          processed_rows: resultRows.length,
-          imported_rows: summary.importedRows,
-          review_rows: summary.needsReviewRows + summary.paymentActivityRows,
-          rejected_rows: summary.rejectedRows,
+          processed_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status !== "pending").length) : resultRows.length,
+          imported_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status === "imported").length) : summary.importedRows,
+          review_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status === "needs_review" || row.status === "payment_activity").length) : summary.needsReviewRows + summary.paymentActivityRows,
+          rejected_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status === "rejected").length) : summary.rejectedRows,
           failed_rows: 0,
           total_amount: summary.totalPaymentInFile,
-          progress: 100,
+          progress: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatch(textValue(batchId)))?.progress || 5) : 100,
           summary_json: JSON.stringify({ ...summary, updatedClaims: updatedClaims.length }),
           error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
         });
@@ -3291,15 +3320,9 @@ async function startServer() {
 
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), handlePaymentReconciliationImport);
 
-  const runPaymentImportBatch = async (batchId: string, payload: any, appUser: User | undefined) => {
-    await sheetsService.updatePaymentImportBatch(batchId, {
-      status: "running",
-      started_at: new Date().toISOString(),
-      progress: 5,
-      error_message: ""
-    });
+  const processPaymentImportBatchChunk = async (batchId: string, payload: any, appUser: User | undefined, rowNumbers: number[]) => {
     const fakeReq = {
-      body: { ...payload, apply: true, batchId },
+      body: { ...payload, apply: true, batchId, retryRows: rowNumbers },
       appUser
     } as AppRequest;
     const fakeRes: any = {
@@ -3324,6 +3347,7 @@ async function startServer() {
         progress: 100,
         error_message: err.message || "Payment import batch failed."
       });
+      throw err;
     }
   };
 
@@ -3360,14 +3384,136 @@ async function startServer() {
                   : "pending"
         })));
       }
-      setTimeout(() => {
-        runPaymentImportBatch(batch.batch_id, req.body, req.appUser).catch(err => {
-          console.error("Payment import batch failed:", err);
-        });
-      }, 0);
       res.status(202).json({ success: true, batchId: batch.batch_id, status: batch.status });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Unable to start payment import batch." });
+    }
+  });
+
+  app.post("/api/payment-reconciliation-import/batches/:batchId/process", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const batch = await sheetsService.getPaymentImportBatch(req.params.batchId);
+      if (!batch) return res.status(404).json({ error: "Payment import batch not found." });
+      let rows = await sheetsService.getPaymentImportBatchRows(batch.batch_id);
+      const pendingRows = rows
+        .filter(row => row.status === "pending" || row.status === "failed")
+        .map(row => Number(row.row_number))
+        .filter(row => Number.isFinite(row) && row > 0);
+      if (pendingRows.length === 0) {
+        const summary = summarizePaymentImportBatchRows(rows);
+        const finalStatus = summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0
+          ? "completed_with_errors"
+          : "completed";
+        const updated = await sheetsService.updatePaymentImportBatch(batch.batch_id, {
+          status: finalStatus,
+          completed_at: batch.completed_at || new Date().toISOString(),
+          processed_rows: rows.length,
+          imported_rows: summary.importedRows,
+          review_rows: summary.needsReviewRows + summary.paymentActivityRows,
+          rejected_rows: summary.rejectedRows,
+          failed_rows: rows.filter(row => row.status === "failed").length,
+          total_amount: summary.totalPaymentInFile,
+          progress: 100,
+          summary_json: JSON.stringify(summary),
+          error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} row(s) need review or were rejected.` : ""
+        });
+        return res.json({ success: true, done: true, batch: updated, result: paymentImportResultFromBatch(updated, rows) });
+      }
+
+      const chunkSize = Math.max(1, Math.min(100, Number(req.body?.chunkSize || 50)));
+      const chunkRows = pendingRows.slice(0, chunkSize);
+      await sheetsService.updatePaymentImportBatch(batch.batch_id, {
+        status: "running",
+        started_at: batch.started_at || new Date().toISOString(),
+        progress: Math.max(5, Number(batch.progress || 0)),
+        error_message: ""
+      });
+      const payload = JSON.parse(batch.payload_json || "{}");
+      await processPaymentImportBatchChunk(batch.batch_id, payload, req.appUser, chunkRows);
+
+      rows = await sheetsService.getPaymentImportBatchRows(batch.batch_id);
+      const remainingPending = rows.filter(row => row.status === "pending" || row.status === "failed").length;
+      const summary = summarizePaymentImportBatchRows(rows);
+      const processedRows = rows.length - remainingPending;
+      const progress = remainingPending === 0 ? 100 : Math.max(5, Math.min(99, Math.round((processedRows / Math.max(1, rows.length)) * 100)));
+      const finalStatus = remainingPending === 0
+        ? (summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0 ? "completed_with_errors" : "completed")
+        : "running";
+      const updated = await sheetsService.updatePaymentImportBatch(batch.batch_id, {
+        status: finalStatus,
+        completed_at: remainingPending === 0 ? new Date().toISOString() : "",
+        processed_rows: processedRows,
+        imported_rows: summary.importedRows,
+        review_rows: summary.needsReviewRows + summary.paymentActivityRows,
+        rejected_rows: summary.rejectedRows,
+        failed_rows: rows.filter(row => row.status === "failed").length,
+        total_amount: summary.totalPaymentInFile,
+        progress,
+        summary_json: JSON.stringify(summary),
+        error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} row(s) need review or were rejected.` : ""
+      });
+      if (remainingPending === 0) {
+        const operatorEmail = getOperatorEmail(req);
+        const importHistory = await sheetsService.createImportHistory({
+          import_type: "Payment Import applied",
+          file_name: batch.file_name,
+          requested_by: operatorEmail,
+          total_rows: summary.totalRowsRead,
+          imported_rows: summary.importedRows,
+          rejected_rows: summary.rejectedRows,
+          review_rows: summary.needsReviewRows + summary.paymentActivityRows,
+          total_amount: summary.totalPaymentInFile,
+          summary_json: JSON.stringify(summary),
+          status: finalStatus === "completed" ? "Applied" : "Applied with review"
+        });
+        await sheetsService.createJob({
+          job_type: "Payment Import",
+          status: finalStatus === "completed" ? "completed" : "failed",
+          requested_by: operatorEmail,
+          progress: 100,
+          summary_json: JSON.stringify(summary),
+          error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
+        });
+        const reviewCandidates = rows
+          .filter(row => row.status === "needs_review" || row.status === "payment_activity" || row.status === "rejected" || row.status === "failed")
+          .slice(0, 100);
+        for (const row of reviewCandidates) {
+          const issues = (() => {
+            try {
+              return JSON.parse(row.issue_json || "[]");
+            } catch {
+              return [];
+            }
+          })();
+          await sheetsService.createReviewTask({
+            source: "Payment Import",
+            claim_id: row.claim_id || "",
+            cpt_code: row.cpt_code || "",
+            reason: Array.isArray(issues) && issues.length > 0 ? issues.join(" ") : "Payment import row requires review.",
+            assigned_to: "",
+            priority: row.status === "rejected" || row.status === "failed" ? "High" : "Medium",
+            status: "Open",
+            due_date: ""
+          });
+        }
+        await sheetsService.addUserActivityLog({
+          user_email: operatorEmail,
+          action: "Complete payment import batch",
+          entity_type: "Import",
+          entity_id: importHistory.import_id,
+          metadata_json: JSON.stringify({ batchId: batch.batch_id, summary })
+        });
+      }
+      res.json({
+        success: true,
+        done: remainingPending === 0,
+        processedRows: chunkRows.length,
+        remainingRows: remainingPending,
+        batch: updated,
+        result: paymentImportResultFromBatch(updated, rows)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Unable to process payment import batch." });
     }
   });
 
@@ -3399,12 +3545,6 @@ async function startServer() {
       if (pendingRows.length === 0) {
         return res.json({ success: true, batchId: batch.batch_id, status: batch.status, message: "No pending rows to resume." });
       }
-      const payload = JSON.parse(batch.payload_json || "{}");
-      setTimeout(() => {
-        runPaymentImportBatch(batch.batch_id, { ...payload, retryRows: pendingRows }, req.appUser).catch(err => {
-          console.error("Payment import batch resume failed:", err);
-        });
-      }, 0);
       res.status(202).json({ success: true, batchId: batch.batch_id, status: "running", pendingRows: pendingRows.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Unable to resume payment import batch." });

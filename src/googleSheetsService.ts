@@ -1630,6 +1630,19 @@ export class GoogleSheetsService {
     return rows;
   }
 
+  public async upsertPaymentImportBatchRows(rows: PaymentImportBatchRow[]): Promise<PaymentImportBatchRow[]> {
+    if (rows.length === 0) return [];
+    const nextRows = [...this.paymentImportBatchRows];
+    for (const row of rows) {
+      const index = nextRows.findIndex(item => item.batch_id === row.batch_id && Number(item.row_number) === Number(row.row_number));
+      if (index >= 0) nextRows[index] = { ...nextRows[index], ...row };
+      else nextRows.push(row);
+    }
+    this.paymentImportBatchRows = nextRows;
+    await this.overwriteOperationalRecords("Payment_Import_Batch_Rows", this.paymentImportBatchRows);
+    return rows;
+  }
+
   public async getPaymentImportBatchRows(batchId: string): Promise<PaymentImportBatchRow[]> {
     return this.paymentImportBatchRows
       .filter(row => row.batch_id === batchId)
