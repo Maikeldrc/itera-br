@@ -2973,9 +2973,18 @@ async function startServer() {
         const unpaidLineIndex = sameCptLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
         const lineIndex = unpaidLineIndex ?? sameCptLineIndexes[0] ?? -1;
         const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
-        const existingPayment = row.externalPaymentId
-          ? existingPaymentById.get(row.externalPaymentId.toLowerCase()) || null
+        const batchGeneratedPaymentId = batchId ? `PMT-IMP-${textValue(batchId)}-${row.rowNumber}` : "";
+        const lookupPaymentId = row.externalPaymentId || batchGeneratedPaymentId;
+        const existingPayment = lookupPaymentId
+          ? existingPaymentById.get(lookupPaymentId.toLowerCase()) || null
           : null;
+        const alreadyAppliedByThisBatch = Boolean(
+          apply &&
+          batchId &&
+          batchGeneratedPaymentId &&
+          existingPayment &&
+          textValue(existingPayment.payment_id).toLowerCase() === batchGeneratedPaymentId.toLowerCase()
+        );
 
         if (errors.length === 0 && candidates.length === 0) {
           errors.push(`No matching claim/CPT found for Patient Acct No ${row.patientAcctNo || "blank"}, CPT ${cptCode || "blank"} and DOS ${formatDisplayDos(row.serviceDate)}.`);
@@ -3017,7 +3026,9 @@ async function startServer() {
           claim && linePaymentTotal(targetLine) > 0
         );
         if (errors.length === 0 && hasExistingPayment) {
-          warnings.push(existingPaymentActivityMessage(claim, targetLine, cptCode, row.serviceDate));
+          if (!alreadyAppliedByThisBatch) {
+            warnings.push(existingPaymentActivityMessage(claim, targetLine, cptCode, row.serviceDate));
+          }
         }
 
         return {
@@ -3036,7 +3047,11 @@ async function startServer() {
           existingPaymentId: existingPayment?.payment_id || "",
           existingPaymentClaimId: existingPayment?.claim_id || "",
           lineIndex,
-          status: errors.length > 0 ? "rejected" : (hasExistingPayment ? "payment_activity" : ((hasMultipleCandidateReview || (payerMismatch && !payerAssociationAccepted)) ? "needs_review" : "ready")),
+          status: errors.length > 0
+            ? "rejected"
+            : alreadyAppliedByThisBatch
+              ? "imported"
+              : (hasExistingPayment ? "payment_activity" : ((hasMultipleCandidateReview || (payerMismatch && !payerAssociationAccepted)) ? "needs_review" : "ready")),
           errors,
           warnings
         };
@@ -3301,8 +3316,7 @@ async function startServer() {
           error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
         });
         const reviewCandidates = resultRows.filter(row => row.status === "needs_review" || row.status === "payment_activity" || row.status === "rejected");
-        for (const row of reviewCandidates.slice(0, 100)) {
-          await sheetsService.createReviewTask({
+        await sheetsService.createReviewTasksBulk(reviewCandidates.slice(0, 100).map(row => ({
             source: "Payment Import",
             claim_id: row.claimId || "",
             cpt_code: row.cptCode || "",
@@ -3311,8 +3325,7 @@ async function startServer() {
             priority: row.status === "rejected" ? "High" : "Medium",
             status: "Open",
             due_date: ""
-          });
-        }
+          })));
         await sheetsService.addUserActivityLog({
           user_email: operatorEmail,
           action: "Record payment import exceptions",
@@ -3356,7 +3369,7 @@ async function startServer() {
       });
     } catch (err: any) {
       const batchId = textValue(req.body?.batchId);
-      if (batchId) {
+      if (batchId && !req.body?.suppressBatchFailure) {
         await sheetsService.updatePaymentImportBatch(batchId, {
           status: "failed",
           completed_at: new Date().toISOString(),
@@ -3372,7 +3385,7 @@ async function startServer() {
 
   const processPaymentImportBatchChunk = async (batchId: string, payload: any, appUser: User | undefined, rowNumbers: number[]) => {
     const fakeReq = {
-      body: { ...payload, apply: true, batchId, retryRows: rowNumbers },
+      body: { ...payload, apply: true, batchId, retryRows: rowNumbers, suppressBatchFailure: true },
       appUser
     } as AppRequest;
     const fakeRes: any = {
@@ -3391,12 +3404,6 @@ async function startServer() {
     try {
       await handlePaymentReconciliationImport(fakeReq, fakeRes as express.Response);
     } catch (err: any) {
-      await sheetsService.updatePaymentImportBatch(batchId, {
-        status: "failed",
-        completed_at: new Date().toISOString(),
-        progress: 100,
-        error_message: err.message || "Payment import batch failed."
-      });
       throw err;
     }
   };
@@ -3527,7 +3534,7 @@ async function startServer() {
         const reviewCandidates = rows
           .filter(row => row.status === "needs_review" || row.status === "payment_activity" || row.status === "rejected" || row.status === "failed")
           .slice(0, 100);
-        for (const row of reviewCandidates) {
+        const reviewTasks = reviewCandidates.map(row => {
           const issues = (() => {
             try {
               return JSON.parse(row.issue_json || "[]");
@@ -3535,7 +3542,7 @@ async function startServer() {
               return [];
             }
           })();
-          await sheetsService.createReviewTask({
+          return {
             source: "Payment Import",
             claim_id: row.claim_id || "",
             cpt_code: row.cpt_code || "",
@@ -3544,8 +3551,9 @@ async function startServer() {
             priority: row.status === "rejected" || row.status === "failed" ? "High" : "Medium",
             status: "Open",
             due_date: ""
-          });
-        }
+          };
+        });
+        await sheetsService.createReviewTasksBulk(reviewTasks);
         await sheetsService.addUserActivityLog({
           user_email: operatorEmail,
           action: "Complete payment import batch",

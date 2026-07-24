@@ -599,14 +599,33 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
 
   const waitForPaymentImportBatch = async (batchId: string, steps: string[]) => {
     const maxAttempts = 360;
+    let transientFailures = 0;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const response = await apiFetch(`/api/payment-reconciliation-import/batches/${encodeURIComponent(batchId)}/process`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chunkSize: 50 })
-      });
-      const data: PaymentImportBatchStatus = await response.json();
-      if (!response.ok) throw new Error((data as any).error || "Unable to load payment import batch.");
+      let data: PaymentImportBatchStatus;
+      try {
+        const response = await apiFetch(`/api/payment-reconciliation-import/batches/${encodeURIComponent(batchId)}/process`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chunkSize: 20 })
+        });
+        data = await response.json();
+        if (!response.ok) throw new Error((data as any).error || "Unable to process payment import batch.");
+        transientFailures = 0;
+      } catch (err: any) {
+        transientFailures++;
+        if (transientFailures > 8) {
+          throw new Error(err.message || "Unable to process payment import batch.");
+        }
+        const waitMs = Math.min(30000, 3000 * transientFailures);
+        setProgress(current => current ? {
+          ...current,
+          label: isEnglish
+            ? `Temporary import delay. Retrying batch in ${Math.round(waitMs / 1000)}s...`
+            : `Demora temporal de importación. Reintentando lote en ${Math.round(waitMs / 1000)}s...`
+        } : current);
+        await wait(waitMs);
+        continue;
+      }
       const batch = data.batch;
       const progress = Math.max(5, Math.min(100, Number(batch.progress || 0)));
       const runningStep = progress >= 90 ? 4 : progress >= 65 ? 3 : progress >= 35 ? 2 : 1;

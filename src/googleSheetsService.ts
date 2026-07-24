@@ -1777,6 +1777,29 @@ export class GoogleSheetsService {
     return this.appendOperationalRecord("Review_Tasks", record);
   }
 
+  public async createReviewTasksBulk(recordsData: Partial<ReviewTask>[]): Promise<ReviewTask[]> {
+    if (recordsData.length === 0) return [];
+    const now = new Date().toISOString();
+    const records = recordsData.map((recordData, index) => ({
+      task_id: recordData.task_id || `TASK-${Date.now()}-${index}-${Math.floor(Math.random() * 1000)}`,
+      source: recordData.source || "System",
+      claim_id: recordData.claim_id || "",
+      cpt_code: recordData.cpt_code || "",
+      reason: recordData.reason || "Review required",
+      assigned_to: recordData.assigned_to || "",
+      priority: recordData.priority || "Medium",
+      status: recordData.status || "Open",
+      due_date: recordData.due_date || "",
+      created_at: recordData.created_at || now,
+      updated_at: recordData.updated_at || now
+    }));
+    this.reviewTasks.push(...records);
+    if (this.isConfigured) {
+      await this.appendRowsStrict("Review_Tasks", records.map(record => mapObjectToRow("Review_Tasks", record)));
+    }
+    return records;
+  }
+
   public async updateReviewTask(taskId: string, updates: Partial<ReviewTask>): Promise<ReviewTask | null> {
     const index = this.reviewTasks.findIndex(task => task.task_id === taskId);
     if (index === -1) return null;
