@@ -291,21 +291,31 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     setValidationResults(validations);
   };
 
-  const startImportProgress = () => {
+  const startImportProgress = (mode: "analysis" | "import" = "import") => {
     clearProgressTimer();
     setImportProgress({
       percent: 8,
-      label: isEnglish ? "Preparing import..." : "Preparando importación..."
+      label: mode === "analysis"
+        ? (isEnglish ? "Preparing analysis..." : "Preparando análisis...")
+        : (isEnglish ? "Preparing import..." : "Preparando importación...")
     });
 
     progressTimerRef.current = window.setInterval(() => {
       setImportProgress(current => {
         if (!current) return current;
         const nextPercent = Math.min(88, current.percent + (filePayload ? 4 : 7));
-        let label = isEnglish ? "Uploading file..." : "Subiendo archivo...";
-        if (nextPercent >= 35) label = isEnglish ? "Processing rows..." : "Procesando filas...";
-        if (nextPercent >= 65) label = isEnglish ? "Writing claims to Google Sheets..." : "Guardando claims en Google Sheets...";
-        if (nextPercent >= 82) label = isEnglish ? "Refreshing imported data..." : "Actualizando datos importados...";
+        let label = mode === "analysis"
+          ? (isEnglish ? "Uploading file for validation..." : "Subiendo archivo para validación...")
+          : (isEnglish ? "Uploading file for import..." : "Subiendo archivo para importación...");
+        if (nextPercent >= 35) label = mode === "analysis"
+          ? (isEnglish ? "Validating rows and business rules..." : "Validando filas y reglas de negocio...")
+          : (isEnglish ? "Processing selected rows..." : "Procesando filas seleccionadas...");
+        if (nextPercent >= 65) label = mode === "analysis"
+          ? (isEnglish ? "Preparing preflight results..." : "Preparando resultados del análisis...")
+          : (isEnglish ? "Writing claims to Google Sheets..." : "Guardando claims en Google Sheets...");
+        if (nextPercent >= 82) label = mode === "analysis"
+          ? (isEnglish ? "Building review table..." : "Construyendo tabla de revisión...")
+          : (isEnglish ? "Refreshing imported data..." : "Actualizando datos importados...");
         return { percent: nextPercent, label };
       });
     }, 700);
@@ -493,9 +503,9 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
 
   const runImport = async (payload: ImportPayload, options?: { mergeForcedRows?: number[]; readyRowsImported?: number; apply?: boolean; importMode?: ClaimImportMode }) => {
     setIsProcessing(true);
-    startImportProgress();
+    const shouldApply = options?.apply !== false;
+    startImportProgress(shouldApply ? "import" : "analysis");
     try {
-      const shouldApply = options?.apply !== false;
       const importPayload = Array.isArray(payload)
         ? { rows: payload, fileName: file?.name || "", importBilledBy, apply: shouldApply, importMode: options?.importMode || "ready" }
         : { ...payload, importBilledBy, apply: shouldApply, importMode: options?.importMode || "ready" };
@@ -1418,7 +1428,30 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         </div>
 
         {/* Footer */}
-        <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-end gap-3">
+        <div className="bg-slate-50 p-4 border-t border-slate-200 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-h-[38px] flex-1">
+            {isProcessing && importProgress && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2">
+                <div className="mb-1 flex items-center justify-between gap-3">
+                  <p className="truncate text-[11px] font-semibold text-dark-blue">{importProgress.label}</p>
+                  <span className="font-mono text-[11px] font-bold text-dark-blue">{Math.round(importProgress.percent)}%</span>
+                </div>
+                <div
+                  className="h-2 w-full overflow-hidden rounded-full bg-white ring-1 ring-blue-100"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(importProgress.percent)}
+                >
+                  <div
+                    className="h-full rounded-full bg-primary-blue transition-all duration-500 ease-out"
+                    style={{ width: `${importProgress.percent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center justify-end gap-3">
           <button
             onClick={handleClose}
             disabled={isProcessing}
@@ -1452,6 +1485,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     : selectedImportDecisionLabel)
                 : (filePayload ? (isEnglish ? "Analyze file" : "Analizar archivo") : `${isEnglish ? "Analyze" : "Analizar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>
+          </div>
         </div>
       </div>
     </div>
