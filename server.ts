@@ -2111,6 +2111,7 @@ async function startServer() {
     try {
       const operatorEmail = getOperatorEmail(req);
       const { rows, fileBase64, retryRows, fileName, forceImportRows, importBilledBy } = req.body;
+      const shouldApplyImport = req.body?.apply !== false;
       const batchBilledBy: "ITERA" | "Provider" | "Unknown" =
         importBilledBy === "Provider" ? "Provider" : importBilledBy === "ITERA" ? "ITERA" : "Unknown";
       const retryRowSet = Array.isArray(retryRows)
@@ -2405,48 +2406,54 @@ async function startServer() {
       }
 
       let importedClaims: Claim[] = [];
-      if (claimsToImport.length > 0) {
+      if (shouldApplyImport && claimsToImport.length > 0) {
         importedClaims = await sheetsService.createClaimsBulk(claimsToImport, operatorEmail);
       }
 
-      const summary = summarizeImport(importRows, importedClaims, errors);
+      const summary = summarizeImport(importRows, shouldApplyImport ? importedClaims : claimsToImport, errors);
       (summary as any).forcedImportedRows = forcedImportClaims.length;
-      await sheetsService.createJob({
-        job_type: retryRowSet ? "Claims corrected rows import" : "Claims import",
-        status: errors.length > 0 ? "failed" : "completed",
-        requested_by: operatorEmail,
-        progress: 100,
-        summary_json: JSON.stringify(summary),
-        error_message: errors.length > 0 ? `${errors.length} rejected row(s)` : ""
-      });
-      await sheetsService.createImportHistory({
-        import_type: retryRowSet ? "Claims corrected rows" : "Claims",
-        file_name: textValue(fileName),
-        requested_by: operatorEmail,
-        total_rows: Number(summary.totalRowsRead || importRows.length || 0),
-        imported_rows: importedClaims.length,
-        rejected_rows: errors.length,
-        review_rows: 0,
-        total_amount: Number(summary.totalBilledChargeImported || 0),
-        summary_json: JSON.stringify(summary),
-        status: errors.length > 0 ? "Completed with errors" : "Completed"
-      });
-      await sheetsService.addUserActivityLog({
-        user_email: operatorEmail,
-        action: retryRowSet ? "Import corrected claim rows" : "Import claims",
-        entity_type: "Import",
-        entity_id: textValue(fileName),
-        metadata_json: JSON.stringify({ importedCount: importedClaims.length, errorCount: errors.length, forcedImportedCount: forcedImportClaims.length })
-      });
+      (summary as any).readyRows = claimsToImport.length;
+      (summary as any).analysisOnly = !shouldApplyImport;
+      if (shouldApplyImport) {
+        await sheetsService.createJob({
+          job_type: retryRowSet ? "Claims corrected rows import" : "Claims import",
+          status: errors.length > 0 ? "failed" : "completed",
+          requested_by: operatorEmail,
+          progress: 100,
+          summary_json: JSON.stringify(summary),
+          error_message: errors.length > 0 ? `${errors.length} rejected row(s)` : ""
+        });
+        await sheetsService.createImportHistory({
+          import_type: retryRowSet ? "Claims corrected rows" : "Claims",
+          file_name: textValue(fileName),
+          requested_by: operatorEmail,
+          total_rows: Number(summary.totalRowsRead || importRows.length || 0),
+          imported_rows: importedClaims.length,
+          rejected_rows: errors.length,
+          review_rows: 0,
+          total_amount: Number(summary.totalBilledChargeImported || 0),
+          summary_json: JSON.stringify(summary),
+          status: errors.length > 0 ? "Completed with errors" : "Completed"
+        });
+        await sheetsService.addUserActivityLog({
+          user_email: operatorEmail,
+          action: retryRowSet ? "Import corrected claim rows" : "Import claims",
+          entity_type: "Import",
+          entity_id: textValue(fileName),
+          metadata_json: JSON.stringify({ importedCount: importedClaims.length, errorCount: errors.length, forcedImportedCount: forcedImportClaims.length })
+        });
+      }
 
       res.json({
         success: errors.length === 0 && summary.allRowsAccounted,
-        importedCount: importedClaims.length,
+        analysisOnly: !shouldApplyImport,
+        readyCount: claimsToImport.length,
+        importedCount: shouldApplyImport ? importedClaims.length : 0,
         errorCount: errors.length,
         errors: errors,
-        importedClaimIds: importedClaims.map(claim => claim.claim_id),
-        forcedImportedCount: forcedImportClaims.length,
-        rollbackAvailable: importedClaims.length > 0,
+        importedClaimIds: shouldApplyImport ? importedClaims.map(claim => claim.claim_id) : [],
+        forcedImportedCount: shouldApplyImport ? forcedImportClaims.length : 0,
+        rollbackAvailable: shouldApplyImport && importedClaims.length > 0,
         summary
       });
     } catch (err: any) {

@@ -17,7 +17,7 @@ interface ImportModalProps {
 }
 
 type ImportBillingOwner = "Unknown" | "ITERA" | "Provider";
-type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: ImportBillingOwner };
+type ImportPayload = any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; forceImportRows?: number[]; importBilledBy?: ImportBillingOwner; apply?: boolean };
 
 type ImportSummary = {
   totalRowsRead: number;
@@ -35,12 +35,16 @@ type ImportSummary = {
   totalBilledChargeImported: number;
   topRejectionReasons: { reason: string; count: number }[];
   forcedImportedRows?: number;
+  readyRows?: number;
+  analysisOnly?: boolean;
 };
 
 type ImportResult = {
   success: boolean;
   importedCount: number;
+  readyCount?: number;
   errorCount: number;
+  analysisOnly?: boolean;
   errors: any[];
   importedClaimIds?: string[];
   rollbackAvailable?: boolean;
@@ -320,7 +324,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       });
     });
 
-    const importedRows = Number(result?.importedCount || 0);
+    const importedRows = Number(result?.analysisOnly ? (result?.readyCount ?? result?.summary?.readyRows ?? result?.summary?.importedRows ?? 0) : (result?.importedCount || 0));
     const rejectedRows = Number(result?.errorCount || (fallbackReason ? 1 : 0));
     const totalRowsRead = sourceRows.length;
     return {
@@ -410,21 +414,28 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const handleImportClick = async () => {
-    await runImport(filePayload || parsedRows);
+    if (importResult?.analysisOnly) {
+      await runImport(filePayload || parsedRows, { apply: true });
+      return;
+    }
+    await runImport(filePayload || parsedRows, { apply: false });
   };
 
-  const runImport = async (payload: ImportPayload, options?: { mergeForcedRows?: number[] }) => {
+  const runImport = async (payload: ImportPayload, options?: { mergeForcedRows?: number[]; apply?: boolean }) => {
     setIsProcessing(true);
     startImportProgress();
     try {
+      const shouldApply = options?.apply !== false;
       const importPayload = Array.isArray(payload)
-        ? { rows: payload, fileName: file?.name || "", importBilledBy }
-        : { ...payload, importBilledBy };
+        ? { rows: payload, fileName: file?.name || "", importBilledBy, apply: shouldApply }
+        : { ...payload, importBilledBy, apply: shouldApply };
       const res = await onImport(importPayload);
       clearProgressTimer();
       setImportProgress({
         percent: 100,
-        label: isEnglish ? "Import completed." : "Importación completada."
+        label: shouldApply
+          ? (isEnglish ? "Import completed." : "Importación completada.")
+          : (isEnglish ? "Analysis completed. No data has been written." : "Análisis completado. No se ha escrito ningún dato.")
       });
       const normalizedResult = normalizeImportResult(res);
       if (options?.mergeForcedRows?.length) {
@@ -520,9 +531,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   };
 
   const displayedSummary = importResult?.summary || null;
+  const isAnalysisResult = Boolean(importResult?.analysisOnly || displayedSummary?.analysisOnly);
+  const readyToImportCount = Number(importResult?.readyCount ?? displayedSummary?.readyRows ?? (isAnalysisResult ? displayedSummary?.importedRows : 0) ?? 0);
   const rollbackAvailable = Boolean(importResult?.rollbackAvailable && (importResult.importedClaimIds || []).length > 0 && !importResult.rollbackCompleted);
-  const importCompletedSuccessfully = Boolean(importResult?.success && Number(importResult.importedCount || 0) > 0 && Number(importResult.errorCount || 0) === 0);
-  const importAlreadyFinalized = Number(importResult?.importedCount || 0) > 0 || Boolean(importResult?.rollbackCompleted);
+  const importCompletedSuccessfully = Boolean(!isAnalysisResult && importResult?.success && Number(importResult.importedCount || 0) > 0 && Number(importResult.errorCount || 0) === 0);
+  const importAlreadyFinalized = !isAnalysisResult && (Number(importResult?.importedCount || 0) > 0 || Boolean(importResult?.rollbackCompleted));
   const rejectedSourceRows = new Set<number>(
     (importResult?.errors || [])
       .map(err => Number(err.row))
@@ -842,24 +855,45 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               </div>
               <p className="text-[11px] text-slate-500 mt-2">
                 {filePayload
-                  ? (isEnglish ? "Large XLSX files can take a few moments while the server validates rows and writes claims." : "Los XLSX grandes pueden tardar mientras el servidor valida filas y guarda claims.")
-                  : (isEnglish ? `${parsedRows.length} parsed records are being validated and imported.` : `${parsedRows.length} registros parseados se están validando e importando.`)}
+                  ? (isAnalysisResult || !importResult
+                    ? (isEnglish ? "Large Excel files can take a few moments while the server validates rows." : "Los Excel grandes pueden tardar mientras el servidor valida las filas.")
+                    : (isEnglish ? "Large Excel files can take a few moments while the server writes claims." : "Los Excel grandes pueden tardar mientras el servidor guarda los claims."))
+                  : (isAnalysisResult || !importResult
+                    ? (isEnglish ? `${parsedRows.length} parsed records are being validated.` : `${parsedRows.length} registros parseados se están validando.`)
+                    : (isEnglish ? `${parsedRows.length} parsed records are being imported.` : `${parsedRows.length} registros parseados se están importando.`))}
               </p>
             </div>
           )}
 
           {/* Import Results Summary */}
           {importResult && (
-            <div ref={importResultRef} className={`p-4 rounded-xl border flex gap-3 ${importResult.success && importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
-              {importResult.success && importResult.errorCount === 0 ? (
+            <div ref={importResultRef} className={`p-4 rounded-xl border flex gap-3 ${isAnalysisResult ? "bg-amber-50 border-amber-100 text-amber-900" : importResult.success && importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
+              {isAnalysisResult ? (
+                <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+              ) : importResult.success && importResult.errorCount === 0 ? (
                 <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               ) : (
                 <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
               )}
               <div className="text-sm">
-                <h5 className="font-semibold mb-1">{isEnglish ? "Import Result" : "Resultado de Importación"}</h5>
-                <p>{isEnglish ? "Successfully imported" : "Importados correctamente"}: <span className="font-bold">{importResult.importedCount} claims</span></p>
-                {Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0) > 0 && (
+                <h5 className="font-semibold mb-1">
+                  {isAnalysisResult
+                    ? (isEnglish ? "Preflight Analysis Result" : "Resultado del análisis previo")
+                    : (isEnglish ? "Import Result" : "Resultado de Importación")}
+                </h5>
+                {isAnalysisResult ? (
+                  <>
+                    <p>{isEnglish ? "Ready to import" : "Listos para importar"}: <span className="font-bold">{readyToImportCount} claims</span></p>
+                    <p className="mt-1 text-xs font-semibold text-amber-800">
+                      {isEnglish
+                        ? "No data has been written to Google Sheets yet. Review the rows below, then import the ready rows or correct the rejected ones."
+                        : "Todavía no se ha escrito ningún dato en Google Sheets. Revise las filas debajo y luego importe las filas listas o corrija las rechazadas."}
+                    </p>
+                  </>
+                ) : (
+                  <p>{isEnglish ? "Successfully imported" : "Importados correctamente"}: <span className="font-bold">{importResult.importedCount} claims</span></p>
+                )}
+                {!isAnalysisResult && Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0) > 0 && (
                   <p className="mt-1 text-xs text-emerald-700">
                     {isEnglish
                       ? `${Math.max(0, Number(importResult.importedCount || 0) - Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0))} imported without errors + ${Number(importResult.forcedImportedCount || displayedSummary?.forcedImportedRows || 0)} imported anyway and marked for review.`
@@ -867,7 +901,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   </p>
                 )}
                 {importResult.errorCount > 0 && (
-                  <p className="mt-1 font-semibold text-rose-700">{isEnglish ? "Rejected due to errors" : "Rechazados por errores"}: {importResult.errorCount} {isEnglish ? "records" : "registros"}.</p>
+                  <p className={`mt-1 font-semibold ${isAnalysisResult ? "text-amber-800" : "text-rose-700"}`}>{isEnglish ? "Rejected due to errors" : "Rechazados por errores"}: {importResult.errorCount} {isEnglish ? "records" : "registros"}.</p>
                 )}
                 {displayedSummary && !displayedSummary.allRowsAccounted && (
                   <p className="mt-1 font-semibold text-rose-700">
@@ -1061,7 +1095,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
             <div className="rounded-xl border border-slate-200 bg-white p-4">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <h4 className="font-semibold text-slate-800 text-sm">
-                  {isEnglish ? "Import Summary" : "Resumen de importación"}
+                  {isAnalysisResult ? (isEnglish ? "Preflight Summary" : "Resumen del análisis previo") : (isEnglish ? "Import Summary" : "Resumen de importación")}
                 </h4>
                 <span className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-full ${displayedSummary.allRowsAccounted ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
                   {displayedSummary.allRowsAccounted ? (isEnglish ? "All rows accounted" : "Filas contabilizadas") : (isEnglish ? "Review required" : "Revisión requerida")}
@@ -1070,8 +1104,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 {[
                   [isEnglish ? "Rows read" : "Filas leídas", displayedSummary.totalRowsRead],
-                  [isEnglish ? "Imported" : "Importadas", displayedSummary.importedRows],
-                  [isEnglish ? "Imported anyway" : "Importadas de todos modos", displayedSummary.forcedImportedRows || 0],
+                  [isAnalysisResult ? (isEnglish ? "Ready" : "Listas") : (isEnglish ? "Imported" : "Importadas"), isAnalysisResult ? readyToImportCount : displayedSummary.importedRows],
+                  [isAnalysisResult ? (isEnglish ? "Import-anyway eligible" : "Elegibles para importar de todos modos") : (isEnglish ? "Imported anyway" : "Importadas de todos modos"), isAnalysisResult ? forcedImportEligibleRows.length : (displayedSummary.forcedImportedRows || 0)],
                   [isEnglish ? "Rejected" : "Rechazadas", displayedSummary.rejectedRows],
                   [isEnglish ? "Unique patients" : "Pacientes únicos", displayedSummary.uniquePatientsImported || displayedSummary.uniquePatientsInFile],
                   [isEnglish ? "Providers" : "Proveedores", displayedSummary.uniqueProvidersImported],
@@ -1088,7 +1122,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <div className="grid md:grid-cols-2 gap-3 mt-3">
                 <div className="rounded-lg border border-slate-100 bg-slate-50 p-3">
                   <p className="text-[10px] uppercase tracking-wide text-slate-500 font-semibold mb-2">
-                    {isEnglish ? "CPT imported" : "CPT importados"}
+                    {isAnalysisResult ? (isEnglish ? "CPT ready" : "CPT listos") : (isEnglish ? "CPT imported" : "CPT importados")}
                   </p>
                   <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
                     {Object.entries(displayedSummary.cptCodeCounts).length === 0 ? (
@@ -1121,7 +1155,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 </div>
               </div>
               <p className="text-[11px] text-slate-500 mt-3">
-                {isEnglish ? "Total billed charge imported" : "Cargo total importado"}: <span className="font-mono font-bold">${displayedSummary.totalBilledChargeImported.toFixed(2)}</span>
+                {isAnalysisResult ? (isEnglish ? "Total billed charge ready" : "Cargo total listo") : (isEnglish ? "Total billed charge imported" : "Cargo total importado")}: <span className="font-mono font-bold">${displayedSummary.totalBilledChargeImported.toFixed(2)}</span>
               </p>
             </div>
           )}
@@ -1192,7 +1226,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
           </button>
           <button
             onClick={handleImportClick}
-            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized}
+            disabled={(!filePayload && parsedRows.length === 0) || isProcessing || isRollingBack || importAlreadyFinalized || (isAnalysisResult && readyToImportCount <= 0)}
             className="bg-primary-blue hover:bg-secondary-blue disabled:bg-slate-300 disabled:cursor-not-allowed px-5 py-2 rounded-xl text-xs font-semibold text-white flex items-center gap-1.5 transition-all shadow-md"
             title={importAlreadyFinalized
               ? (isEnglish ? "This import batch is finalized. Close this window to start a new import." : "Este lote de importación ya finalizó. Cierre esta ventana para iniciar una nueva importación.")
@@ -1204,7 +1238,9 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                 ? (isEnglish ? "Import Reverted" : "Importación revertida")
                 : importCompletedSuccessfully
                 ? (isEnglish ? "Import Completed" : "Importación completada")
-                : (filePayload ? (isEnglish ? "Import Excel" : "Importar Excel") : `${isEnglish ? "Import" : "Importar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
+                : isAnalysisResult
+                ? (isEnglish ? `Import ${readyToImportCount} ready row(s)` : `Importar ${readyToImportCount} fila(s) lista(s)`)
+                : (filePayload ? (isEnglish ? "Analyze file" : "Analizar archivo") : `${isEnglish ? "Analyze" : "Analizar"} ${parsedRows.length} ${isEnglish ? "Records" : "Registros"}`)}
           </button>
         </div>
       </div>

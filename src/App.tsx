@@ -1249,7 +1249,7 @@ export default function App() {
   };
 
   // Import claims CSV handler
-  const handleImportCSV = async (payload: any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[] }) => {
+  const handleImportCSV = async (payload: any[] | { rows?: any[]; fileName?: string; fileBase64?: string; retryRows?: number[]; apply?: boolean }) => {
     const res = await apiFetch("/api/import-csv", {
       method: "POST",
       headers: {
@@ -1262,10 +1262,12 @@ export default function App() {
     if (!res.ok) {
       throw new Error(data.error || "Import process failed");
     }
-    fetchAllData({ showInitialLoading: false }).catch(err => {
-      console.error("Post-import data refresh failed", err);
-      notify(isEnglish ? "Import completed, but refreshing the worklist failed." : "La importación terminó, pero falló la actualización del worklist.", "warning");
-    });
+    if (!(typeof payload === "object" && !Array.isArray(payload) && payload.apply === false)) {
+      fetchAllData({ showInitialLoading: false }).catch(err => {
+        console.error("Post-import data refresh failed", err);
+        notify(isEnglish ? "Import completed, but refreshing the worklist failed." : "La importación terminó, pero falló la actualización del worklist.", "warning");
+      });
+    }
     return data;
   };
 
