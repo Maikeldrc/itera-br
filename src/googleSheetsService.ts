@@ -281,6 +281,20 @@ export class GoogleSheetsService {
     }));
   }
 
+  private async updateSheetRowsStrict(tabName: string, rowUpdates: Array<{ sheetRowNumber: number; rowData: any[] }>) {
+    if (!this.isConfigured || rowUpdates.length === 0) return;
+    await this.executeSheetsWrite(() => this.sheets.spreadsheets.values.batchUpdate({
+      spreadsheetId: this.sheetId,
+      requestBody: {
+        valueInputOption: "RAW",
+        data: rowUpdates.map(update => ({
+          range: `${tabName}!A${update.sheetRowNumber}`,
+          values: [update.rowData]
+        }))
+      }
+    }));
+  }
+
   /**
    * Sync Google Sheets with Local Store (and vice versa)
    */
@@ -1774,7 +1788,12 @@ export class GoogleSheetsService {
     const index = this.paymentImportBatches.findIndex(batch => batch.batch_id === batchId);
     if (index === -1) return null;
     this.paymentImportBatches[index] = { ...this.paymentImportBatches[index], ...updates };
-    await this.overwriteOperationalRecords("Payment_Import_Batches", this.paymentImportBatches);
+    if (this.isConfigured) {
+      await this.updateSheetRowsStrict("Payment_Import_Batches", [{
+        sheetRowNumber: index + 2,
+        rowData: mapObjectToRow("Payment_Import_Batches", this.paymentImportBatches[index])
+      }]);
+    }
     return this.paymentImportBatches[index];
   }
 
@@ -1784,10 +1803,10 @@ export class GoogleSheetsService {
 
   public async createPaymentImportBatchRows(rows: PaymentImportBatchRow[]): Promise<PaymentImportBatchRow[]> {
     if (rows.length === 0) return [];
-    this.paymentImportBatchRows.push(...rows);
     if (this.isConfigured) {
-      await this.overwriteOperationalRecords("Payment_Import_Batch_Rows", this.paymentImportBatchRows);
+      await this.appendRowsStrict("Payment_Import_Batch_Rows", rows.map(row => mapObjectToRow("Payment_Import_Batch_Rows", row)));
     }
+    this.paymentImportBatchRows.push(...rows);
     return rows;
   }
 
@@ -1803,13 +1822,29 @@ export class GoogleSheetsService {
   public async upsertPaymentImportBatchRows(rows: PaymentImportBatchRow[]): Promise<PaymentImportBatchRow[]> {
     if (rows.length === 0) return [];
     const nextRows = [...this.paymentImportBatchRows];
+    const rowUpdates: Array<{ sheetRowNumber: number; rowData: any[] }> = [];
+    let hasNewRows = false;
     for (const row of rows) {
       const index = nextRows.findIndex(item => item.batch_id === row.batch_id && Number(item.row_number) === Number(row.row_number));
-      if (index >= 0) nextRows[index] = { ...nextRows[index], ...row };
-      else nextRows.push(row);
+      if (index >= 0) {
+        nextRows[index] = { ...nextRows[index], ...row };
+        rowUpdates.push({
+          sheetRowNumber: index + 2,
+          rowData: mapObjectToRow("Payment_Import_Batch_Rows", nextRows[index])
+        });
+      } else {
+        nextRows.push(row);
+        hasNewRows = true;
+      }
+    }
+    if (this.isConfigured) {
+      if (hasNewRows) {
+        await this.overwriteOperationalRecords("Payment_Import_Batch_Rows", nextRows);
+      } else {
+        await this.updateSheetRowsStrict("Payment_Import_Batch_Rows", rowUpdates);
+      }
     }
     this.paymentImportBatchRows = nextRows;
-    await this.overwriteOperationalRecords("Payment_Import_Batch_Rows", this.paymentImportBatchRows);
     return rows;
   }
 

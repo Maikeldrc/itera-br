@@ -3613,6 +3613,12 @@ async function startServer() {
         result: paymentImportResultFromBatch(updated, rows)
       });
     } catch (err: any) {
+      console.error("Payment import batch process failed:", {
+        batchId: req.params.batchId,
+        message: err?.message || String(err),
+        code: err?.code || err?.response?.status || err?.status || "",
+        stack: err?.stack || ""
+      });
       res.status(500).json({ error: err.message || "Unable to process payment import batch." });
     }
   });
