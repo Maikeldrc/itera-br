@@ -15,7 +15,6 @@ import {
   FileWarning,
   Hospital,
   Sliders,
-  History,
   Info,
   ChevronLeft,
   ChevronRight,
@@ -118,12 +117,6 @@ export function Sidebar({ currentView, onViewChange, currentUser, isCollapsed, o
       label: isEnglish ? "Reports" : "Reportes",
       icon: BarChart3,
       roles: [UserRole.Admin, UserRole.BillingManager, UserRole.ReconciliationSpecialist, UserRole.ProviderViewer, UserRole.Auditor],
-    },
-    {
-      id: "audit-log" as ViewType,
-      label: isEnglish ? "Audit Log (HIPAA)" : "Log de Auditoría (HIPAA)",
-      icon: History,
-      roles: [UserRole.Admin, UserRole.BillingManager, UserRole.Auditor],
     },
     {
       id: "settings" as ViewType,

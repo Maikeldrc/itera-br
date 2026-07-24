@@ -390,6 +390,20 @@ export default function App() {
   const [backupFolderId, setBackupFolderId] = useState("");
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
   const [isSavingBackupSettings, setIsSavingBackupSettings] = useState(false);
+  const [auditLogPage, setAuditLogPage] = useState(1);
+  const [auditLogRowsPerPage, setAuditLogRowsPerPage] = useState(10);
+  const [backupPage, setBackupPage] = useState(1);
+  const [backupRowsPerPage, setBackupRowsPerPage] = useState(10);
+  const [visibleAuditLogColumns, setVisibleAuditLogColumns] = useState<string[]>([
+    "changed_at",
+    "changed_by",
+    "claim_id",
+    "action_type",
+    "field_name",
+    "previous_value",
+    "new_value",
+    "reason"
+  ]);
   const [customRuleName, setCustomRuleName] = useState("");
   const [customRuleScope, setCustomRuleScope] = useState("Claims Import");
   const [customRuleSeverity, setCustomRuleSeverity] = useState("Review");
@@ -2941,6 +2955,44 @@ export default function App() {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(val);
   };
 
+  const auditLogColumns = [
+    { key: "audit_id", label: "Log ID", width: "w-[150px]" },
+    { key: "changed_at", label: isEnglish ? "Date / Time" : "Fecha / Hora", width: "w-[150px]" },
+    { key: "changed_by", label: isEnglish ? "Audit User" : "Usuario Auditor", width: "w-[210px]" },
+    { key: "claim_id", label: "Claim ID", width: "w-[180px]" },
+    { key: "action_type", label: isEnglish ? "Action" : "Acción", width: "w-[110px]" },
+    { key: "field_name", label: isEnglish ? "Changed Field" : "Campo Alterado", width: "w-[180px]" },
+    { key: "previous_value", label: isEnglish ? "Previous Value" : "Valor Previo", width: "w-[260px]" },
+    { key: "new_value", label: isEnglish ? "New Value" : "Valor Nuevo", width: "w-[260px]" },
+    { key: "reason", label: isEnglish ? "Reason / Justification" : "Motivo / Justificación", width: "w-[300px]" }
+  ];
+  const auditLogTotalPages = Math.max(1, Math.ceil(auditLogs.length / auditLogRowsPerPage));
+  const currentAuditLogPage = Math.min(auditLogPage, auditLogTotalPages);
+  const paginatedAuditLogs = auditLogs.slice(
+    (currentAuditLogPage - 1) * auditLogRowsPerPage,
+    currentAuditLogPage * auditLogRowsPerPage
+  );
+  const auditLogPageStart = auditLogs.length === 0 ? 0 : (currentAuditLogPage - 1) * auditLogRowsPerPage + 1;
+  const auditLogPageEnd = Math.min(currentAuditLogPage * auditLogRowsPerPage, auditLogs.length);
+  const backupTotalPages = Math.max(1, Math.ceil(backups.length / backupRowsPerPage));
+  const currentBackupPage = Math.min(backupPage, backupTotalPages);
+  const paginatedBackups = backups.slice(
+    (currentBackupPage - 1) * backupRowsPerPage,
+    currentBackupPage * backupRowsPerPage
+  );
+  const backupPageStart = backups.length === 0 ? 0 : (currentBackupPage - 1) * backupRowsPerPage + 1;
+  const backupPageEnd = Math.min(currentBackupPage * backupRowsPerPage, backups.length);
+
+  const toggleAuditLogColumn = (key: string) => {
+    setVisibleAuditLogColumns(current => {
+      if (current.includes(key)) {
+        const next = current.filter(item => item !== key);
+        return next.length > 0 ? next : current;
+      }
+      return [...current, key];
+    });
+  };
+
   const renderAuditValue = (value: string, tone: "previous" | "new" | "neutral" = "neutral") => {
     const text = toText(value);
     const toneClass = tone === "previous"
@@ -2958,104 +3010,125 @@ export default function App() {
     );
   };
 
-  const renderAuditLogSection = (settingsMode = false) => (
-    <div className="space-y-6">
-      {!settingsMode && (
-        <div>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-            {isEnglish ? "HIPAA Security Audit Log" : "Log de Auditoría de Seguridad HIPAA"}
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            {isEnglish ? "Immutable access and claim modification log required for medical data compliance" : "Bitácora inalterable de acceso y modificaciones de claims requerida para el cumplimiento normativo de datos médicos"}
-          </p>
+  const renderAuditLogSection = (settingsMode = false) => {
+    const activeColumns = auditLogColumns.filter(column => visibleAuditLogColumns.includes(column.key));
+    const renderAuditCell = (log: AuditLog, key: string) => {
+      if (key === "audit_id") return <span className="block break-all font-mono text-[10px] font-bold leading-relaxed text-slate-400">{log.audit_id}</span>;
+      if (key === "changed_at") return <span className="font-mono text-[11px] leading-relaxed text-slate-500">{new Date(log.changed_at).toLocaleString(isEnglish ? "en-US" : "es-ES")}</span>;
+      if (key === "changed_by") return <span className="block truncate font-bold text-slate-800" title={log.changed_by}>{log.changed_by}</span>;
+      if (key === "claim_id") return <span className="block break-all font-mono text-[11px] font-bold text-primary-blue">{log.claim_id || "-"}</span>;
+      if (key === "action_type") {
+        return (
+          <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-[10px] font-bold ${
+            log.action_type === "Lock" ? "bg-red-100 text-red-800" :
+            log.action_type === "Unlock" ? "bg-emerald-100 text-emerald-800" :
+            log.action_type === "Create" ? "bg-blue-100 text-blue-800" :
+            log.action_type === "Delete" ? "bg-rose-100 text-rose-800" :
+            "bg-slate-100 text-slate-700"
+          }`}>
+            {log.action_type}
+          </span>
+        );
+      }
+      if (key === "field_name") return <span className="block break-words font-mono text-[11px] font-semibold text-slate-700">{log.field_name || "-"}</span>;
+      if (key === "previous_value") return renderAuditValue(log.previous_value, "previous");
+      if (key === "new_value") return renderAuditValue(log.new_value, "new");
+      return (
+        <div className="max-h-24 overflow-auto rounded-lg border border-amber-100 bg-amber-50/40 px-2.5 py-2 text-[11px] leading-relaxed text-slate-700 break-words" title={log.reason || "-"}>
+          {log.reason || "-"}
         </div>
-      )}
+      );
+    };
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-        <div className="p-5 border-b border-slate-100 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    return (
+      <div className="space-y-6">
+        {!settingsMode && (
           <div>
-            <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Recorded Security Events" : "Registros de Seguridad Registrados"}</h4>
-            <p className="mt-0.5 text-[10px] text-slate-500">
-              {isEnglish ? "Long values are contained inside each cell. Hover for full text or scroll inside the cell." : "Los valores largos quedan contenidos dentro de cada celda. Pase el mouse o haga scroll dentro de la celda."}
+            <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
+              {isEnglish ? "HIPAA Security Audit Log" : "Log de Auditoría de Seguridad HIPAA"}
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              {isEnglish ? "Immutable access and claim modification log required for medical data compliance" : "Bitácora inalterable de acceso y modificaciones de claims requerida para el cumplimiento normativo de datos médicos"}
             </p>
           </div>
-          <span className="shrink-0 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-500 font-mono">{auditLogs.length} {isEnglish ? "saved actions" : "acciones guardadas"}</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1420px] table-fixed text-left text-xs border-collapse">
-            <colgroup>
-              <col className="w-[145px]" />
-              <col className="w-[150px]" />
-              <col className="w-[210px]" />
-              <col className="w-[170px]" />
-              <col className="w-[110px]" />
-              <col className="w-[180px]" />
-              <col className="w-[260px]" />
-              <col className="w-[260px]" />
-              <col className="w-[280px]" />
-            </colgroup>
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
-                <th className="px-4 py-3">Log ID</th>
-                <th className="px-4 py-3">{isEnglish ? "Date / Time" : "Fecha / Hora"}</th>
-                <th className="px-4 py-3">{isEnglish ? "Audit User" : "Usuario Auditor"}</th>
-                <th className="px-4 py-3">Claim ID</th>
-                <th className="px-4 py-3">{isEnglish ? "Action" : "Acción"}</th>
-                <th className="px-4 py-3">{isEnglish ? "Changed Field" : "Campo Alterado"}</th>
-                <th className="px-4 py-3">{isEnglish ? "Previous Value" : "Valor Previo"}</th>
-                <th className="px-4 py-3">{isEnglish ? "New Value" : "Valor Nuevo"}</th>
-                <th className="px-4 py-3">{isEnglish ? "Reason / Justification" : "Motivo / Justificación"}</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
-              {auditLogs.map((log) => (
-                <tr key={log.audit_id} className="align-top hover:bg-slate-50/70">
-                  <td className="px-4 py-4">
-                    <span className="block break-all font-mono text-[10px] font-bold leading-relaxed text-slate-400">{log.audit_id}</span>
-                  </td>
-                  <td className="px-4 py-4 font-mono text-[11px] leading-relaxed text-slate-500">{new Date(log.changed_at).toLocaleString(isEnglish ? "en-US" : "es-ES")}</td>
-                  <td className="px-4 py-4">
-                    <span className="block truncate font-bold text-slate-800" title={log.changed_by}>{log.changed_by}</span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className="block break-all font-mono text-[11px] font-bold text-primary-blue">{log.claim_id || "-"}</span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className={`inline-flex whitespace-nowrap rounded-md px-2 py-1 text-[10px] font-bold ${
-                      log.action_type === "Lock" ? "bg-red-100 text-red-800" :
-                      log.action_type === "Unlock" ? "bg-emerald-100 text-emerald-800" :
-                      log.action_type === "Create" ? "bg-blue-100 text-blue-800" :
-                      log.action_type === "Delete" ? "bg-rose-100 text-rose-800" :
-                      "bg-slate-100 text-slate-700"
-                    }`}>
-                      {log.action_type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-4">
-                    <span className="block break-words font-mono text-[11px] font-semibold text-slate-700">{log.field_name || "-"}</span>
-                  </td>
-                  <td className="px-4 py-4">{renderAuditValue(log.previous_value, "previous")}</td>
-                  <td className="px-4 py-4">{renderAuditValue(log.new_value, "new")}</td>
-                  <td className="px-4 py-4">
-                    <div className="max-h-24 overflow-auto rounded-lg border border-amber-100 bg-amber-50/40 px-2.5 py-2 text-[11px] leading-relaxed text-slate-700 break-words" title={log.reason || "-"}>
-                      {log.reason || "-"}
-                    </div>
-                  </td>
-                </tr>
+        )}
+
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+          <div className="p-5 border-b border-slate-100 flex flex-col gap-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+              <div>
+                <h4 className="font-bold text-slate-800 text-sm">{isEnglish ? "Recorded Security Events" : "Registros de Seguridad Registrados"}</h4>
+                <p className="mt-0.5 text-[10px] text-slate-500">
+                  {isEnglish ? "Long values stay inside each cell. Log ID is hidden by default and can be enabled below." : "Los valores largos quedan dentro de cada celda. Log ID está oculto por defecto y se puede activar debajo."}
+                </p>
+              </div>
+              <span className="shrink-0 rounded-lg bg-slate-50 px-3 py-1.5 text-xs text-slate-500 font-mono">{auditLogs.length} {isEnglish ? "saved actions" : "acciones guardadas"}</span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Columns" : "Columnas"}</span>
+              {auditLogColumns.map(column => (
+                <label key={column.key} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={visibleAuditLogColumns.includes(column.key)}
+                    onChange={() => toggleAuditLogColumn(column.key)}
+                    className="h-3.5 w-3.5 rounded border-slate-300 text-primary-blue"
+                  />
+                  {column.label}
+                </label>
               ))}
-              {auditLogs.length === 0 && (
-                <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-xs font-semibold text-slate-400">
-                    {isEnglish ? "No audit log records found." : "No hay registros de auditoría."}
-                  </td>
+            </div>
+          </div>
+          <div className="max-w-full overflow-x-auto">
+            <table className="w-full min-w-[980px] table-fixed text-left text-xs border-collapse">
+              <colgroup>
+                {activeColumns.map(column => <col key={column.key} className={column.width} />)}
+              </colgroup>
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-mono uppercase tracking-wider">
+                  {activeColumns.map(column => (
+                    <th key={column.key} className="px-4 py-3">{column.label}</th>
+                  ))}
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-sans text-slate-700">
+                {paginatedAuditLogs.map(log => (
+                  <tr key={log.audit_id} className="align-top hover:bg-slate-50/70">
+                    {activeColumns.map(column => (
+                      <td key={column.key} className="px-4 py-4">{renderAuditCell(log, column.key)}</td>
+                    ))}
+                  </tr>
+                ))}
+                {auditLogs.length === 0 && (
+                  <tr>
+                    <td colSpan={activeColumns.length || 1} className="px-4 py-10 text-center text-xs font-semibold text-slate-400">
+                      {isEnglish ? "No audit log records found." : "No hay registros de auditoría."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-slate-500">
+              {isEnglish ? "Showing" : "Mostrando"} <span className="font-mono font-bold text-slate-800">{auditLogPageStart}</span> {isEnglish ? "to" : "a"} <span className="font-mono font-bold text-slate-800">{auditLogPageEnd}</span> {isEnglish ? "of" : "de"} <span className="font-mono font-bold text-slate-800">{auditLogs.length}</span>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <label className="flex items-center gap-2 text-slate-500">
+                {isEnglish ? "Rows" : "Filas"}
+                <select value={auditLogRowsPerPage} onChange={event => { setAuditLogRowsPerPage(Number(event.target.value)); setAuditLogPage(1); }} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700">
+                  {[10, 25, 50, 100].map(size => <option key={size} value={size}>{size}</option>)}
+                </select>
+              </label>
+              <button onClick={() => setAuditLogPage(page => Math.max(1, page - 1))} disabled={currentAuditLogPage <= 1} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 disabled:opacity-50">{isEnglish ? "Previous" : "Anterior"}</button>
+              <span className="rounded-lg bg-primary-blue px-3 py-1.5 font-mono font-bold text-white">{currentAuditLogPage} / {auditLogTotalPages}</span>
+              <button onClick={() => setAuditLogPage(page => Math.min(auditLogTotalPages, page + 1))} disabled={currentAuditLogPage >= auditLogTotalPages} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 disabled:opacity-50">{isEnglish ? "Next" : "Siguiente"}</button>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Export claims helper
   const handleExportClaimsCSV = () => {
@@ -5380,7 +5453,7 @@ export default function App() {
                               </td>
                             </tr>
                           )}
-                          {backups.map(backup => (
+                          {paginatedBackups.map(backup => (
                             <tr key={backup.backup_file_id} className="hover:bg-slate-50">
                               <td className="px-4 py-3 font-mono text-slate-500">{backup.created_at ? new Date(backup.created_at).toLocaleString() : "-"}</td>
                               <td className="px-4 py-3">
@@ -5433,6 +5506,43 @@ export default function App() {
                           ))}
                         </tbody>
                       </table>
+                    </div>
+                    <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-slate-500">
+                        {isEnglish ? "Showing" : "Mostrando"} <span className="font-mono font-bold text-slate-800">{backupPageStart}</span> {isEnglish ? "to" : "a"} <span className="font-mono font-bold text-slate-800">{backupPageEnd}</span> {isEnglish ? "of" : "de"} <span className="font-mono font-bold text-slate-800">{backups.length}</span>
+                      </div>
+                      <div className="flex items-center justify-end gap-2">
+                        <label className="flex items-center gap-2 text-slate-500">
+                          {isEnglish ? "Rows" : "Filas"}
+                          <select
+                            value={backupRowsPerPage}
+                            onChange={event => {
+                              setBackupRowsPerPage(Number(event.target.value));
+                              setBackupPage(1);
+                            }}
+                            className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700"
+                          >
+                            {[10, 25, 50].map(size => <option key={size} value={size}>{size}</option>)}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setBackupPage(page => Math.max(1, page - 1))}
+                          disabled={currentBackupPage <= 1}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 disabled:opacity-50"
+                        >
+                          {isEnglish ? "Previous" : "Anterior"}
+                        </button>
+                        <span className="rounded-lg bg-primary-blue px-3 py-1.5 font-mono font-bold text-white">{currentBackupPage} / {backupTotalPages}</span>
+                        <button
+                          type="button"
+                          onClick={() => setBackupPage(page => Math.min(backupTotalPages, page + 1))}
+                          disabled={currentBackupPage >= backupTotalPages}
+                          className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 disabled:opacity-50"
+                        >
+                          {isEnglish ? "Next" : "Siguiente"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>

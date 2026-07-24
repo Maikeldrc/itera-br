@@ -287,6 +287,8 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
   const [resultStatusFilter, setResultStatusFilter] = useState("all");
   const [resultIssueFilter, setResultIssueFilter] = useState("all");
   const [resultSort, setResultSort] = useState<{ field: string; direction: "asc" | "desc" }>({ field: "row", direction: "asc" });
+  const [resultPage, setResultPage] = useState(1);
+  const [resultRowsPerPage, setResultRowsPerPage] = useState(25);
   const [restoredFromSavedAnalysis, setRestoredFromSavedAnalysis] = useState(false);
   const persistWarningShownRef = useRef(false);
   const legacyRefreshAttemptedRef = useRef(false);
@@ -994,6 +996,14 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       : String(aValue || "").localeCompare(String(bValue || ""), undefined, { numeric: true, sensitivity: "base" });
     return resultSort.direction === "asc" ? result : -result;
   });
+  const resultTotalPages = Math.max(1, Math.ceil(sortedResultRows.length / resultRowsPerPage));
+  const currentResultPage = Math.min(resultPage, resultTotalPages);
+  const paginatedResultRows = sortedResultRows.slice(
+    (currentResultPage - 1) * resultRowsPerPage,
+    currentResultPage * resultRowsPerPage
+  );
+  const resultPageStart = sortedResultRows.length === 0 ? 0 : (currentResultPage - 1) * resultRowsPerPage + 1;
+  const resultPageEnd = Math.min(currentResultPage * resultRowsPerPage, sortedResultRows.length);
   const exportPaymentImportRowsToExcel = () => {
     if (sortedResultRows.length === 0) {
       notify(
@@ -1052,11 +1062,13 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     setResultSearch("");
     setResultStatusFilter("all");
     setResultIssueFilter("all");
+    setResultPage(1);
   };
   const applyResultStatusFilter = (status: string) => {
     setResultSearch("");
     setResultIssueFilter("all");
     setResultStatusFilter(status);
+    setResultPage(1);
   };
   const summaryCards = summary ? [
     { key: "rows", label: isEnglish ? "Rows" : "Filas", value: summary.totalRowsRead, status: "all" },
@@ -1530,7 +1542,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="rounded-full bg-slate-50 px-3 py-1 text-[11px] font-bold text-slate-600">
-                    {isEnglish ? "Showing" : "Mostrando"} {filteredResultRows.length} {isEnglish ? "of" : "de"} {resultRows.length}
+                    {isEnglish ? "Showing" : "Mostrando"} {resultPageStart}-{resultPageEnd} {isEnglish ? "of" : "de"} {sortedResultRows.length}
                   </div>
                   <button
                     type="button"
@@ -1549,7 +1561,10 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                   <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Search result" : "Buscar resultado"}</span>
                   <input
                     value={resultSearch}
-                    onChange={event => setResultSearch(event.target.value)}
+                    onChange={event => {
+                      setResultSearch(event.target.value);
+                      setResultPage(1);
+                    }}
                     placeholder={isEnglish ? "Row, claim, patient, CPT, payer, issue..." : "Fila, claim, paciente, CPT, payer, problema..."}
                     className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"
                   />
@@ -1558,7 +1573,10 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                   <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Status" : "Estado"}</span>
                   <MultiSelectFilter
                     value={resultStatusFilter === "all" ? "" : resultStatusFilter}
-                    onChange={value => setResultStatusFilter(value || "all")}
+                    onChange={value => {
+                      setResultStatusFilter(value || "all");
+                      setResultPage(1);
+                    }}
                     allLabel={isEnglish ? "All statuses" : "Todos"}
                     options={[
                       { value: "ready", label: isEnglish ? "Ready" : "Lista" },
@@ -1575,7 +1593,10 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                   <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Issue type" : "Tipo de issue"}</span>
                   <MultiSelectFilter
                     value={resultIssueFilter === "all" ? "" : resultIssueFilter}
-                    onChange={value => setResultIssueFilter(value || "all")}
+                    onChange={value => {
+                      setResultIssueFilter(value || "all");
+                      setResultPage(1);
+                    }}
                     allLabel={isEnglish ? "All rows" : "Todas las filas"}
                     options={[
                       { value: "errors", label: isEnglish ? "Errors only" : "Solo errores" },
@@ -1616,7 +1637,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {sortedResultRows.map(row => (
+                  {paginatedResultRows.map(row => (
                     <tr key={`${row.rowNumber}-${row.claimId}-${row.cptCode}`} className="hover:bg-slate-50">
                       <td className="px-3 py-3 font-mono text-slate-500">{row.rowNumber}</td>
                       <td className="px-3 py-3">{statusBadge(row.status, isEnglish)}</td>
@@ -1738,6 +1759,43 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                   )}
                 </tbody>
               </table>
+            </div>
+            <div className="flex flex-col gap-3 border-t border-slate-100 px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+              <div className="text-slate-500">
+                {isEnglish ? "Showing" : "Mostrando"} <span className="font-mono font-bold text-slate-800">{resultPageStart}</span> {isEnglish ? "to" : "a"} <span className="font-mono font-bold text-slate-800">{resultPageEnd}</span> {isEnglish ? "of" : "de"} <span className="font-mono font-bold text-slate-800">{sortedResultRows.length}</span>
+              </div>
+              <div className="flex items-center justify-end gap-2">
+                <label className="flex items-center gap-2 text-slate-500">
+                  {isEnglish ? "Rows" : "Filas"}
+                  <select
+                    value={resultRowsPerPage}
+                    onChange={event => {
+                      setResultRowsPerPage(Number(event.target.value));
+                      setResultPage(1);
+                    }}
+                    className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-bold text-slate-700"
+                  >
+                    {[25, 50, 100, 250].map(size => <option key={size} value={size}>{size}</option>)}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setResultPage(page => Math.max(1, page - 1))}
+                  disabled={currentResultPage <= 1}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 disabled:opacity-50"
+                >
+                  {isEnglish ? "Previous" : "Anterior"}
+                </button>
+                <span className="rounded-lg bg-primary-blue px-3 py-1.5 font-mono font-bold text-white">{currentResultPage} / {resultTotalPages}</span>
+                <button
+                  type="button"
+                  onClick={() => setResultPage(page => Math.min(resultTotalPages, page + 1))}
+                  disabled={currentResultPage >= resultTotalPages}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 font-semibold text-slate-600 disabled:opacity-50"
+                >
+                  {isEnglish ? "Next" : "Siguiente"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
