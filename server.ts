@@ -514,7 +514,7 @@ function paymentImportMappingIssues(mapping: PaymentImportMapping) {
 }
 
 function mappedImportField(row: Record<string, unknown>, mapping: PaymentImportMapping | undefined, field: PaymentImportFieldKey, fallbackNames: string[] = []) {
-  const names = [mapping?.[field], ...fallbackNames].filter(Boolean) as string[];
+  const names = [mapping?.[field], field, PAYMENT_IMPORT_FIELD_LABELS[field], ...fallbackNames, ...PAYMENT_IMPORT_FIELD_ALIASES[field]].filter(Boolean) as string[];
   return importField(row, names);
 }
 
@@ -530,7 +530,7 @@ function normalizePaymentImportRow(row: Record<string, unknown>, index: number, 
     excelSerialToIsoDate(importField(row, ["Payment Check Date"]));
 
   return {
-    rowNumber: Number(row.__source_row) || index + 1,
+    rowNumber: Number(row.__source_row || row.rowNumber) || index + 1,
     sourceRow: row,
     cptCode: mappedImportField(row, mapping, "cptCode", ["CPT Code", "CPT"]),
     facilityName: mappedImportField(row, mapping, "facilityName", ["Facility Name"]),
@@ -888,6 +888,16 @@ function compactPaymentImportResultRow(row: any) {
   compact.warnings = Array.isArray(row.warnings) ? row.warnings.map((item: unknown) => textValue(item).slice(0, 1000)) : [];
   compact.sourceRow = compactObjectForStoredJson(row.sourceRow, 500);
   return compact;
+}
+
+function compactPaymentImportBatchPayload(body: any) {
+  return {
+    fileName: textValue(body?.fileName),
+    apply: Boolean(body?.apply),
+    mapping: body?.mapping && typeof body.mapping === "object" ? body.mapping : undefined,
+    acceptedPayerAssociations: Array.isArray(body?.acceptedPayerAssociations) ? body.acceptedPayerAssociations : [],
+    importBilledBy: textValue(body?.importBilledBy) || "Unknown"
+  };
 }
 
 function paymentImportBatchRowFromResult(batchId: string, row: any): PaymentImportBatchRow {
@@ -3424,8 +3434,21 @@ async function startServer() {
 
   const processPaymentImportBatchChunk = async (batchId: string, payload: any, appUser: User | undefined, rowNumbers: number[]) => {
     await sheetsService.reloadPaymentImportData();
+    const batchRows = await sheetsService.getPaymentImportBatchRows(batchId);
+    const selectedRows = batchRows
+      .filter(row => rowNumbers.includes(Number(row.row_number)))
+      .map(row => {
+        const parsed = safeJsonParse(row.row_json, {}) as Record<string, unknown>;
+        return {
+          ...parsed,
+          rowNumber: Number(parsed.rowNumber || row.row_number),
+          cptCode: parsed.cptCode || row.cpt_code,
+          serviceDate: parsed.serviceDate || row.dos,
+          payment: Number((parsed as any).payment ?? row.payment_amount ?? 0)
+        };
+      });
     const fakeReq = {
-      body: { ...payload, apply: true, batchId, retryRows: rowNumbers, suppressBatchFailure: true },
+      body: { ...payload, rows: selectedRows, fileBase64: undefined, apply: true, batchId, retryRows: rowNumbers, suppressBatchFailure: true },
       appUser
     } as AppRequest;
     const fakeRes: any = {
@@ -3465,7 +3488,7 @@ async function startServer() {
         failed_rows: 0,
         total_amount: Number(rowsForBatch.reduce((sum: number, row: any) => sum + Number(row.payment || 0), 0).toFixed(2)),
         progress: 0,
-        payload_json: JSON.stringify({ ...req.body, analysisRows: undefined })
+        payload_json: JSON.stringify(compactPaymentImportBatchPayload(req.body))
       });
       if (rowsForBatch.length > 0) {
         await sheetsService.createPaymentImportBatchRows(rowsForBatch.map((row: any) => ({
