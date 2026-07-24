@@ -663,10 +663,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const selectedImportDecisionLabel = selectedImportDecision === "ready"
     ? (isEnglish ? `Import ${selectedImportCount} ready row(s)` : `Importar ${selectedImportCount} fila(s) lista(s)`)
     : selectedImportDecision === "all_eligible"
-      ? (isEnglish ? `Import ${selectedImportCount} eligible row(s)` : `Importar ${selectedImportCount} fila(s) elegibles`)
+      ? (isEnglish ? `Import ${selectedImportCount} ready + review row(s)` : `Importar ${selectedImportCount} fila(s) listas + revisión`)
       : (isEnglish ? `Import ${selectedImportCount} problem row(s)` : `Importar ${selectedImportCount} fila(s) con problemas`);
   const selectedImportConfirmationLabel = selectedImportDecision === "all_eligible"
-    ? (isEnglish ? `Confirm import ${selectedImportCount} eligible row(s)` : `Confirmar importación de ${selectedImportCount} fila(s) elegibles`)
+    ? (isEnglish ? `Confirm import ${selectedImportCount} ready + review row(s)` : `Confirmar importación de ${selectedImportCount} fila(s) listas + revisión`)
     : (isEnglish ? `Confirm import ${selectedImportCount} problem row(s)` : `Confirmar importación de ${selectedImportCount} fila(s) con problemas`);
 
   const escapeCsvValue = (value: unknown) => {
@@ -1089,6 +1089,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     {remainingReadyToImportCount > 0
                       ? (isEnglish ? `${remainingReadyToImportCount} ready row(s)` : `${remainingReadyToImportCount} fila(s) lista(s)`)
                       : (isEnglish ? `${importedReadyRows} ready row(s) imported` : `${importedReadyRows} fila(s) lista(s) importadas`)}
+                    <span className="mt-1 block text-[10px] font-semibold leading-snug text-slate-500">
+                      {isEnglish
+                        ? "Only rows with no validation issues. These can be written directly."
+                        : "Solo filas sin problemas de validación. Se pueden guardar directamente."}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -1100,12 +1105,17 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                         : "border-blue-200 bg-white text-dark-blue hover:bg-blue-50"
                     }`}
                   >
-                    <span className="block text-[10px] uppercase tracking-wide text-primary-blue">{isEnglish ? "All eligible" : "Todas elegibles"}</span>
+                    <span className="block text-[10px] uppercase tracking-wide text-primary-blue">{isEnglish ? "Ready + review rows" : "Listas + revisión"}</span>
                     {remainingReadyToImportCount > 0 || remainingForcedImportEligibleRows.length > 0
                       ? (isEnglish
-                        ? `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} eligible row(s)`
-                        : `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} fila(s) elegibles`)
-                      : (isEnglish ? "All eligible rows imported" : "Todas las filas elegibles importadas")}
+                        ? `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} row(s) total`
+                        : `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} fila(s) en total`)
+                      : (isEnglish ? "All selected rows imported" : "Todas las filas seleccionadas importadas")}
+                    <span className="mt-1 block text-[10px] font-semibold leading-snug text-slate-500">
+                      {isEnglish
+                        ? "Clean rows plus recoverable problem rows that will be marked for review."
+                        : "Filas limpias más problemas recuperables que quedarán marcados para revisión."}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -1121,6 +1131,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     {remainingForcedImportEligibleRows.length > 0
                       ? (isEnglish ? `${remainingForcedImportEligibleRows.length} problem row(s) only` : `Solo ${remainingForcedImportEligibleRows.length} fila(s) con problemas`)
                       : (isEnglish ? `${importedProblemRows} problem row(s) imported` : `${importedProblemRows} fila(s) con problemas importadas`)}
+                    <span className="mt-1 block text-[10px] font-semibold leading-snug text-slate-500">
+                      {isEnglish
+                        ? "Only recoverable rule conflicts. Paid duplicate CPT/DOS rows remain blocked."
+                        : "Solo conflictos recuperables. Duplicados pagados por CPT/DOS siguen bloqueados."}
+                    </span>
                   </button>
                 </div>
               </div>

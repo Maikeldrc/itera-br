@@ -5,6 +5,9 @@ export type CptRepeatLine = {
   cpt?: string;
   units?: number;
   dos?: string;
+  status?: string;
+  paid?: number;
+  secondaryPaid?: number;
 };
 
 const DEFAULT_MAX_PER_DOS = 1;
@@ -57,6 +60,12 @@ function expandLineOccurrences(line: CptRepeatLine, fallbackDos?: string) {
   const dos = normalizeDos(line.dos || fallbackDos);
   if (!cpt || !dos) return [];
   return Array.from({ length: lineUnitCount(line) }, () => ({ cpt, dos }));
+}
+
+function isPaidLine(line: CptRepeatLine) {
+  const status = String(line.status || "").trim().toLowerCase();
+  const paid = Number(line.paid || 0) + Number(line.secondaryPaid || 0);
+  return status === "paid" || paid > 0;
 }
 
 export function getCptMaxPerDos(cpt: string, feeSchedules: FeeSchedule[], dos?: string) {
@@ -131,7 +140,10 @@ export function extractClaimCptRepeatLines(claim: Partial<Claim>): CptRepeatLine
           .map(line => ({
             cpt: normalizedCpt(line?.cpt),
             dos: normalizeDos(line?.dos || claim.date_of_service_from),
-            units: lineUnitCount({ units: line?.units })
+            units: lineUnitCount({ units: line?.units }),
+            status: String(line?.status || claim.claim_status || ""),
+            paid: Number(line?.paid || 0),
+            secondaryPaid: Number(line?.secondaryPaid || 0)
           }))
           .filter(line => line.cpt);
       }
@@ -142,7 +154,12 @@ export function extractClaimCptRepeatLines(claim: Partial<Claim>): CptRepeatLine
 
   return String(claim.cpt_hcpcs || "")
     .split(/[\s,]+/)
-    .map(cpt => ({ cpt: normalizedCpt(cpt), dos: normalizeDos(claim.date_of_service_from) }))
+    .map(cpt => ({
+      cpt: normalizedCpt(cpt),
+      dos: normalizeDos(claim.date_of_service_from),
+      status: String(claim.claim_status || ""),
+      paid: Number(claim.paid_amount || 0)
+    }))
     .filter(line => line.cpt);
 }
 
@@ -182,9 +199,23 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
     .filter(existing => !currentClaimId || normalizedCpt(existing.claim_id) !== normalizedCpt(currentClaimId))
     .filter(existing => normalizedCpt(existing.patient_id) === patientId);
 
-  otherPatientClaims
-    .flatMap(existing => extractClaimCptRepeatLines(existing))
-    .forEach(addLine);
+  const existingLines = otherPatientClaims.flatMap(existing => extractClaimCptRepeatLines(existing));
+  const paidDuplicateErrors = candidateLines.flatMap(candidate => {
+    const candidateCpt = normalizedCpt(candidate.cpt);
+    const candidateDos = normalizeDos(candidate.dos || claimDos);
+    if (!candidateCpt || !candidateDos) return [];
+    const paidMatch = existingLines.find(existingLine =>
+      normalizedCpt(existingLine.cpt) === candidateCpt &&
+      normalizeDos(existingLine.dos || claimDos) === candidateDos &&
+      isPaidLine(existingLine)
+    );
+    if (!paidMatch) return [];
+    return [
+      `CPT ${candidateCpt} already exists as paid for patient ${patientId} on ${displayDos(candidateDos)}. Paid duplicate service lines cannot be imported.`
+    ];
+  });
+
+  existingLines.forEach(addLine);
 
   candidateLines.forEach(addLine);
 
@@ -228,5 +259,5 @@ export function validateClaimCptRepeatLimitsAgainstExisting(
     ];
   });
 
-  return [...spacingErrors, ...maxPerDosErrors];
+  return [...paidDuplicateErrors, ...spacingErrors, ...maxPerDosErrors];
 }

@@ -49,5 +49,24 @@ export function runCptRepeatLimitTests(): string[] {
     failures.push("99454 should reject another patient claim when previous DOS is less than 30 days apart.");
   }
 
+  const paidExistingClaim = {
+    claim_id: "CLM-PAID",
+    patient_id: "PAT-002",
+    date_of_service_from: "2026-06-01",
+    claim_status: "Paid",
+    paid_amount: 42.36,
+    service_lines_json: JSON.stringify([{ cpt: "99490", dos: "2026-06-01", units: 1, status: "Paid", paid: 42.36 }])
+  } as Partial<Claim>;
+  const duplicatePaidCandidate = {
+    claim_id: "CLM-DUP-PAID",
+    patient_id: "PAT-002",
+    date_of_service_from: "2026-06-01",
+    service_lines_json: JSON.stringify([{ cpt: "99490", dos: "2026-06-01", units: 1 }])
+  } as Partial<Claim>;
+  const paidDuplicateErrors = validateClaimCptRepeatLimitsAgainstExisting(duplicatePaidCandidate, feeSchedules, [paidExistingClaim]);
+  if (!paidDuplicateErrors.some(error => error.includes("already exists as paid"))) {
+    failures.push("Paid CPT/DOS duplicates should be rejected as non-importable.");
+  }
+
   return failures;
 }
