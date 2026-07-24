@@ -31,6 +31,10 @@ function safeSheetCell(value: unknown): string {
   return `${text.slice(0, GOOGLE_SHEETS_SAFE_CELL_LIMIT)}... [truncated ${text.length - GOOGLE_SHEETS_SAFE_CELL_LIMIT} chars to fit Google Sheets cell limit]`;
 }
 
+function safeAuditValue(value: unknown): string {
+  return safeSheetCell(value);
+}
+
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -493,8 +497,8 @@ export class GoogleSheetsService {
         claim_id: claimId,
         action_type: "Update",
         field_name: diff.field,
-        previous_value: String(diff.prev),
-        new_value: String(diff.curr),
+        previous_value: safeAuditValue(diff.prev),
+        new_value: safeAuditValue(diff.curr),
         reason: diff.reason || "Field manual modification",
         changed_by: operatorEmail,
         changed_at: new Date().toISOString()
@@ -546,8 +550,8 @@ export class GoogleSheetsService {
           claim_id: savedClaim.claim_id,
           action_type: "Update",
           field_name: diff.field,
-          previous_value: String(diff.prev),
-          new_value: String(diff.curr),
+          previous_value: safeAuditValue(diff.prev),
+          new_value: safeAuditValue(diff.curr),
           reason: diff.reason || "Payment import batch update",
           changed_by: operatorEmail,
           changed_at: now
