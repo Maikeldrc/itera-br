@@ -363,6 +363,7 @@ export default function App() {
   const [importExceptionSearch, setImportExceptionSearch] = useState("");
   const [importExceptionTypeFilter, setImportExceptionTypeFilter] = useState("");
   const [importExceptionSourceFilter, setImportExceptionSourceFilter] = useState("");
+  const [importExceptionProviderFilter, setImportExceptionProviderFilter] = useState("");
   const [importExceptionSeverityFilter, setImportExceptionSeverityFilter] = useState("");
   const [importExceptionStatusFilter, setImportExceptionStatusFilter] = useState("");
   const [importExceptionPage, setImportExceptionPage] = useState(1);
@@ -2608,8 +2609,56 @@ export default function App() {
     setPaymentPage(1);
   };
   const importExceptions = operationsData?.importExceptions || [];
+  const providerByClaimId = new Map(visibleClaims.map(claim => [toText(claim.claim_id), claim.provider_name]));
+  const providerByNpi = new Map(visibleProviders.map(provider => [toText(provider.npi).toLowerCase(), provider.provider_name]));
+  const providerByName = new Map(visibleProviders.map(provider => [toText(provider.provider_name).toLowerCase(), provider.provider_name]));
+  const getExceptionProviderLabels = (item: any) => {
+    const labels = new Set<string>();
+    const addProvider = (value: unknown) => {
+      const text = toText(value);
+      if (text) labels.add(text);
+    };
+    const addProviderFromClaim = (claimId: unknown) => {
+      const providerName = providerByClaimId.get(toText(claimId));
+      if (providerName) addProvider(providerName);
+    };
+    const addProviderFromNpi = (npi: unknown) => {
+      const providerName = providerByNpi.get(toText(npi).toLowerCase());
+      if (providerName) addProvider(providerName);
+    };
+    const addProviderFromName = (name: unknown) => {
+      const text = toText(name);
+      if (!text) return;
+      addProvider(providerByName.get(text.toLowerCase()) || text);
+    };
+
+    addProviderFromClaim(item?.claim_id || item?.claimId);
+    getExceptionRejectedRows(item).forEach((row: any) => {
+      addProviderFromClaim(row.claimId || row.normalized?.claimId || row.sourceRow?.["Claim ID"] || row.sourceRow?.["Claim No"]);
+      addProviderFromNpi(
+        row.normalized?.providerNpi ||
+        row.normalized?.provider_npi ||
+        row.sourceRow?.["Provider NPI"] ||
+        row.sourceRow?.["Rendering Provider NPI"] ||
+        row.sourceRow?.NPI
+      );
+      addProviderFromName(
+        row.normalized?.providerName ||
+        row.normalized?.provider_name ||
+        row.sourceRow?.Provider ||
+        row.sourceRow?.["Provider Name"] ||
+        row.sourceRow?.["Rendering Provider Name"] ||
+        row.sourceRow?.["Facility Name"]
+      );
+    });
+    return Array.from(labels).sort((a, b) => a.localeCompare(b));
+  };
   const importExceptionTypes = Array.from(new Set(importExceptions.map((item: any) => toText(item.type)).filter(Boolean))).sort();
   const importExceptionSources = Array.from(new Set(importExceptions.map((item: any) => toText(item.source)).filter(Boolean))).sort();
+  const importExceptionProviders = Array.from(new Set([
+    ...visibleProviders.map(provider => toText(provider.provider_name)).filter(Boolean),
+    ...importExceptions.flatMap((item: any) => getExceptionProviderLabels(item))
+  ])).sort();
   const importExceptionSeverities = Array.from(new Set(importExceptions.map((item: any) => toText(item.severity)).filter(Boolean))).sort();
   const importExceptionStatuses = Array.from(new Set([
     ...importExceptions.map((item: any) => toText(item.status)).filter(Boolean),
@@ -2617,6 +2666,7 @@ export default function App() {
   ])).sort();
   const filteredImportExceptions = importExceptions.filter((item: any) => {
     const task = (operationsData?.reviewTasks || []).find((candidate: any) => candidate.task_id === item.exception_id);
+    const providerLabels = getExceptionProviderLabels(item);
     const search = importExceptionSearch.trim().toLowerCase();
     if (search) {
       const matches = [
@@ -2630,12 +2680,14 @@ export default function App() {
         item.assigned_to,
         task?.assigned_to,
         task?.status,
-        task?.due_date
+        task?.due_date,
+        ...providerLabels
       ].some(value => toText(value).toLowerCase().includes(search));
       if (!matches) return false;
     }
     if (!multiFilterMatches(item.type, importExceptionTypeFilter)) return false;
     if (!multiFilterMatches(item.source, importExceptionSourceFilter)) return false;
+    if (importExceptionProviderFilter && !providerLabels.some(provider => multiFilterMatches(provider, importExceptionProviderFilter))) return false;
     if (!multiFilterMatches(item.severity, importExceptionSeverityFilter)) return false;
     if (importExceptionStatusFilter) {
       const status = task?.status || item.status;
@@ -2648,6 +2700,7 @@ export default function App() {
     const cptSummary = getExceptionCptSummary(item);
     if (field === "type") return item.type;
     if (field === "source") return item.source;
+    if (field === "provider") return getExceptionProviderLabels(item).join(", ");
     if (field === "cpt") return cptSummary.total;
     if (field === "reason") return item.reason;
     if (field === "severity") return item.severity;
@@ -2668,6 +2721,7 @@ export default function App() {
     setImportExceptionSearch("");
     setImportExceptionTypeFilter("");
     setImportExceptionSourceFilter("");
+    setImportExceptionProviderFilter("");
     setImportExceptionSeverityFilter("");
     setImportExceptionStatusFilter("");
     setImportExceptionPage(1);
@@ -3306,7 +3360,7 @@ export default function App() {
                   <p className="mt-0.5 text-[10px] text-slate-500">{isEnglish ? "Review tasks can be assigned and resolved directly here." : "Las tareas de revisión se pueden asignar y resolver directamente aquí."}</p>
                 </div>
                 <div className="border-b border-slate-100 bg-slate-50/70 p-4">
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_170px_190px_160px_170px_auto]">
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[1.4fr_150px_170px_190px_150px_160px_auto]">
                     <label className="block">
                       <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{isEnglish ? "Search" : "Buscar"}</span>
                       <input
@@ -3343,6 +3397,20 @@ export default function App() {
                         }}
                         allLabel={isEnglish ? "All sources" : "Todos"}
                         options={importExceptionSources.map(source => ({ value: source, label: source }))}
+                        className="mt-1"
+                        buttonClassName="h-9 bg-white px-3 font-semibold"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500">Provider</span>
+                      <MultiSelectFilter
+                        value={importExceptionProviderFilter}
+                        onChange={value => {
+                          setImportExceptionProviderFilter(value);
+                          setImportExceptionPage(1);
+                        }}
+                        allLabel={isEnglish ? "All providers" : "Todos"}
+                        options={importExceptionProviders.map(provider => ({ value: provider, label: provider }))}
                         className="mt-1"
                         buttonClassName="h-9 bg-white px-3 font-semibold"
                       />
@@ -3387,11 +3455,12 @@ export default function App() {
                   </div>
                 </div>
                 <div className="overflow-auto">
-                  <table className="w-full min-w-[1180px] text-left text-xs">
+                  <table className="w-full min-w-[1320px] text-left text-xs">
                     <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
                       <tr>
                         {renderSortableHeader("Type", "type", importExceptionSort, setImportExceptionSort)}
                         {renderSortableHeader("Source", "source", importExceptionSort, setImportExceptionSort)}
+                        {renderSortableHeader("Provider", "provider", importExceptionSort, setImportExceptionSort)}
                         {renderSortableHeader("CPT", "cpt", importExceptionSort, setImportExceptionSort)}
                         {renderSortableHeader("Reason", "reason", importExceptionSort, setImportExceptionSort)}
                         {renderSortableHeader("Severity", "severity", importExceptionSort, setImportExceptionSort)}
@@ -3423,6 +3492,22 @@ export default function App() {
                             <tr className="hover:bg-slate-50">
                               <td className="px-3 py-2 font-semibold text-slate-800">{item.type}</td>
                               <td className="px-3 py-2 text-slate-600">{item.source || "-"}</td>
+                              <td className="max-w-44 px-3 py-2 text-slate-600">
+                                {getExceptionProviderLabels(item).length > 0 ? (
+                                  <div className="flex flex-wrap gap-1">
+                                    {getExceptionProviderLabels(item).slice(0, 2).map(provider => (
+                                      <span key={provider} className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600" title={provider}>
+                                        {provider}
+                                      </span>
+                                    ))}
+                                    {getExceptionProviderLabels(item).length > 2 && (
+                                      <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">+{getExceptionProviderLabels(item).length - 2}</span>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="font-mono text-[10px] text-slate-400">-</span>
+                                )}
+                              </td>
                               <td className="px-3 py-2">
                                 {cptSummary.entries.length > 0 ? (
                                   <div className="flex max-w-44 flex-wrap gap-1">
@@ -3483,7 +3568,7 @@ export default function App() {
                             </tr>
                             {isExpanded && (
                               <tr className="bg-slate-50/70">
-                                <td colSpan={9} className="px-4 py-4">
+                                <td colSpan={10} className="px-4 py-4">
                                   <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
                                     <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                                       <div>
@@ -3592,7 +3677,7 @@ export default function App() {
                       })}
                       {paginatedImportExceptions.length === 0 && (
                         <tr>
-                          <td colSpan={9} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">
+                          <td colSpan={10} className="px-3 py-10 text-center text-xs font-semibold text-slate-400">
                             {isLoadingOperations
                               ? (isEnglish ? "Loading..." : "Cargando...")
                               : filteredImportExceptions.length === 0 && importExceptions.length > 0
