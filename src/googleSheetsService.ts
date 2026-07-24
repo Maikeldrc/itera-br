@@ -79,6 +79,7 @@ export class GoogleSheetsService {
   public paymentImportBatches: PaymentImportBatch[] = [];
   public paymentImportBatchRows: PaymentImportBatchRow[] = [];
   private scheduledBackupInFlight = false;
+  private scheduledBackupRetryAfter = 0;
 
   constructor() {
     this.clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
@@ -172,6 +173,22 @@ export class GoogleSheetsService {
         if (!isGoogleSheetsQuotaError(err) || attempt === 5) break;
         const waitMs = Math.min(45000, 3000 * Math.pow(2, attempt));
         console.warn(`Google Sheets quota reached. Retrying write in ${Math.round(waitMs / 1000)}s.`);
+        await sleep(waitMs);
+      }
+    }
+    throw lastError;
+  }
+
+  private async executeSheetsRead<T>(operation: () => Promise<T>): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        return await operation();
+      } catch (err) {
+        lastError = err;
+        if (!isGoogleSheetsQuotaError(err) || attempt === 5) break;
+        const waitMs = Math.min(45000, 3000 * Math.pow(2, attempt));
+        console.warn(`Google Sheets quota reached. Retrying read in ${Math.round(waitMs / 1000)}s.`);
         await sleep(waitMs);
       }
     }
@@ -289,6 +306,22 @@ export class GoogleSheetsService {
     await this.loadAllFromSheets();
   }
 
+  public async reloadPaymentImportData() {
+    if (!this.isConfigured) return;
+    await this.bootstrapSheetsIfEmpty();
+    await this.loadTabsFromSheets(["Claims", "Payments", "Settings", "Payers", "Payment_Import_Batches", "Payment_Import_Batch_Rows"]);
+  }
+
+  public async reloadClaimsFromGoogleSheets() {
+    if (!this.isConfigured) return;
+    await this.loadTabsFromSheets(["Claims"]);
+  }
+
+  public async reloadPaymentsFromGoogleSheets() {
+    if (!this.isConfigured) return;
+    await this.loadTabsFromSheets(["Payments"]);
+  }
+
   /**
    * Create missing tabs. In production, write headers only; seed data requires USE_SEED_DATA=true.
    */
@@ -372,12 +405,18 @@ export class GoogleSheetsService {
     if (!this.isConfigured) return;
 
     const tabs = ["Claims", "Payments", "Notes", "Audit_Log", "Providers", "Payers", "Users", "Settings", "FeeSchedules", "Fee_Schedule", "Eligibility_Coverage", "Jobs", "Import_History", "User_Activity_Log", "Review_Tasks", "Notifications", "Bank_Deposits", "Monthly_Closures", "Import_Mapping_Templates", "Payment_Import_Batches", "Payment_Import_Batch_Rows"];
+    await this.loadTabsFromSheets(tabs);
+  }
+
+  private async loadTabsFromSheets(tabs: string[]) {
+    if (!this.isConfigured) return;
+
     for (const tab of tabs) {
       try {
-        const response = await this.sheets.spreadsheets.values.get({
+        const response = await this.executeSheetsRead(() => this.sheets.spreadsheets.values.get({
           spreadsheetId: this.sheetId,
           range: `${tab}!A:ZZ`,
-        });
+        }));
 
         const rows = response.data.values || [];
         const headers = rows[0] || getHeadersForTab(tab);
@@ -465,7 +504,7 @@ export class GoogleSheetsService {
     if (updatedClaims.length === 0) return [];
     const now = new Date().toISOString();
     if (this.isConfigured) {
-      await this.reloadFromGoogleSheets();
+      await this.reloadClaimsFromGoogleSheets();
     }
     const savedClaims: Claim[] = [];
     const auditRecords: AuditLog[] = [];
@@ -848,7 +887,7 @@ export class GoogleSheetsService {
   public async createPaymentsBulk(newPayments: Payment[]): Promise<Payment[]> {
     if (newPayments.length === 0) return [];
     if (this.isConfigured) {
-      await this.reloadFromGoogleSheets();
+      await this.reloadPaymentsFromGoogleSheets();
     }
     const existingIds = new Set(this.payments.map(payment => String(payment.payment_id || "").toLowerCase()).filter(Boolean));
     const batchIds = new Set<string>();
@@ -1465,13 +1504,19 @@ export class GoogleSheetsService {
   public async maybeCreateScheduledBackup(createdBy = "system@itera.health"): Promise<BackupRecord | null> {
     const config = this.getBackupConfiguration();
     if (!config.enabled || !config.googleDriveConfigured || this.scheduledBackupInFlight) return null;
+    if (this.scheduledBackupRetryAfter && Date.now() < this.scheduledBackupRetryAfter) return null;
     const last = config.lastBackupAt ? new Date(config.lastBackupAt).getTime() : 0;
     const dueAt = last + config.frequencyHours * 60 * 60 * 1000;
     if (last > 0 && Date.now() < dueAt) return null;
 
     this.scheduledBackupInFlight = true;
     try {
-      return await this.createSpreadsheetBackup(createdBy, `Scheduled backup every ${config.frequencyHours} hour(s).`);
+      const backup = await this.createSpreadsheetBackup(createdBy, `Scheduled backup every ${config.frequencyHours} hour(s).`);
+      this.scheduledBackupRetryAfter = 0;
+      return backup;
+    } catch (err) {
+      this.scheduledBackupRetryAfter = Date.now() + 60 * 60 * 1000;
+      throw err;
     } finally {
       this.scheduledBackupInFlight = false;
     }

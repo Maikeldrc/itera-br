@@ -3276,7 +3276,7 @@ async function startServer() {
           const savedClaims = await sheetsService.updateClaimsWithAuditBulk(claimsPendingSave, operatorEmail);
           updatedClaims.push(...savedClaims);
         }
-        await sheetsService.reloadFromGoogleSheets();
+        await sheetsService.reloadPaymentImportData();
         const verifiedClaims = await sheetsService.getClaims();
         const verifiedPayments = await sheetsService.getPayments();
         readyRows.forEach(row => {
@@ -3423,7 +3423,7 @@ async function startServer() {
   app.post("/api/payment-reconciliation-import", requireRoles(...API_ROLE_GROUPS.claimWrite), handlePaymentReconciliationImport);
 
   const processPaymentImportBatchChunk = async (batchId: string, payload: any, appUser: User | undefined, rowNumbers: number[]) => {
-    await sheetsService.reloadFromGoogleSheets();
+    await sheetsService.reloadPaymentImportData();
     const fakeReq = {
       body: { ...payload, apply: true, batchId, retryRows: rowNumbers, suppressBatchFailure: true },
       appUser
@@ -3489,7 +3489,7 @@ async function startServer() {
 
   app.post("/api/payment-reconciliation-import/batches/:batchId/process", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
     try {
-      await sheetsService.reloadFromGoogleSheets();
+      await sheetsService.reloadPaymentImportData();
       const batch = await sheetsService.getPaymentImportBatch(req.params.batchId);
       if (!batch) return res.status(404).json({ error: "Payment import batch not found." });
       let rows = await sheetsService.getPaymentImportBatchRows(batch.batch_id);
@@ -3529,7 +3529,7 @@ async function startServer() {
       const payload = JSON.parse(batch.payload_json || "{}");
       await processPaymentImportBatchChunk(batch.batch_id, payload, req.appUser, chunkRows);
 
-      await sheetsService.reloadFromGoogleSheets();
+      await sheetsService.reloadPaymentImportData();
       rows = await sheetsService.getPaymentImportBatchRows(batch.batch_id);
       const remainingPending = rows.filter(row => row.status === "pending" || row.status === "failed").length;
       const summary = summarizePaymentImportBatchRows(rows);
