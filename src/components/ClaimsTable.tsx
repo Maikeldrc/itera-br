@@ -98,22 +98,19 @@ const splitCptCodes = (value: unknown) =>
   textValue(value).split(/[\s,]+/).map(item => item.trim()).filter(Boolean);
 
 const getClaimCptCodes = (claim: Claim) => {
-  const codes = splitCptCodes(claim.cpt_hcpcs);
-
   if (claim.service_lines_json) {
     try {
       const serviceLines = JSON.parse(claim.service_lines_json);
       if (Array.isArray(serviceLines)) {
-        serviceLines.forEach(line => {
-          if (line?.cpt) codes.push(String(line.cpt).trim());
-        });
+        const serviceLineCodes = serviceLines.map(line => textValue(line?.cpt)).filter(Boolean);
+        if (serviceLineCodes.length > 0) return serviceLineCodes;
       }
     } catch (err) {
       console.warn("Failed to parse service_lines_json", err);
     }
   }
 
-  return Array.from(new Set(codes.filter(Boolean)));
+  return splitCptCodes(claim.cpt_hcpcs);
 };
 
 const getServiceLinesForClaim = (claim: Claim): ServiceLineRow[] => {
@@ -1250,9 +1247,9 @@ export function ClaimsTable({
                       {visibleColumns.cpt && <td className="px-4 py-3">
                         <div className="flex min-w-28 max-w-48 flex-wrap justify-center gap-1">
                           {getClaimCptCodes(claim).length > 0 ? (
-                            getClaimCptCodes(claim).map(code => (
+                            getClaimCptCodes(claim).map((code, index) => (
                               <span
-                                key={code}
+                                key={`${code}-${index}`}
                                 className="rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 font-mono text-[9px] font-bold text-dark-blue"
                               >
                                 {code}

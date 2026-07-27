@@ -367,12 +367,22 @@ function paymentImportRowVerified(row: any, claims: Claim[], payments: Payment[]
     payment.claim_id === claim.claim_id
   ));
   const serviceLines = parseServiceLines(claim);
-  const matchingLine = serviceLines.find(line =>
+  const assignedLineIndex = Number(row.lineIndex);
+  const assignedLine = Number.isInteger(assignedLineIndex) && assignedLineIndex >= 0
+    ? serviceLines[assignedLineIndex]
+    : null;
+  const matchingLine = assignedLine || serviceLines.find(line =>
     textValue(line?.cpt) === textValue(row.cptCode) &&
     serviceLineMatchesDos(line, claim, row.serviceDate) &&
     linePaymentTotal(line) > 0
   );
-  return Boolean(paymentExists && matchingLine);
+  return Boolean(
+    paymentExists &&
+    matchingLine &&
+    textValue(matchingLine?.cpt) === textValue(row.cptCode) &&
+    serviceLineMatchesDos(matchingLine, claim, row.serviceDate) &&
+    linePaymentTotal(matchingLine) > 0
+  );
 }
 
 function serviceLineDos(line: any, claim: Partial<Claim>) {
@@ -877,6 +887,7 @@ function compactPaymentImportResultRow(row: any) {
     "payment",
     "payerPayment",
     "patientPayment",
+    "lineIndex",
     "allowedAmount",
     "contractualAdjustment",
     "coinsurance",
@@ -3167,7 +3178,10 @@ async function startServer() {
             const targetIndex = sameCptIndexes.find(index =>
               !lineAllocations.has(index) && linePaymentTotal(serviceLines[index]) <= 0
             ) ?? sameCptIndexes.find(index => !lineAllocations.has(index)) ?? row.lineIndex;
-            if (targetIndex >= 0) addLineAllocation(targetIndex, row);
+            if (targetIndex >= 0) {
+              row.lineIndex = targetIndex;
+              addLineAllocation(targetIndex, row);
+            }
           }
 
           serviceLines = serviceLines.map((line, index) => {
