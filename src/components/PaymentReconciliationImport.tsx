@@ -267,7 +267,6 @@ function hasLegacyGenericMatchWarning(row: PaymentImportRow) {
   const text = [...(row.errors || []), ...(row.warnings || [])].join(" ");
   return (
     text.includes("Payment date is missing; today's date will be used if imported.") ||
-    text.includes("External Claim No did not match the internal claim ID; matched by Patient Acct No, CPT and DOS instead.") ||
     text.includes("Multiple matching claims found; requires human review.")
   );
 }
@@ -1288,8 +1287,8 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
             [
               isEnglish ? "Primary match" : "Match primario",
               isEnglish
-                ? "Internal Claim No + CPT. If the external claim number does not match, the importer falls back to Patient Acct No + CPT + DOS/month."
-                : "Claim No interno + CPT. Si el claim externo no coincide, usa Patient Acct No + CPT + DOS/mes."
+                ? "Patient Acct No + CPT + exact DOS. External claim numbers from provider reports are ignored."
+                : "Patient Acct No + CPT + DOS exacto. Los números de claim externos del reporte del provider se ignoran."
             ],
             [
               isEnglish ? "Tie breakers" : "Desempate",

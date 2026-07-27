@@ -399,6 +399,14 @@ function serviceLineMatchesDos(line: any, claim: Partial<Claim>, serviceDate: st
   );
 }
 
+function serviceLineMatchesExactDos(line: any, claim: Partial<Claim>, serviceDate: string) {
+  if (!serviceDate) return true;
+  const lineDos = serviceLineDos(line, claim);
+  const claimDosFrom = textValue(claim.date_of_service_from).slice(0, 10);
+  const claimDosTo = textValue(claim.date_of_service_to).slice(0, 10);
+  return [lineDos, claimDosFrom, claimDosTo].filter(Boolean).includes(serviceDate);
+}
+
 const PAYMENT_IMPORT_FIELD_LABELS = {
   cptCode: "CPT Code",
   facilityName: "Facility Name",
@@ -2937,22 +2945,26 @@ async function startServer() {
         if (!row.paymentDate) warnings.push(`Payment date is missing for source row ${row.rowNumber}; today's date will be used if imported.`);
         if (!Number.isFinite(row.payment) || row.payment <= 0) errors.push("Payment amount must be greater than zero.");
 
-        const claimNo = normalizeMatchText(row.claimNo);
         const patientAcct = normalizeMatchText(row.patientAcctNo);
         const payerName = normalizeMatchText(row.payerName);
         const providerName = normalizeMatchText(row.renderingProviderName);
         const cptCode = textValue(row.cptCode);
 
-        const matchesOperationalKeys = (claim: Claim) => {
+        const matchesOperationalKeys = (claim: Claim, allowMonthFallback = false) => {
           const samePatient = patientAcct && normalizeMatchText(claim.patient_id) === patientAcct;
           const claimDosFrom = textValue(claim.date_of_service_from).slice(0, 10);
           const claimDosTo = textValue(claim.date_of_service_to).slice(0, 10);
           const claimMonth = textValue(claim.month_of_service).slice(0, 7);
           const rowMonth = row.serviceDate ? row.serviceDate.slice(0, 7) : "";
-          const sameDos = row.serviceDate && (
+          const sameExactDos = row.serviceDate && (
             claimDosFrom === row.serviceDate ||
-            claimDosTo === row.serviceDate ||
-            (claimMonth && rowMonth && claimMonth === rowMonth)
+            claimDosTo === row.serviceDate
+          );
+          const sameDos = sameExactDos || (
+            allowMonthFallback &&
+            claimMonth &&
+            rowMonth &&
+            claimMonth === rowMonth
           );
           return Boolean(samePatient && sameDos);
         };
@@ -2964,28 +2976,17 @@ async function startServer() {
           })
           .join(" | ");
 
-        let candidates = claims.filter(claim => {
+        const buildCandidates = (allowMonthFallback = false) => claims.filter(claim => {
           const serviceLines = parseServiceLines(claim);
-          const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode && serviceLineMatchesDos(line, claim, row.serviceDate));
+          const hasCpt = serviceLines.some(line =>
+            textValue(line?.cpt) === cptCode &&
+            (allowMonthFallback ? serviceLineMatchesDos(line, claim, row.serviceDate) : serviceLineMatchesExactDos(line, claim, row.serviceDate))
+          );
           if (!hasCpt) return false;
-
-          if (claimNo) {
-            return normalizeMatchText(claim.claim_id) === claimNo;
-          }
-
-          return matchesOperationalKeys(claim);
+          return matchesOperationalKeys(claim, allowMonthFallback);
         });
-
-        if (claimNo && candidates.length === 0) {
-          candidates = claims.filter(claim => {
-            const serviceLines = parseServiceLines(claim);
-            const hasCpt = serviceLines.some(line => textValue(line?.cpt) === cptCode && serviceLineMatchesDos(line, claim, row.serviceDate));
-            return hasCpt && matchesOperationalKeys(claim);
-          });
-          if (candidates.length > 0) {
-            warnings.push(`External Claim No "${row.claimNo || "blank"}" did not match an internal claim ID. Found ${candidates.length} candidate claim(s) by Patient Acct No "${row.patientAcctNo || "blank"}", CPT ${cptCode || "blank"} and DOS ${formatDisplayDos(row.serviceDate)}: ${describeCandidateClaims(candidates)}${candidates.length > 8 ? " | ..." : ""}.`);
-          }
-        }
+        let candidates = buildCandidates(false);
+        if (candidates.length === 0) candidates = buildCandidates(true);
 
         if (candidates.length > 1 && payerName) {
           const payerFiltered = candidates.filter(claim => entityNamesMatch(claim.payer_name, payerName));
@@ -3002,11 +3003,18 @@ async function startServer() {
         const sameCptLineIndexes = claim
           ? serviceLines
               .map((line, index) => ({ line, index }))
+              .filter(item => textValue(item.line?.cpt) === cptCode && serviceLineMatchesExactDos(item.line, claim, row.serviceDate))
+              .map(item => item.index)
+          : [];
+        const fallbackCptLineIndexes = claim && sameCptLineIndexes.length === 0
+          ? serviceLines
+              .map((line, index) => ({ line, index }))
               .filter(item => textValue(item.line?.cpt) === cptCode && serviceLineMatchesDos(item.line, claim, row.serviceDate))
               .map(item => item.index)
           : [];
-        const unpaidLineIndex = sameCptLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
-        const lineIndex = unpaidLineIndex ?? sameCptLineIndexes[0] ?? -1;
+        const matchingLineIndexes = sameCptLineIndexes.length > 0 ? sameCptLineIndexes : fallbackCptLineIndexes;
+        const unpaidLineIndex = matchingLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
+        const lineIndex = unpaidLineIndex ?? matchingLineIndexes[0] ?? -1;
         const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
         const batchGeneratedPaymentId = paymentImportGeneratedPaymentId(batchId, row.rowNumber);
         const lookupPaymentId = row.externalPaymentId || batchGeneratedPaymentId;
@@ -3145,10 +3153,17 @@ async function startServer() {
           };
 
           for (const row of claimRows) {
-            const sameCptIndexes = serviceLines
+            const exactCptIndexes = serviceLines
               .map((line, index) => ({ line, index }))
-              .filter(item => textValue(item.line?.cpt) === textValue(row.cptCode) && serviceLineMatchesDos(item.line, claim, row.serviceDate))
+              .filter(item => textValue(item.line?.cpt) === textValue(row.cptCode) && serviceLineMatchesExactDos(item.line, claim, row.serviceDate))
               .map(item => item.index);
+            const fallbackCptIndexes = exactCptIndexes.length === 0
+              ? serviceLines
+                  .map((line, index) => ({ line, index }))
+                  .filter(item => textValue(item.line?.cpt) === textValue(row.cptCode) && serviceLineMatchesDos(item.line, claim, row.serviceDate))
+                  .map(item => item.index)
+              : [];
+            const sameCptIndexes = exactCptIndexes.length > 0 ? exactCptIndexes : fallbackCptIndexes;
             const targetIndex = sameCptIndexes.find(index =>
               !lineAllocations.has(index) && linePaymentTotal(serviceLines[index]) <= 0
             ) ?? sameCptIndexes.find(index => !lineAllocations.has(index)) ?? row.lineIndex;
