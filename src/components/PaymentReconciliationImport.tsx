@@ -598,16 +598,14 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
     }
   };
 
-  const waitForPaymentImportBatch = async (batchId: string, steps: string[]) => {
-    const maxAttempts = 360;
-    let transientFailures = 0;
-    const buildImportStepProgress = (batch: PaymentImportBatchStatus["batch"], runningStep: number) => {
+  const buildImportStepProgress = (batch: PaymentImportBatchStatus["batch"], steps: string[], runningStep: number) => {
       const totalRows = Number(batch.total_rows || 0);
       const processedRows = Number(batch.processed_rows || 0);
       const importedRows = Number(batch.imported_rows || 0);
       const reviewRows = Number(batch.review_rows || 0);
       const rejectedRows = Number(batch.rejected_rows || 0);
       const openRows = Math.max(0, totalRows - processedRows);
+      const final = batch.status === "completed" || batch.status === "completed_with_errors";
       const detailForStep = (stepIndex: number) => {
         if (!totalRows) return "";
         if (stepIndex === 0) {
@@ -617,15 +615,20 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         }
         if (stepIndex === 1) {
           return isEnglish
-            ? `${processedRows}/${totalRows} row(s) validated`
-            : `${processedRows}/${totalRows} fila(s) validadas`;
+            ? `${processedRows}/${totalRows} row(s) processed`
+            : `${processedRows}/${totalRows} fila(s) procesadas`;
         }
         if (stepIndex === 2) {
           return isEnglish
-            ? `${importedRows} imported, ${openRows} pending`
-            : `${importedRows} importadas, ${openRows} pendientes`;
+            ? `${importedRows} imported, ${reviewRows} review, ${rejectedRows} rejected, ${openRows} pending`
+            : `${importedRows} importadas, ${reviewRows} revisión, ${rejectedRows} rechazadas, ${openRows} pendientes`;
         }
         if (stepIndex === 3) {
+          if (!final && runningStep < 3) {
+            return isEnglish
+              ? "Waiting for written payment records"
+              : "Esperando registros de pago guardados";
+          }
           return isEnglish
             ? `${importedRows} payment record(s) confirmed`
             : `${importedRows} registro(s) de pago confirmados`;
@@ -637,9 +640,13 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       return steps.map((step, stepIndex) => ({
         label: step,
         detail: detailForStep(stepIndex),
-        status: stepIndex < runningStep ? "done" as const : stepIndex === runningStep ? "running" as const : "pending" as const
+        status: final ? "done" as const : stepIndex < runningStep ? "done" as const : stepIndex === runningStep ? "running" as const : "pending" as const
       }));
-    };
+  };
+
+  const waitForPaymentImportBatch = async (batchId: string, steps: string[]) => {
+    const maxAttempts = 360;
+    let transientFailures = 0;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       let data: PaymentImportBatchStatus;
       try {
@@ -682,7 +689,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
                 ? `Payment import completed. ${importedRows} imported, ${reviewRows} review, ${rejectedRows} rejected.`
                 : `Importación de pagos completada. ${importedRows} importadas, ${reviewRows} revisión, ${rejectedRows} rechazadas.`)
             : `${isEnglish ? "Processing batch" : "Procesando lote"} ${batch.processed_rows || 0}/${batch.total_rows || 0}`,
-        steps: buildImportStepProgress(batch, runningStep)
+        steps: buildImportStepProgress(batch, steps, runningStep)
       });
       if (batch.status === "completed" || batch.status === "completed_with_errors") return data;
       if (batch.status === "failed") throw new Error(batch.error_message || "Payment import batch failed.");
@@ -739,6 +746,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       await wait(150);
       setStep(1, apply ? 24 : 36);
       let data: PaymentImportResult;
+      let completedImportBatch: PaymentImportBatchStatus["batch"] | null = null;
       if (apply) {
         const startResponse = await apiFetch("/api/payment-reconciliation-import/start", {
           method: "POST",
@@ -756,6 +764,7 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         if (!startResponse.ok) throw new Error(started.error || "Payment import batch could not be started.");
         setStep(2, 42, isEnglish ? `Batch ${started.batchId} started` : `Lote ${started.batchId} iniciado`);
         const completedBatch = await waitForPaymentImportBatch(started.batchId, steps);
+        completedImportBatch = completedBatch.batch;
         data = completedBatch.result;
       } else {
         const response = await fetchWithTimeout(
@@ -786,11 +795,27 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       if (apply) {
         setStep(4, 90);
         await onImported();
+        const finalImportedRows = Number(data.summary.importedRows || data.importedCount || 0);
+        const finalReviewRows = Number((data.summary.needsReviewRows || 0) + (data.summary.paymentActivityRows || 0));
+        const finalRejectedRows = Number(data.summary.rejectedRows || 0);
+        const finalBatch = completedImportBatch || {
+          batch_id: "",
+          status: finalReviewRows > 0 || finalRejectedRows > 0 ? "completed_with_errors" : "completed",
+          progress: 100,
+          processed_rows: Number(data.summary.totalRowsRead || 0),
+          total_rows: Number(data.summary.totalRowsRead || 0),
+          imported_rows: finalImportedRows,
+          review_rows: finalReviewRows,
+          rejected_rows: finalRejectedRows,
+          error_message: ""
+        };
         setProgress({
           mode: "import",
           percent: 100,
-          label: isEnglish ? "Payment import completed." : "Importación de pagos completada.",
-          steps: steps.map(step => ({ label: step, status: "done" }))
+          label: isEnglish
+            ? `Payment import completed. ${finalImportedRows} imported, ${finalReviewRows} review, ${finalRejectedRows} rejected.`
+            : `Importación de pagos completada. ${finalImportedRows} importadas, ${finalReviewRows} revisión, ${finalRejectedRows} rechazadas.`,
+          steps: buildImportStepProgress(finalBatch, steps, steps.length - 1)
         });
         notify(
           isEnglish
@@ -818,7 +843,6 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       await wait(700);
     } finally {
       setIsProcessing(false);
-      setProgress(null);
     }
   };
 
