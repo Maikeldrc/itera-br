@@ -266,7 +266,7 @@ function statusBadge(status: PaymentImportRow["status"], isEnglish: boolean) {
 function hasLegacyGenericMatchWarning(row: PaymentImportRow) {
   const text = [...(row.errors || []), ...(row.warnings || [])].join(" ");
   return (
-    text.includes("Payment date is missing; today's date will be used if imported.") ||
+    text.includes("Payment date is missing") ||
     text.includes("Multiple matching claims found; requires human review.")
   );
 }

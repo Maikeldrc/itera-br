@@ -2942,7 +2942,7 @@ async function startServer() {
 
         if (!row.cptCode) errors.push("CPT Code is required.");
         if (!row.serviceDate) errors.push("Service Date is required.");
-        if (!row.paymentDate) warnings.push(`Payment date is missing for source row ${row.rowNumber}; today's date will be used if imported.`);
+        if (!row.paymentDate) warnings.push(`Payment date is missing for source row ${row.rowNumber}; payment date will remain blank if imported.`);
         if (!Number.isFinite(row.payment) || row.payment <= 0) errors.push("Payment amount must be greater than zero.");
 
         const patientAcct = normalizeMatchText(row.patientAcctNo);
@@ -3249,7 +3249,7 @@ async function startServer() {
               : (paymentReceivedBy === "ITERA" ? ClaimClassification.IteraCollected : ClaimClassification.ProviderCollected),
             era_received: "No",
             eob_received: claimRows.some(row => row.paymentDate) ? "Yes" : claim.eob_received,
-            payment_date: latestPaymentDate || new Date().toISOString().slice(0, 10),
+            payment_date: latestPaymentDate || claim.payment_date || "",
             check_or_eft_number: latestCheckNo,
             last_note: `${hasOverpaidLine ? "Payment Import detected overpayment; review required. " : ""}Payment Import applied ${claimRows.length} payment row(s).${paymentImportBilledBy !== "Unknown" && paymentImportBilledBy !== claim.billed_by ? ` Billing owner changed to ${paymentImportBilledBy}.` : ""} ${claim.last_note || ""}`.trim()
           }, reconciliationConfig);
@@ -3275,7 +3275,7 @@ async function startServer() {
               const payment: Payment = {
                 payment_id: effectivePaymentId || `PMT-IMP-${Date.now()}-${row.rowNumber}`,
                 claim_id: claimId,
-                payment_date: row.paymentDate || new Date().toISOString().slice(0, 10),
+                payment_date: row.paymentDate || "",
                 payment_received_by: paymentReceivedBy === "Provider" ? "Provider" : "ITERA",
                 payer_name: row.payerName || updated.payer_name,
                 amount: Number(row.payment || 0),
