@@ -2853,6 +2853,7 @@ async function startServer() {
         success: true,
         headers,
         headersSignature,
+        totalRows: importRows.length,
         fieldLabels: PAYMENT_IMPORT_FIELD_LABELS,
         requiredFields: PAYMENT_IMPORT_REQUIRED_FIELDS,
         paymentFields: PAYMENT_IMPORT_PAYMENT_FIELDS,

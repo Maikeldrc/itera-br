@@ -18,6 +18,7 @@ type PaymentImportMapping = Record<string, string>;
 type PaymentImportSchema = {
   headers: string[];
   headersSignature: string;
+  totalRows?: number;
   fieldLabels: Record<string, string>;
   requiredFields: string[];
   paymentFields: string[];
@@ -644,6 +645,57 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
       }));
   };
 
+  const buildAnalysisStepProgress = (summary: PaymentImportSummary | null, steps: string[], runningStep: number) => {
+    const totalRows = Number(summary?.totalRowsRead || schema?.totalRows || payload?.rows?.length || 0);
+    const readyRows = Number(summary?.readyToImport || 0);
+    const reviewRows = Number((summary?.needsReviewRows || 0) + (summary?.paymentActivityRows || 0));
+    const rejectedRows = Number(summary?.rejectedRows || 0);
+    const matchedClaims = Number(summary?.matchedClaims || 0);
+    const matchedCptCodes = Number(summary?.matchedCptCodes || 0);
+    const classifiedRows = readyRows + reviewRows + rejectedRows;
+    const detailForStep = (stepIndex: number) => {
+      if (stepIndex === 0) {
+        if (!totalRows) return isEnglish ? "Waiting for row count" : "Esperando conteo de filas";
+        return isEnglish
+          ? `${totalRows} payment row(s) detected`
+          : `${totalRows} fila(s) de pago detectadas`;
+      }
+      if (stepIndex === 1) {
+        if (summary) {
+          return isEnglish
+            ? `${matchedClaims} claim(s), ${matchedCptCodes} CPT code(s) matched`
+            : `${matchedClaims} claim(s), ${matchedCptCodes} código(s) CPT con match`;
+        }
+        if (!totalRows) return "";
+        return isEnglish
+          ? `Matching ${totalRows} row(s)`
+          : `Buscando matches en ${totalRows} fila(s)`;
+      }
+      if (stepIndex === 2) {
+        if (summary) {
+          return isEnglish
+            ? `${readyRows} ready, ${reviewRows} review, ${rejectedRows} rejected`
+            : `${readyRows} listas, ${reviewRows} revisión, ${rejectedRows} rechazadas`;
+        }
+        if (!totalRows) return "";
+        return isEnglish
+          ? `Classifying ${totalRows} row(s)`
+          : `Clasificando ${totalRows} fila(s)`;
+      }
+      if (summary) {
+        return isEnglish
+          ? `${classifiedRows}/${totalRows || classifiedRows} row(s) in result table`
+          : `${classifiedRows}/${totalRows || classifiedRows} fila(s) en la tabla de resultados`;
+      }
+      return isEnglish ? "Waiting for analysis result" : "Esperando resultado del análisis";
+    };
+    return steps.map((step, stepIndex) => ({
+      label: step,
+      detail: detailForStep(stepIndex),
+      status: stepIndex < runningStep ? "done" as const : stepIndex === runningStep ? "running" as const : "pending" as const
+    }));
+  };
+
   const waitForPaymentImportBatch = async (batchId: string, steps: string[]) => {
     const maxAttempts = 360;
     let transientFailures = 0;
@@ -729,15 +781,17 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
           isEnglish ? "Classifying ready/review/rejected rows" : "Clasificando filas listas/revisión/rechazadas",
           isEnglish ? "Preparing result table" : "Preparando tabla de resultados"
         ];
-    const setStep = (index: number, percent: number, label?: string) => {
+    const setStep = (index: number, percent: number, label?: string, analysisSummary: PaymentImportSummary | null = null) => {
       setProgress({
         mode: apply ? "import" : "analyze",
         percent,
         label: label || steps[index] || "",
-        steps: steps.map((step, stepIndex) => ({
-          label: step,
-          status: stepIndex < index ? "done" : stepIndex === index ? "running" : "pending"
-        }))
+        steps: apply
+          ? steps.map((step, stepIndex) => ({
+              label: step,
+              status: stepIndex < index ? "done" as const : stepIndex === index ? "running" as const : "pending" as const
+            }))
+          : buildAnalysisStepProgress(analysisSummary, steps, index)
       });
     };
     setIsProcessing(true);
@@ -786,11 +840,12 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
             : "El análisis de pagos está tardando demasiado. Intente nuevamente con un archivo más pequeño o una plantilla guardada.",
           processRequestRef
         );
-        setStep(2, 70);
         data = await response.json();
         if (!response.ok) throw new Error((data as any).error || "Payment import failed.");
+        const analysisSummary = data.summary || summarizePaymentImportRows(data.rows || [], false);
+        setStep(2, 70, undefined, analysisSummary);
       }
-      setStep(apply ? 3 : 3, apply ? 76 : 92);
+      setStep(apply ? 3 : 3, apply ? 76 : 92, undefined, apply ? null : (data.summary || summarizePaymentImportRows(data.rows || [], false)));
       setResult(data);
       if (apply) {
         setStep(4, 90);
@@ -827,8 +882,10 @@ export function PaymentReconciliationImport({ onImported, canApply = true, payer
         setProgress({
           mode: "analyze",
           percent: 100,
-          label: isEnglish ? "Analysis completed." : "Análisis completado.",
-          steps: steps.map(step => ({ label: step, status: "done" }))
+          label: isEnglish
+            ? `Analysis completed. ${data.summary.totalRowsRead} row(s) analyzed: ${data.summary.readyToImport} ready, ${(data.summary.needsReviewRows || 0) + (data.summary.paymentActivityRows || 0)} review, ${data.summary.rejectedRows} rejected.`
+            : `Análisis completado. ${data.summary.totalRowsRead} fila(s) analizadas: ${data.summary.readyToImport} listas, ${(data.summary.needsReviewRows || 0) + (data.summary.paymentActivityRows || 0)} revisión, ${data.summary.rejectedRows} rechazadas.`,
+          steps: buildAnalysisStepProgress(data.summary, steps, steps.length)
         });
       }
       await wait(500);
