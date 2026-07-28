@@ -37,6 +37,7 @@ type ImportSummary = {
   totalBilledChargeImported: number;
   topRejectionReasons: { reason: string; count: number }[];
   forcedImportedRows?: number;
+  readyImportedRows?: number;
   readyRows?: number;
   analysisOnly?: boolean;
 };
@@ -69,7 +70,7 @@ export function ImportModal({ isOpen, onClose, onImport, onRollback }: ImportMod
   const [parsedRows, setParsedRows] = useState<any[]>([]);
   const [validationResults, setValidationResults] = useState<{ row: number; claim_id: string; status: "valid" | "invalid"; errors: string[] }[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [importProgress, setImportProgress] = useState<{ percent: number; label: string } | null>(null);
+  const [importProgress, setImportProgress] = useState<{ percent: number; label: string; mode?: "analysis" | "import" } | null>(null);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [isRollbackConfirmOpen, setIsRollbackConfirmOpen] = useState(false);
   const [isRollingBack, setIsRollingBack] = useState(false);
@@ -295,6 +296,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     clearProgressTimer();
     setImportProgress({
       percent: 8,
+      mode,
       label: mode === "analysis"
         ? (isEnglish ? "Preparing analysis..." : "Preparando análisis...")
         : (isEnglish ? "Preparing import..." : "Preparando importación...")
@@ -316,7 +318,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
         if (nextPercent >= 82) label = mode === "analysis"
           ? (isEnglish ? "Building review table..." : "Construyendo tabla de revisión...")
           : (isEnglish ? "Refreshing imported data..." : "Actualizando datos importados...");
-        return { percent: nextPercent, label };
+        return { percent: nextPercent, label, mode };
       });
     }, 700);
   };
@@ -418,6 +420,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
     const accountedRows = importedRows + rejectedRows;
     const allRowsAccounted = totalRowsRead > 0 ? accountedRows === totalRowsRead : nextSummary.allRowsAccounted;
     const forcedImportedRows = previousForcedRows + Number(nextSummary.forcedImportedRows || next.forcedImportedCount || 0);
+    const readyImportedRows = Number(previousSummary.readyImportedRows || importedReadyRows || 0) + (
+      options.readyRowsImported
+        ? Number(nextSummary.importedRows || next.importedCount || 0)
+        : 0
+    );
     const mergedSummary: ImportSummary = {
       ...previousSummary,
       totalRowsRead,
@@ -436,6 +443,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       totalBilledChargeImported: Number((previousImportedCharge + Number(nextSummary.totalBilledChargeImported || 0)).toFixed(2)),
       topRejectionReasons: rejectedRows > 0 ? previousSummary.topRejectionReasons : [],
       forcedImportedRows,
+      readyImportedRows,
       analysisOnly: previousWasAnalysis
     };
 
@@ -513,9 +521,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       clearProgressTimer();
       setImportProgress({
         percent: 100,
+        mode: shouldApply ? "import" : "analysis",
         label: shouldApply
           ? (isEnglish ? "Import completed." : "Importación completada.")
-          : (isEnglish ? "Analysis completed. No data has been written." : "Análisis completado. No se ha escrito ningún dato.")
+          : (isEnglish ? "Preflight analysis completed. No data has been written." : "Análisis previo completado. No se ha escrito ningún dato.")
       });
       const normalizedResult = normalizeImportResult(res);
       if (shouldApply && (options?.mergeForcedRows?.length || options?.readyRowsImported)) {
@@ -534,6 +543,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
       clearProgressTimer();
       setImportProgress({
         percent: 100,
+        mode: shouldApply ? "import" : "analysis",
         label: isEnglish ? "Import failed." : "Importación fallida."
       });
       const message = err instanceof Error ? err.message : (isEnglish ? "Import process failed." : "El proceso de importación falló.");
@@ -618,9 +628,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const displayedSummary = importResult?.summary || null;
   const isAnalysisResult = Boolean(importResult?.analysisOnly || displayedSummary?.analysisOnly);
   const readyToImportCount = Number(importResult?.readyCount ?? displayedSummary?.readyRows ?? (isAnalysisResult ? displayedSummary?.importedRows : 0) ?? 0);
+  const readyImportedSoFar = Math.max(importedReadyRows, Number(displayedSummary?.readyImportedRows || 0));
+  const problemImportedSoFar = Math.max(importedProblemRows, Number(displayedSummary?.forcedImportedRows || importResult?.forcedImportedCount || 0));
   const rollbackAvailable = Boolean(importResult?.rollbackAvailable && (importResult.importedClaimIds || []).length > 0 && !importResult.rollbackCompleted);
   const importCompletedSuccessfully = Boolean(!isAnalysisResult && importResult?.success && Number(importResult.importedCount || 0) > 0 && Number(importResult.errorCount || 0) === 0);
-  const importAlreadyFinalized = !isAnalysisResult && (Number(importResult?.importedCount || 0) > 0 || Boolean(importResult?.rollbackCompleted));
   const rejectedSourceRows = new Set<number>(
     (importResult?.errors || [])
       .map(err => Number(err.row))
@@ -656,7 +667,11 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const forcedImportEligibleRowSet = new Set(forcedImportEligibleRows);
   const importedForcedRowSet = new Set(importedForcedRows);
   const remainingForcedImportEligibleRows = forcedImportEligibleRows.filter(row => !importedForcedRowSet.has(row));
-  const remainingReadyToImportCount = Math.max(0, readyToImportCount - importedReadyRows);
+  const remainingReadyToImportCount = Math.max(0, readyToImportCount - readyImportedSoFar);
+  const totalRemainingImportableRows = remainingReadyToImportCount + remainingForcedImportEligibleRows.length;
+  const importAlreadyFinalized = Boolean(importResult?.rollbackCompleted)
+    || Boolean(!isAnalysisResult && Number(importResult?.importedCount || 0) > 0)
+    || Boolean(isAnalysisResult && readyToImportCount > 0 && totalRemainingImportableRows === 0);
   const selectedImportCount = selectedImportDecision === "ready"
     ? remainingReadyToImportCount
     : selectedImportDecision === "all_eligible"
@@ -667,11 +682,14 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
   const selectedImportDecisionLabel = selectedImportDecision === "ready"
     ? (isEnglish ? `Import ${selectedImportCount} ready row(s)` : `Importar ${selectedImportCount} fila(s) lista(s)`)
     : selectedImportDecision === "all_eligible"
-      ? (isEnglish ? `Import ${selectedImportCount} ready + review row(s)` : `Importar ${selectedImportCount} fila(s) listas + revisión`)
+      ? remainingForcedImportEligibleRows.length > 0
+        ? (isEnglish ? `Import ${selectedImportCount} ready + review row(s)` : `Importar ${selectedImportCount} fila(s) listas + revisión`)
+        : (isEnglish ? `Import ${selectedImportCount} ready row(s)` : `Importar ${selectedImportCount} fila(s) lista(s)`)
       : (isEnglish ? `Import ${selectedImportCount} problem row(s)` : `Importar ${selectedImportCount} fila(s) con problemas`);
   const selectedImportConfirmationLabel = selectedImportDecision === "all_eligible"
     ? (isEnglish ? `Confirm import ${selectedImportCount} ready + review row(s)` : `Confirmar importación de ${selectedImportCount} fila(s) listas + revisión`)
     : (isEnglish ? `Confirm import ${selectedImportCount} problem row(s)` : `Confirmar importación de ${selectedImportCount} fila(s) con problemas`);
+  const hasExecutedImportAction = Boolean(isAnalysisResult && (readyImportedSoFar > 0 || problemImportedSoFar > 0 || Number(importResult?.importedCount || 0) > 0));
 
   const escapeCsvValue = (value: unknown) => {
     const text = String(value ?? "");
@@ -968,7 +986,9 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <div className="flex items-center justify-between gap-4 mb-2">
                 <div>
                   <h4 className="font-semibold text-dark-blue text-sm">
-                    {isEnglish ? "Import progress" : "Progreso de importación"}
+                    {importProgress.mode === "analysis"
+                      ? (isEnglish ? "Preflight progress" : "Progreso del análisis previo")
+                      : (isEnglish ? "Import progress" : "Progreso de importación")}
                   </h4>
                   <p className="text-xs text-slate-600 mt-0.5">{importProgress.label}</p>
                 </div>
@@ -988,10 +1008,10 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               </div>
               <p className="text-[11px] text-slate-500 mt-2">
                 {filePayload
-                  ? (isAnalysisResult || !importResult
+                  ? (importProgress.mode === "analysis"
                     ? (isEnglish ? "Large Excel files can take a few moments while the server validates rows." : "Los Excel grandes pueden tardar mientras el servidor valida las filas.")
                     : (isEnglish ? "Large Excel files can take a few moments while the server writes claims." : "Los Excel grandes pueden tardar mientras el servidor guarda los claims."))
-                  : (isAnalysisResult || !importResult
+                  : (importProgress.mode === "analysis"
                     ? (isEnglish ? `${parsedRows.length} parsed records are being validated.` : `${parsedRows.length} registros parseados se están validando.`)
                     : (isEnglish ? `${parsedRows.length} parsed records are being imported.` : `${parsedRows.length} registros parseados se están importando.`))}
               </p>
@@ -1000,9 +1020,9 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
 
           {/* Import Results Summary */}
           {importResult && (
-            <div ref={importResultRef} className={`p-4 rounded-xl border flex gap-3 ${isAnalysisResult ? "bg-amber-50 border-amber-100 text-amber-900" : importResult.success && importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
+            <div ref={importResultRef} className={`p-4 rounded-xl border flex gap-3 ${isAnalysisResult ? (hasExecutedImportAction ? "bg-blue-50 border-blue-100 text-dark-blue" : "bg-amber-50 border-amber-100 text-amber-900") : importResult.success && importResult.errorCount === 0 ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-rose-50 border-rose-100 text-rose-800"}`}>
               {isAnalysisResult ? (
-                <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <Info className={`w-5 h-5 shrink-0 mt-0.5 ${hasExecutedImportAction ? "text-primary-blue" : "text-amber-600"}`} />
               ) : importResult.success && importResult.errorCount === 0 ? (
                 <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
               ) : (
@@ -1011,17 +1031,33 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <div className="text-sm">
                 <h5 className="font-semibold mb-1">
                   {isAnalysisResult
-                    ? (isEnglish ? "Preflight Analysis Result" : "Resultado del análisis previo")
+                    ? hasExecutedImportAction
+                      ? (isEnglish ? "Preflight and Import Action Result" : "Resultado del análisis y acción de importación")
+                      : (isEnglish ? "Preflight Analysis Result" : "Resultado del análisis previo")
                     : (isEnglish ? "Import Result" : "Resultado de Importación")}
                 </h5>
                 {isAnalysisResult ? (
                   <>
-                    <p>{isEnglish ? "Ready to import" : "Listos para importar"}: <span className="font-bold">{readyToImportCount} claims</span></p>
-                    <p className="mt-1 text-xs font-semibold text-amber-800">
-                      {isEnglish
-                        ? "No data has been written to Google Sheets yet. Review the rows below, then import the ready rows or correct the rejected ones."
-                        : "Todavía no se ha escrito ningún dato en Google Sheets. Revise las filas debajo y luego importe las filas listas o corrija las rechazadas."}
+                    <p>
+                      {hasExecutedImportAction
+                        ? (isEnglish ? "Written to Google Sheets" : "Escrito en Google Sheets")
+                        : (isEnglish ? "Ready to import" : "Listos para importar")}
+                      : <span className="font-bold"> {hasExecutedImportAction ? readyImportedSoFar + problemImportedSoFar : readyToImportCount} claims</span>
                     </p>
+                    {hasExecutedImportAction && (
+                      <p className="mt-1 text-xs font-semibold text-emerald-700">
+                        {isEnglish
+                          ? `${readyImportedSoFar} clean row(s) imported + ${problemImportedSoFar} problem row(s) imported and marked for review. ${totalRemainingImportableRows} importable row(s) remain.`
+                          : `${readyImportedSoFar} fila(s) limpia(s) importadas + ${problemImportedSoFar} fila(s) con problemas importadas y marcadas para revisión. Quedan ${totalRemainingImportableRows} fila(s) importables.`}
+                      </p>
+                    )}
+                    {!hasExecutedImportAction && (
+                      <p className="mt-1 text-xs font-semibold text-amber-800">
+                        {isEnglish
+                          ? "No data has been written to Google Sheets yet. Review the rows below, then import the ready rows or correct the rejected ones."
+                          : "Todavía no se ha escrito ningún dato en Google Sheets. Revise las filas debajo y luego importe las filas listas o corrija las rechazadas."}
+                      </p>
+                    )}
                   </>
                 ) : (
                   <p>{isEnglish ? "Successfully imported" : "Importados correctamente"}: <span className="font-bold">{importResult.importedCount} claims</span></p>
@@ -1091,8 +1127,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                   >
                     <span className="block text-[10px] uppercase tracking-wide text-emerald-600">{isEnglish ? "Clean rows" : "Filas limpias"}</span>
                     {remainingReadyToImportCount > 0
-                      ? (isEnglish ? `${remainingReadyToImportCount} ready row(s)` : `${remainingReadyToImportCount} fila(s) lista(s)`)
-                      : (isEnglish ? `${importedReadyRows} ready row(s) imported` : `${importedReadyRows} fila(s) lista(s) importadas`)}
+                      ? (isEnglish ? `${remainingReadyToImportCount} ready row(s) remain` : `Quedan ${remainingReadyToImportCount} fila(s) lista(s)`)
+                      : (isEnglish ? `${readyImportedSoFar} ready row(s) imported` : `${readyImportedSoFar} fila(s) lista(s) importadas`)}
                     <span className="mt-1 block text-[10px] font-semibold leading-snug text-slate-500">
                       {isEnglish
                         ? "Only rows with no validation issues. These can be written directly."
@@ -1112,8 +1148,8 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     <span className="block text-[10px] uppercase tracking-wide text-primary-blue">{isEnglish ? "Ready + review rows" : "Listas + revisión"}</span>
                     {remainingReadyToImportCount > 0 || remainingForcedImportEligibleRows.length > 0
                       ? (isEnglish
-                        ? `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} row(s) total`
-                        : `${remainingReadyToImportCount + remainingForcedImportEligibleRows.length} fila(s) en total`)
+                        ? `${remainingReadyToImportCount} clean + ${remainingForcedImportEligibleRows.length} review row(s) remain`
+                        : `Quedan ${remainingReadyToImportCount} limpias + ${remainingForcedImportEligibleRows.length} en revisión`)
                       : (isEnglish ? "All selected rows imported" : "Todas las filas seleccionadas importadas")}
                     <span className="mt-1 block text-[10px] font-semibold leading-snug text-slate-500">
                       {isEnglish
@@ -1134,7 +1170,7 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
                     <span className="block text-[10px] uppercase tracking-wide text-amber-700">{isEnglish ? "Problem rows" : "Filas con problemas"}</span>
                     {remainingForcedImportEligibleRows.length > 0
                       ? (isEnglish ? `${remainingForcedImportEligibleRows.length} problem row(s) only` : `Solo ${remainingForcedImportEligibleRows.length} fila(s) con problemas`)
-                      : (isEnglish ? `${importedProblemRows} problem row(s) imported` : `${importedProblemRows} fila(s) con problemas importadas`)}
+                      : (isEnglish ? `${problemImportedSoFar} problem row(s) imported` : `${problemImportedSoFar} fila(s) con problemas importadas`)}
                     <span className="mt-1 block text-[10px] font-semibold leading-snug text-slate-500">
                       {isEnglish
                         ? "Only recoverable rule conflicts. Paid duplicate CPT/DOS rows remain blocked."
@@ -1331,11 +1367,12 @@ CLM-2026-999,PAT-0192,Maria Knight,PRAC_01,Metropolitan Care Group,PROV_01,Dr. R
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 {[
                   [isEnglish ? "Rows read" : "Filas leídas", displayedSummary.totalRowsRead],
-                  [isAnalysisResult ? (isEnglish ? "Ready" : "Listas") : (isEnglish ? "Imported" : "Importadas"), isAnalysisResult ? readyToImportCount : displayedSummary.importedRows],
-                  [isAnalysisResult ? (isEnglish ? "Import-anyway eligible" : "Elegibles para importar de todos modos") : (isEnglish ? "Imported anyway" : "Importadas de todos modos"), isAnalysisResult ? forcedImportEligibleRows.length : (displayedSummary.forcedImportedRows || 0)],
-                  ...(isAnalysisResult && (importedReadyRows > 0 || importedProblemRows > 0) ? [
-                    [isEnglish ? "Ready imported" : "Listas importadas", importedReadyRows],
-                    [isEnglish ? "Problem imported" : "Con problemas importadas", importedProblemRows]
+                  [isAnalysisResult ? (isEnglish ? "Ready remaining" : "Listas restantes") : (isEnglish ? "Imported" : "Importadas"), isAnalysisResult ? remainingReadyToImportCount : displayedSummary.importedRows],
+                  [isAnalysisResult ? (isEnglish ? "Review remaining" : "Revisión restante") : (isEnglish ? "Imported anyway" : "Importadas de todos modos"), isAnalysisResult ? remainingForcedImportEligibleRows.length : (displayedSummary.forcedImportedRows || 0)],
+                  ...(isAnalysisResult && (readyImportedSoFar > 0 || problemImportedSoFar > 0) ? [
+                    [isEnglish ? "Clean imported" : "Limpias importadas", readyImportedSoFar],
+                    [isEnglish ? "Problem imported" : "Con problemas importadas", problemImportedSoFar],
+                    [isEnglish ? "Importable remaining" : "Importables restantes", totalRemainingImportableRows]
                   ] : []),
                   [isEnglish ? "Rejected" : "Rechazadas", displayedSummary.rejectedRows],
                   [isEnglish ? "Unique patients" : "Pacientes únicos", displayedSummary.uniquePatientsImported || displayedSummary.uniquePatientsInFile],
