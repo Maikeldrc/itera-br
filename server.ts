@@ -3065,7 +3065,7 @@ async function startServer() {
         const lineIndex = unpaidLineIndex ?? matchingLineIndexes[0] ?? -1;
         const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
         const batchGeneratedPaymentId = paymentImportGeneratedPaymentId(batchId, row.rowNumber);
-        const lookupPaymentId = row.externalPaymentId || batchGeneratedPaymentId;
+        const lookupPaymentId = batchGeneratedPaymentId;
         const existingPayment = lookupPaymentId
           ? existingPaymentById.get(lookupPaymentId.toLowerCase()) || null
           : null;
@@ -3091,10 +3091,10 @@ async function startServer() {
         }
         if (errors.length === 0 && claim && lineIndex < 0) errors.push("Matched claim does not contain the CPT code.");
         if (errors.length === 0 && claim && existingPayment && existingPayment.claim_id !== claim.claim_id) {
-          errors.push(`Payment ID ${row.externalPaymentId} already exists in Payments for claim ${existingPayment.claim_id || "unknown"}.`);
+          errors.push(`Internal import payment record ${existingPayment.payment_id} already exists in Payments for claim ${existingPayment.claim_id || "unknown"}.`);
         }
         if (errors.length === 0 && claim && existingPayment && existingPayment.claim_id === claim.claim_id) {
-          warnings.push(`Payment ID ${row.externalPaymentId} already exists in Payments for this claim; the import will update the unpaid CPT line without creating a duplicate payment record.`);
+          warnings.push(`Internal import payment record ${existingPayment.payment_id} already exists for this claim; the import will verify the CPT line without creating a duplicate payment record.`);
         }
 
         const claimPayerName = claim?.payer_name || "";
@@ -3317,7 +3317,7 @@ async function startServer() {
           claimsPendingSave.push(updated);
 
           for (const row of claimRows) {
-            const effectivePaymentId = row.externalPaymentId || paymentImportGeneratedPaymentId(batchId, row.rowNumber);
+            const effectivePaymentId = paymentImportGeneratedPaymentId(batchId, row.rowNumber) || `PMT-IMP-${Date.now()}-${row.rowNumber}`;
             row._effectivePaymentId = effectivePaymentId;
             const existingPayment = effectivePaymentId
               ? existingPaymentById.get(effectivePaymentId.toLowerCase()) || null
@@ -3334,7 +3334,7 @@ async function startServer() {
                 era_id: "",
                 eob_id: row.paymentDate ? `EOB-${row.paymentDate}` : "",
                 payment_source: "Payment Import",
-                notes: `Imported from payer payment report "${textValue(fileName) || "Unknown file"}" row ${row.rowNumber}. CPT ${row.cptCode}. Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.${row.payerAssociationAccepted ? ` Report payer "${row.reportPayerName}" was associated to current claim payer "${updated.payer_name}" without changing claim insurance.` : ""}`,
+                notes: `Imported from payer payment report "${textValue(fileName) || "Unknown file"}" row ${row.rowNumber}. CPT ${row.cptCode}.${row.externalPaymentId ? ` External Payment ID: ${row.externalPaymentId}.` : ""} Payment type: ${row.paymentType || "N/A"}. Payer withheld: ${Number(row.payerWithheld || 0).toFixed(2)}.${row.payerAssociationAccepted ? ` Report payer "${row.reportPayerName}" was associated to current claim payer "${updated.payer_name}" without changing claim insurance.` : ""}`,
                 created_at: "",
                 updated_at: ""
               };
