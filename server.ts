@@ -550,6 +550,9 @@ function normalizePaymentImportRow(row: Record<string, unknown>, index: number, 
   return {
     rowNumber: Number(row.__source_row || row.rowNumber) || index + 1,
     sourceRow: row,
+    claimId: textValue(row.claimId),
+    lineIndex: Number.isFinite(Number(row.lineIndex)) ? Number(row.lineIndex) : undefined,
+    preflightStatus: textValue(row.preflightStatus || row.status),
     cptCode: mappedImportField(row, mapping, "cptCode", ["CPT Code", "CPT"]),
     facilityName: mappedImportField(row, mapping, "facilityName", ["Facility Name"]),
     renderingProviderName: mappedImportField(row, mapping, "renderingProviderName", ["Rendering Provider Name", "Provider"]),
@@ -888,6 +891,7 @@ function compactPaymentImportResultRow(row: any) {
     "payerPayment",
     "patientPayment",
     "lineIndex",
+    "preflightStatus",
     "allowedAmount",
     "contractualAdjustment",
     "coinsurance",
@@ -997,7 +1001,7 @@ function paymentImportResultFromBatch(batch: any, rows: PaymentImportBatchRow[])
       importedRows: Number(batch.imported_rows || 0),
       needsReviewRows: Number(batch.review_rows || 0),
       paymentActivityRows: Number(summary.paymentActivityRows || 0),
-      rejectedRows: Number(batch.rejected_rows || 0),
+      rejectedRows: Number(summary.rejectedRows ?? batch.rejected_rows ?? 0),
       matchedClaims: Number(summary.matchedClaims || 0),
       matchedCptCodes: Number(summary.matchedCptCodes || 0),
       totalPaymentInFile: Number(batch.total_amount || summary.totalPaymentInFile || 0),
@@ -1005,6 +1009,15 @@ function paymentImportResultFromBatch(batch: any, rows: PaymentImportBatchRow[])
     },
     rows: parsedRows
   };
+}
+
+function paymentImportBatchRowPreflightStatus(row: PaymentImportBatchRow) {
+  try {
+    const parsed = JSON.parse(row.row_json || "{}");
+    return textValue(parsed.preflightStatus || parsed.status || row.status);
+  } catch {
+    return textValue(row.status);
+  }
 }
 
 function summarizePaymentImportBatchRows(rows: PaymentImportBatchRow[]) {
@@ -1015,13 +1028,26 @@ function summarizePaymentImportBatchRows(rows: PaymentImportBatchRow[]) {
       return {};
     }
   });
+  const preflightStatusFor = (row: PaymentImportBatchRow) => paymentImportBatchRowPreflightStatus(row);
+  const preflightReadyRows = rows.filter((row, index) => preflightStatusFor(row, index) === "ready");
+  const attemptedReadyRows = rows.filter((row, index) =>
+    preflightStatusFor(row, index) === "ready" &&
+    ["imported", "needs_review", "payment_activity", "rejected", "failed"].includes(String(row.status))
+  );
+  const writeFailedReadyRows = rows.filter((row, index) =>
+    preflightStatusFor(row, index) === "ready" &&
+    ["rejected", "failed"].includes(String(row.status))
+  );
   return {
     totalRowsRead: rows.length,
-    readyToImport: rows.filter(row => row.status === "pending" || row.status === "imported").length,
+    readyToImport: preflightReadyRows.length,
     importedRows: rows.filter(row => row.status === "imported").length,
     needsReviewRows: rows.filter(row => row.status === "needs_review").length,
     paymentActivityRows: rows.filter(row => row.status === "payment_activity").length,
-    rejectedRows: rows.filter(row => row.status === "rejected" || row.status === "failed").length,
+    rejectedRows: rows.filter((row, index) => preflightStatusFor(row, index) === "rejected" || ["rejected", "failed"].includes(String(row.status))).length,
+    originalRejectedRows: rows.filter((row, index) => preflightStatusFor(row, index) === "rejected").length,
+    importFailedRows: writeFailedReadyRows.length,
+    attemptedReadyRows: attemptedReadyRows.length,
     matchedClaims: new Set(rows.map(row => row.claim_id).filter(Boolean)).size,
     matchedCptCodes: new Set(rows.map(row => row.cpt_code).filter(Boolean)).size,
     totalPaymentInFile: Number(rows.reduce((sum, row) => sum + Number(row.payment_amount || 0), 0).toFixed(2)),
@@ -2960,6 +2986,8 @@ async function startServer() {
         const payerName = normalizeMatchText(row.payerName);
         const providerName = normalizeMatchText(row.renderingProviderName);
         const cptCode = textValue(row.cptCode);
+        const frozenClaimId = apply && batchId ? textValue(row.claimId) : "";
+        const frozenLineIndex = apply && batchId && Number.isInteger(Number(row.lineIndex)) ? Number(row.lineIndex) : -1;
 
         const matchesOperationalKeys = (claim: Claim, allowMonthFallback = false) => {
           const samePatient = patientAcct && normalizeMatchText(claim.patient_id) === patientAcct;
@@ -2996,14 +3024,16 @@ async function startServer() {
           if (!hasCpt) return false;
           return matchesOperationalKeys(claim, allowMonthFallback);
         });
-        let candidates = buildCandidates(false);
-        if (candidates.length === 0) candidates = buildCandidates(true);
+        let candidates = frozenClaimId
+          ? claims.filter(claim => claim.claim_id === frozenClaimId)
+          : buildCandidates(false);
+        if (!frozenClaimId && candidates.length === 0) candidates = buildCandidates(true);
 
-        if (candidates.length > 1 && payerName) {
+        if (!frozenClaimId && candidates.length > 1 && payerName) {
           const payerFiltered = candidates.filter(claim => entityNamesMatch(claim.payer_name, payerName));
           if (payerFiltered.length > 0) candidates = payerFiltered;
         }
-        if (candidates.length > 1 && providerName) {
+        if (!frozenClaimId && candidates.length > 1 && providerName) {
           const providerFiltered = candidates.filter(claim => normalizeMatchText(claim.provider_name).includes(providerName) || providerName.includes(normalizeMatchText(claim.provider_name)));
           if (providerFiltered.length > 0) candidates = providerFiltered;
         }
@@ -3023,7 +3053,13 @@ async function startServer() {
               .filter(item => textValue(item.line?.cpt) === cptCode && serviceLineMatchesDos(item.line, claim, row.serviceDate))
               .map(item => item.index)
           : [];
-        const matchingLineIndexes = sameCptLineIndexes.length > 0 ? sameCptLineIndexes : fallbackCptLineIndexes;
+        const frozenLineMatches = frozenLineIndex >= 0 &&
+          serviceLines[frozenLineIndex] &&
+          textValue(serviceLines[frozenLineIndex]?.cpt) === cptCode &&
+          serviceLineMatchesDos(serviceLines[frozenLineIndex], claim || {}, row.serviceDate);
+        const matchingLineIndexes = frozenLineMatches
+          ? [frozenLineIndex]
+          : (sameCptLineIndexes.length > 0 ? sameCptLineIndexes : fallbackCptLineIndexes);
         const unpaidLineIndex = matchingLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
         const lineIndex = unpaidLineIndex ?? matchingLineIndexes[0] ?? -1;
         const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
@@ -3420,20 +3456,34 @@ async function startServer() {
         } else {
           await sheetsService.replacePaymentImportBatchRows(textValue(batchId), batchRows);
         }
+        const currentBatchRows = await sheetsService.getPaymentImportBatchRows(textValue(batchId));
+        const currentBatch = await sheetsService.getPaymentImportBatch(textValue(batchId));
+        const processedReadyRows = currentBatchRows.filter(row =>
+          paymentImportBatchRowPreflightStatus(row) === "ready" &&
+          row.status !== "pending"
+        ).length;
+        const importedBatchRows = currentBatchRows.filter(row => row.status === "imported").length;
+        const reviewBatchRows = currentBatchRows.filter(row => row.status === "needs_review" || row.status === "payment_activity").length;
+        const rejectedBatchRows = currentBatchRows.filter(row =>
+          paymentImportBatchRowPreflightStatus(row) === "ready" &&
+          (row.status === "rejected" || row.status === "failed")
+        ).length;
         await sheetsService.updatePaymentImportBatch(textValue(batchId), {
           status: retryRowSet.size > 0
             ? "running"
             : (summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0 ? "completed_with_errors" : "completed"),
           completed_at: new Date().toISOString(),
-          processed_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status !== "pending").length) : resultRows.length,
-          imported_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status === "imported").length) : summary.importedRows,
-          review_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status === "needs_review" || row.status === "payment_activity").length) : summary.needsReviewRows + summary.paymentActivityRows,
-          rejected_rows: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatchRows(textValue(batchId))).filter(row => row.status === "rejected").length) : summary.rejectedRows,
+          processed_rows: retryRowSet.size > 0 ? processedReadyRows : resultRows.length,
+          imported_rows: retryRowSet.size > 0 ? importedBatchRows : summary.importedRows,
+          review_rows: retryRowSet.size > 0 ? reviewBatchRows : summary.needsReviewRows + summary.paymentActivityRows,
+          rejected_rows: retryRowSet.size > 0 ? rejectedBatchRows : Number((summary as any).importFailedRows || 0),
           failed_rows: 0,
           total_amount: summary.totalPaymentInFile,
-          progress: retryRowSet.size > 0 ? Number((await sheetsService.getPaymentImportBatch(textValue(batchId)))?.progress || 5) : 100,
+          progress: retryRowSet.size > 0 ? Number(currentBatch?.progress || 5) : 100,
           summary_json: JSON.stringify({ ...summary, updatedClaims: updatedClaims.length }),
-          error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} rejected row(s)` : ""
+          error_message: Number((summary as any).importFailedRows || 0) > 0
+            ? `${Number((summary as any).importFailedRows || 0)} ready row(s) failed during import. ${Number((summary as any).originalRejectedRows || 0)} row(s) were rejected during preflight.`
+            : ""
         });
       }
 
@@ -3505,23 +3555,24 @@ async function startServer() {
       const operatorEmail = getOperatorEmail(req);
       const { fileName, analysisRows } = req.body;
       const rowsForBatch = Array.isArray(analysisRows) ? analysisRows : [];
+      const importTargetRows = rowsForBatch.filter((row: any) => row.status === "ready");
       const batch = await sheetsService.createPaymentImportBatch({
         file_name: textValue(fileName),
         status: "queued",
         requested_by: operatorEmail,
-        total_rows: rowsForBatch.length,
+        total_rows: importTargetRows.length,
         processed_rows: 0,
         imported_rows: 0,
         review_rows: 0,
         rejected_rows: 0,
         failed_rows: 0,
-        total_amount: Number(rowsForBatch.reduce((sum: number, row: any) => sum + Number(row.payment || 0), 0).toFixed(2)),
+        total_amount: Number(importTargetRows.reduce((sum: number, row: any) => sum + Number(row.payment || 0), 0).toFixed(2)),
         progress: 0,
         payload_json: JSON.stringify(compactPaymentImportBatchPayload(req.body))
       });
       if (rowsForBatch.length > 0) {
         await sheetsService.createPaymentImportBatchRows(rowsForBatch.map((row: any) => ({
-          ...paymentImportBatchRowFromResult(batch.batch_id, row),
+          ...paymentImportBatchRowFromResult(batch.batch_id, { ...row, preflightStatus: row.status }),
           status: row.status === "ready"
             ? "pending"
             : row.status === "needs_review"
@@ -3551,21 +3602,24 @@ async function startServer() {
         .filter(row => Number.isFinite(row) && row > 0);
       if (pendingRows.length === 0) {
         const summary = summarizePaymentImportBatchRows(rows);
+        const targetRows = Number(batch.total_rows || summary.readyToImport || 0);
         const finalStatus = summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0
           ? "completed_with_errors"
           : "completed";
         const updated = await sheetsService.updatePaymentImportBatch(batch.batch_id, {
           status: finalStatus,
           completed_at: batch.completed_at || new Date().toISOString(),
-          processed_rows: rows.length,
+          processed_rows: targetRows,
           imported_rows: summary.importedRows,
           review_rows: summary.needsReviewRows + summary.paymentActivityRows,
-          rejected_rows: summary.rejectedRows,
+          rejected_rows: Number((summary as any).importFailedRows || 0),
           failed_rows: rows.filter(row => row.status === "failed").length,
           total_amount: summary.totalPaymentInFile,
           progress: 100,
           summary_json: JSON.stringify(summary),
-          error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} row(s) need review or were rejected.` : ""
+          error_message: Number((summary as any).importFailedRows || 0) > 0
+            ? `${Number((summary as any).importFailedRows || 0)} ready row(s) failed during import. ${Number((summary as any).originalRejectedRows || 0)} row(s) were rejected during preflight.`
+            : ""
         });
         return res.json({ success: true, done: true, batch: updated, result: paymentImportResultFromBatch(updated, rows) });
       }
@@ -3585,8 +3639,9 @@ async function startServer() {
       rows = await sheetsService.getPaymentImportBatchRows(batch.batch_id);
       const remainingPending = rows.filter(row => row.status === "pending" || row.status === "failed").length;
       const summary = summarizePaymentImportBatchRows(rows);
-      const processedRows = rows.length - remainingPending;
-      const progress = remainingPending === 0 ? 100 : Math.max(5, Math.min(99, Math.round((processedRows / Math.max(1, rows.length)) * 100)));
+      const targetRows = Number(batch.total_rows || summary.readyToImport || 0);
+      const processedRows = Math.max(0, targetRows - remainingPending);
+      const progress = remainingPending === 0 ? 100 : Math.max(5, Math.min(99, Math.round((processedRows / Math.max(1, targetRows)) * 100)));
       const finalStatus = remainingPending === 0
         ? (summary.rejectedRows > 0 || summary.needsReviewRows > 0 || summary.paymentActivityRows > 0 ? "completed_with_errors" : "completed")
         : "running";
@@ -3596,12 +3651,14 @@ async function startServer() {
         processed_rows: processedRows,
         imported_rows: summary.importedRows,
         review_rows: summary.needsReviewRows + summary.paymentActivityRows,
-        rejected_rows: summary.rejectedRows,
+        rejected_rows: Number((summary as any).importFailedRows || 0),
         failed_rows: rows.filter(row => row.status === "failed").length,
         total_amount: summary.totalPaymentInFile,
         progress,
         summary_json: JSON.stringify(summary),
-        error_message: summary.rejectedRows > 0 ? `${summary.rejectedRows} row(s) need review or were rejected.` : ""
+        error_message: Number((summary as any).importFailedRows || 0) > 0
+          ? `${Number((summary as any).importFailedRows || 0)} ready row(s) failed during import. ${Number((summary as any).originalRejectedRows || 0)} row(s) were rejected during preflight.`
+          : ""
       });
       if (remainingPending === 0) {
         const operatorEmail = getOperatorEmail(req);
