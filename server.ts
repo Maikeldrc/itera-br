@@ -358,6 +358,44 @@ function paymentImportGeneratedPaymentId(batchId: unknown, rowNumber: unknown) {
   return normalizedBatchId && normalizedRowNumber > 0 ? `PMT-IMP-${normalizedBatchId}-${normalizedRowNumber}` : "";
 }
 
+function assignPaymentImportBatchLineIndexes(rows: any[], claims: Claim[]) {
+  const assignedByClaim = new Map<string, Set<number>>();
+  const rowsWithTargets = rows.map(row => ({ ...row }));
+  for (const row of rowsWithTargets) {
+    if (row.status !== "ready" || !row.claimId) continue;
+    const claim = claims.find(item => item.claim_id === row.claimId && !item.deleted_flag);
+    if (!claim) continue;
+    const serviceLines = parseServiceLines(claim);
+    const assigned = assignedByClaim.get(claim.claim_id) || new Set<number>();
+    const cptCode = textValue(row.cptCode);
+    const serviceDate = textValue(row.serviceDate);
+    const exactIndexes = serviceLines
+      .map((line, index) => ({ line, index }))
+      .filter(item => textValue(item.line?.cpt) === cptCode && serviceLineMatchesExactDos(item.line, claim, serviceDate))
+      .map(item => item.index);
+    const fallbackIndexes = exactIndexes.length > 0 ? [] : serviceLines
+      .map((line, index) => ({ line, index }))
+      .filter(item => textValue(item.line?.cpt) === cptCode && serviceLineMatchesDos(item.line, claim, serviceDate))
+      .map(item => item.index);
+    const candidateIndexes = exactIndexes.length > 0 ? exactIndexes : fallbackIndexes;
+    const currentLineIndex = Number(row.lineIndex);
+    const targetIndex = candidateIndexes.find(index =>
+      index === currentLineIndex &&
+      !assigned.has(index) &&
+      linePaymentTotal(serviceLines[index]) <= 0
+    ) ?? candidateIndexes.find(index =>
+      !assigned.has(index) &&
+      linePaymentTotal(serviceLines[index]) <= 0
+    ) ?? candidateIndexes.find(index => !assigned.has(index)) ?? currentLineIndex;
+    if (Number.isInteger(targetIndex) && targetIndex >= 0) {
+      row.lineIndex = targetIndex;
+      assigned.add(targetIndex);
+      assignedByClaim.set(claim.claim_id, assigned);
+    }
+  }
+  return rowsWithTargets;
+}
+
 function paymentImportRowVerified(row: any, claims: Claim[], payments: Payment[]) {
   const claim = claims.find(item => item.claim_id === row.claimId && !item.deleted_flag);
   if (!claim) return false;
@@ -3061,7 +3099,9 @@ async function startServer() {
         const matchingLineIndexes = frozenLineMatches
           ? [frozenLineIndex]
           : (sameCptLineIndexes.length > 0 ? sameCptLineIndexes : fallbackCptLineIndexes);
-        const unpaidLineIndex = matchingLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
+        const unpaidLineIndex = frozenLineMatches
+          ? frozenLineIndex
+          : matchingLineIndexes.find(index => linePaymentTotal(serviceLines[index]) <= 0);
         const lineIndex = unpaidLineIndex ?? matchingLineIndexes[0] ?? -1;
         const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
         const batchGeneratedPaymentId = paymentImportGeneratedPaymentId(batchId, row.rowNumber);
@@ -3115,7 +3155,7 @@ async function startServer() {
         }
 
         const hasExistingPayment = Boolean(
-          claim && linePaymentTotal(targetLine) > 0
+          claim && linePaymentTotal(targetLine) > 0 && !alreadyAppliedByThisBatch
         );
         if (errors.length === 0 && hasExistingPayment) {
           if (!alreadyAppliedByThisBatch) {
@@ -3556,7 +3596,9 @@ async function startServer() {
       const operatorEmail = getOperatorEmail(req);
       const { fileName, analysisRows } = req.body;
       const rowsForBatch = Array.isArray(analysisRows) ? analysisRows : [];
-      const importTargetRows = rowsForBatch.filter((row: any) => row.status === "ready");
+      const claimsForLineAssignment = await sheetsService.getClaims();
+      const rowsWithFrozenTargets = assignPaymentImportBatchLineIndexes(rowsForBatch, claimsForLineAssignment);
+      const importTargetRows = rowsWithFrozenTargets.filter((row: any) => row.status === "ready");
       const batch = await sheetsService.createPaymentImportBatch({
         file_name: textValue(fileName),
         status: "queued",
@@ -3571,8 +3613,8 @@ async function startServer() {
         progress: 0,
         payload_json: JSON.stringify(compactPaymentImportBatchPayload(req.body))
       });
-      if (rowsForBatch.length > 0) {
-        await sheetsService.createPaymentImportBatchRows(rowsForBatch.map((row: any) => ({
+      if (rowsWithFrozenTargets.length > 0) {
+        await sheetsService.createPaymentImportBatchRows(rowsWithFrozenTargets.map((row: any) => ({
           ...paymentImportBatchRowFromResult(batch.batch_id, { ...row, preflightStatus: row.status }),
           status: row.status === "ready"
             ? "pending"
