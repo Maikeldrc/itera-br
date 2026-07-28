@@ -3767,6 +3767,203 @@ async function startServer() {
     }
   });
 
+  app.post("/api/denials-import", requireRoles(...API_ROLE_GROUPS.claimWrite), async (req: AppRequest, res) => {
+    try {
+      const operatorEmail = getOperatorEmail(req);
+      const apply = req.body?.apply === true;
+      const fileName = textValue(req.body?.fileName);
+      const importRows = req.body?.fileBase64
+        ? parseUploadedTableRows(String(req.body.fileBase64), fileName)
+        : req.body?.rows;
+      if (!Array.isArray(importRows)) {
+        return res.status(400).json({ error: "Rows or XLS/XLSX file content are required for Denials import." });
+      }
+
+      const settings = await sheetsService.getSettings();
+      const reconciliationConfig = buildReconciliationConfig(settings);
+      const claims = (await sheetsService.getClaims()).filter(claim => !claim.deleted_flag);
+      const analyzedRows = importRows.map((row: Record<string, unknown>, index: number) => {
+        const rowNumber = Number(row.__source_row) || index + 1;
+        const denialCode = importField(row, ["Denial Code", "DenialCode", "CARC", "CARC Code"]);
+        const payerName = importField(row, ["Payer Name", "Insurance", "Insurance Name"]);
+        const cptCode = importField(row, ["CPT Code", "CPT", "Code"]);
+        const patientAcctNo = importField(row, ["Patient Acct No", "Patient Acct No ", "Patient Account No", "Patient Acct", "MRN"]);
+        const patientName = importField(row, ["Patient Name", "Patient"]);
+        const serviceDate = excelSerialToIsoDate(importField(row, ["DOS", "Service Date", "Date of Service"]));
+        const errors: string[] = [];
+        const warnings: string[] = [];
+
+        if (!denialCode) errors.push("Denial Code is required.");
+        if (!cptCode) errors.push("CPT Code is required.");
+        if (!patientAcctNo) errors.push("Patient Acct No is required.");
+        if (!serviceDate) errors.push("DOS is required.");
+
+        const patientKey = normalizeMatchText(patientAcctNo);
+        const payerKey = normalizeMatchText(payerName);
+        const candidates = errors.length > 0 ? [] : claims.filter(claim => {
+          if (!canAccessClaim(req, claim)) return false;
+          if (!patientKey || normalizeMatchText(claim.patient_id) !== patientKey) return false;
+          if (payerKey && claim.payer_name && !entityNamesMatch(claim.payer_name, payerName)) return false;
+          const serviceLines = parseServiceLines(claim);
+          return serviceLines.some(line =>
+            textValue(line?.cpt) === cptCode &&
+            serviceLineMatchesExactDos(line, claim, serviceDate)
+          );
+        });
+
+        const claim = candidates.length === 1 ? candidates[0] : null;
+        const serviceLines = claim ? parseServiceLines(claim) : [];
+        const matchingLineIndexes = claim
+          ? serviceLines
+              .map((line, lineIndex) => ({ line, lineIndex }))
+              .filter(item => textValue(item.line?.cpt) === cptCode && serviceLineMatchesExactDos(item.line, claim, serviceDate))
+              .map(item => item.lineIndex)
+          : [];
+        const lineIndex = matchingLineIndexes.find(item => linePaymentTotal(serviceLines[item]) <= 0 && textValue(serviceLines[item]?.status) !== "Denied") ?? matchingLineIndexes[0] ?? -1;
+        const targetLine = lineIndex >= 0 ? serviceLines[lineIndex] : null;
+
+        if (errors.length === 0 && candidates.length === 0) {
+          errors.push(`No matching claim/CPT found for Patient Acct No ${patientAcctNo}, CPT ${cptCode} and DOS ${formatDisplayDos(serviceDate)}.`);
+        }
+        if (errors.length === 0 && candidates.length > 1) {
+          warnings.push(`Multiple matching claims found for Patient Acct No "${patientAcctNo}", CPT ${cptCode}, DOS ${formatDisplayDos(serviceDate)}${payerName ? `, payer "${payerName}"` : ""}. Review the claim manually before importing this denial.`);
+        }
+        if (errors.length === 0 && claim && lineIndex < 0) {
+          errors.push("Matched claim does not contain the CPT service line.");
+        }
+        if (errors.length === 0 && claim && linePaymentTotal(targetLine) > 0) {
+          warnings.push(existingPaymentActivityMessage(claim, targetLine, cptCode, serviceDate));
+        }
+
+        return {
+          rowNumber,
+          status: errors.length > 0 ? "rejected" : warnings.length > 0 ? "needs_review" : "ready",
+          claimId: claim?.claim_id || "",
+          patientId: claim?.patient_id || patientAcctNo,
+          patientName: patientName || claim?.patient_display_name_masked || "",
+          payerName: claim?.payer_name || payerName,
+          cptCode,
+          serviceDate,
+          denialCode,
+          lineIndex,
+          errors,
+          warnings,
+          sourceRow: row
+        };
+      });
+
+      const readyRows = analyzedRows.filter(row => row.status === "ready");
+      let importedRows = 0;
+      if (apply && readyRows.length > 0) {
+        const rowsByClaim = readyRows.reduce<Record<string, typeof readyRows>>((acc, row) => {
+          if (!row.claimId) return acc;
+          acc[row.claimId] = acc[row.claimId] || [];
+          acc[row.claimId].push(row);
+          return acc;
+        }, {});
+        const updates: Claim[] = [];
+        for (const [claimId, claimRows] of Object.entries(rowsByClaim)) {
+          const claim = claims.find(item => item.claim_id === claimId);
+          if (!claim) continue;
+          let serviceLines = parseServiceLines(claim);
+          const usedIndexes = new Set<number>();
+          for (const row of claimRows) {
+            const matchingIndexes = serviceLines
+              .map((line, lineIndex) => ({ line, lineIndex }))
+              .filter(item => textValue(item.line?.cpt) === row.cptCode && serviceLineMatchesExactDos(item.line, claim, row.serviceDate))
+              .map(item => item.lineIndex);
+            const targetIndex = matchingIndexes.find(index =>
+              !usedIndexes.has(index) &&
+              linePaymentTotal(serviceLines[index]) <= 0 &&
+              textValue(serviceLines[index]?.status) !== "Denied"
+            ) ?? matchingIndexes.find(index => !usedIndexes.has(index)) ?? Number(row.lineIndex);
+            if (targetIndex < 0 || !serviceLines[targetIndex]) {
+              row.status = "rejected";
+              row.errors = ["Matched service line was not available when applying the import."];
+              continue;
+            }
+            usedIndexes.add(targetIndex);
+            const line = serviceLines[targetIndex];
+            const codes = Array.from(new Set([...(Array.isArray(line.codes) ? line.codes : []), row.denialCode].filter(Boolean)));
+            const charged = Number(line.charged || 0);
+            const paid = Number(line.paid || 0) + Number(line.secondaryPaid || 0);
+            const deniedBalance = Number(Math.max(0, charged - paid - Number(line.adj || 0) - Number(line.patResp || 0)).toFixed(2));
+            serviceLines[targetIndex] = {
+              ...line,
+              codes,
+              status: "Denied",
+              balance: deniedBalance,
+              nextAction: line.nextAction && line.nextAction !== "No action" ? line.nextAction : "Correct and Resubmit",
+              notes: [
+                ...(Array.isArray(line.notes) ? line.notes : []),
+                `Denials Import: Denial Code ${row.denialCode} from "${fileName || "Unknown file"}" row ${row.rowNumber}.`
+              ]
+            };
+            row.status = "imported";
+            importedRows++;
+          }
+
+          const deniedAmount = Number(serviceLines
+            .filter(line => textValue(line.status) === "Denied")
+            .reduce((sum, line) => sum + Number(line.balance || 0), 0)
+            .toFixed(2));
+          const allDeniedOrPaid = serviceLines.every(line => ["Denied", "Paid"].includes(textValue(line.status)));
+          const firstCode = serviceLines.flatMap(line => Array.isArray(line.codes) ? line.codes : []).filter(Boolean)[0] || claim.carc_code || "";
+          const updated = calculateClaimFinancials({
+            ...claim,
+            service_lines_json: JSON.stringify(serviceLines),
+            claim_status: allDeniedOrPaid ? ClaimStatus.Denied : ClaimStatus.PartiallyPaid,
+            claim_classification: ClaimClassification.DeniedNeedsReview,
+            denied_amount: deniedAmount,
+            carc_code: firstCode,
+            denial_reason: `Denials import${fileName ? ` from ${fileName}` : ""}: ${claimRows.map(row => `${row.cptCode} ${row.denialCode}`).join("; ")}`,
+            correction_status: claim.correction_status || "Pending",
+            last_note: `Denials Import applied ${claimRows.length} row(s). ${claim.last_note || ""}`.trim()
+          }, reconciliationConfig);
+          const validationErrors = validateClaim(updated);
+          if (validationErrors.length > 0) {
+            claimRows.forEach(row => {
+              if (row.status === "imported") importedRows--;
+              row.status = "rejected";
+              row.errors = validationErrors;
+            });
+            continue;
+          }
+          updates.push(updated);
+        }
+        if (updates.length > 0) {
+          await sheetsService.updateClaimsWithAuditBulk(updates, operatorEmail);
+        }
+      }
+
+      const summary = {
+        totalRowsRead: analyzedRows.length,
+        readyRows: analyzedRows.filter(row => row.status === "ready").length,
+        importedRows: analyzedRows.filter(row => row.status === "imported").length,
+        needsReviewRows: analyzedRows.filter(row => row.status === "needs_review").length,
+        rejectedRows: analyzedRows.filter(row => row.status === "rejected").length,
+        matchedClaims: new Set(analyzedRows.map(row => row.claimId).filter(Boolean)).size,
+        cptCodes: new Set(analyzedRows.map(row => row.cptCode).filter(Boolean)).size,
+        denialCodes: new Set(analyzedRows.map(row => row.denialCode).filter(Boolean)).size
+      };
+      await sheetsService.createImportHistory({
+        import_type: apply ? "Denials Import applied" : "Denials Import analysis",
+        file_name: fileName || "Denials Import",
+        requested_by: operatorEmail,
+        total_rows: summary.totalRowsRead,
+        imported_rows: summary.importedRows,
+        rejected_rows: summary.rejectedRows,
+        review_rows: summary.needsReviewRows,
+        total_amount: 0,
+        summary_json: JSON.stringify({ summary, rejectedRows: analyzedRows.filter(row => row.status === "rejected") }),
+        status: apply ? (summary.rejectedRows || summary.needsReviewRows ? "Completed with errors" : "Completed") : "Analyzed"
+      });
+      res.json({ success: true, applied: apply, importedCount: importedRows, summary, rows: analyzedRows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Denials import failed." });
+    }
+  });
+
   // Vite development middleware vs Static serving for Production
   if (process.env.NODE_ENV !== "production") {
     console.log("Starting in DEVELOPMENT mode with Vite Middleware...");

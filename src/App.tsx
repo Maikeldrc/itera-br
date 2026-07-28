@@ -328,6 +328,10 @@ export default function App() {
   const [denialPage, setDenialPage] = useState(1);
   const [denialRowsPerPage, setDenialRowsPerPage] = useState(10);
   const [denialSort, setDenialSort] = useState<TableSortState>({ field: "patient", direction: "asc" });
+  const denialImportInputRef = useRef<HTMLInputElement | null>(null);
+  const [denialImportPayload, setDenialImportPayload] = useState<{ fileName: string; fileBase64: string } | null>(null);
+  const [denialImportResult, setDenialImportResult] = useState<any | null>(null);
+  const [isProcessingDenialImport, setIsProcessingDenialImport] = useState(false);
   const [blockedClaimSearch, setBlockedClaimSearch] = useState("");
   const [blockedClaimProviderFilter, setBlockedClaimProviderFilter] = useState("");
   const [blockedClaimCategoryFilter, setBlockedClaimCategoryFilter] = useState("");
@@ -1657,6 +1661,58 @@ export default function App() {
     } finally {
       setIsImportingBankDeposits(false);
       if (bankDepositInputRef.current) bankDepositInputRef.current.value = "";
+    }
+  };
+
+  const readFileAsDataUrl = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = event => resolve(String(event.target?.result || ""));
+    reader.onerror = () => reject(new Error("Unable to read selected file."));
+    reader.readAsDataURL(file);
+  });
+
+  const handleSelectDenialImportFile = async (file: File | null | undefined) => {
+    if (!file) return;
+    try {
+      const fileBase64 = await readFileAsDataUrl(file);
+      const payload = { fileName: file.name, fileBase64 };
+      setDenialImportPayload(payload);
+      setDenialImportResult(null);
+      await runDenialImport(payload, false);
+    } catch (err: any) {
+      notify(`${isEnglish ? "Denials file error" : "Error en archivo de denials"}: ${err.message}`, "error");
+    } finally {
+      if (denialImportInputRef.current) denialImportInputRef.current.value = "";
+    }
+  };
+
+  const runDenialImport = async (payload = denialImportPayload, apply = false) => {
+    if (!payload || isProcessingDenialImport) return;
+    setIsProcessingDenialImport(true);
+    try {
+      const res = await apiFetch("/api/denials-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, apply })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Denials import failed.");
+      setDenialImportResult(data);
+      notify(
+        apply
+          ? (isEnglish
+              ? `Imported ${data.summary.importedRows} denial row(s). ${data.summary.needsReviewRows + data.summary.rejectedRows} need review.`
+              : `Importadas ${data.summary.importedRows} fila(s) de denials. ${data.summary.needsReviewRows + data.summary.rejectedRows} requieren revisión.`)
+          : (isEnglish
+              ? `Denials analysis completed: ${data.summary.readyRows} ready, ${data.summary.needsReviewRows} review, ${data.summary.rejectedRows} rejected.`
+              : `Análisis de denials completado: ${data.summary.readyRows} listas, ${data.summary.needsReviewRows} revisión, ${data.summary.rejectedRows} rechazadas.`),
+        data.summary.rejectedRows || data.summary.needsReviewRows ? "warning" : "success"
+      );
+      if (apply) await fetchAllData({ showInitialLoading: false });
+    } catch (err: any) {
+      notify(`${isEnglish ? "Denials import error" : "Error importando denials"}: ${err.message}`, "error");
+    } finally {
+      setIsProcessingDenialImport(false);
     }
   };
 
@@ -4350,14 +4406,129 @@ export default function App() {
           {/* VIEW: DENIALS REPORT MODULE */}
           {currentView === "denials" && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
-                  {isEnglish ? "Denials Report (Denial Audits)" : "Reporte de Denegaciones (Denial Audits)"}
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  {isEnglish ? "Analysis and correction of rejected or denied claims from insurance payers" : "Análisis y corrección de reclamaciones rechazadas o denegadas por las aseguradoras"}
-                </p>
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <h2 className="text-xl md:text-2xl font-bold text-slate-900 font-display tracking-tight">
+                    {isEnglish ? "Denials Report (Denial Audits)" : "Reporte de Denegaciones (Denial Audits)"}
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {isEnglish ? "Analysis and correction of rejected or denied claims from insurance payers" : "Análisis y corrección de reclamaciones rechazadas o denegadas por las aseguradoras"}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    ref={denialImportInputRef}
+                    type="file"
+                    accept=".csv,.xls,.xlsx"
+                    className="hidden"
+                    onChange={event => void handleSelectDenialImportFile(event.target.files?.[0])}
+                  />
+                  {denialImportPayload && (
+                    <button
+                      type="button"
+                      onClick={() => void runDenialImport(denialImportPayload, false)}
+                      disabled={isProcessingDenialImport}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${isProcessingDenialImport ? "animate-spin" : ""}`} />
+                      {isEnglish ? "Analyze again" : "Analizar nuevamente"}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => denialImportInputRef.current?.click()}
+                    disabled={isProcessingDenialImport}
+                    className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-primary-blue shadow-sm hover:bg-blue-50 disabled:opacity-50"
+                  >
+                    <Upload className="h-3.5 w-3.5" />
+                    {isEnglish ? "Import Denials" : "Importar Denials"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void runDenialImport(denialImportPayload, true)}
+                    disabled={isProcessingDenialImport || !denialImportPayload || !denialImportResult || Number(denialImportResult?.summary?.readyRows || 0) <= 0}
+                    className="inline-flex items-center gap-2 rounded-lg bg-primary-blue px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-dark-blue disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {isProcessingDenialImport
+                      ? (isEnglish ? "Processing..." : "Procesando...")
+                      : (isEnglish ? `Import ${denialImportResult?.summary?.readyRows || 0} ready` : `Importar ${denialImportResult?.summary?.readyRows || 0} listas`)}
+                  </button>
+                </div>
               </div>
+
+              {denialImportResult && (
+                <div className="rounded-xl border border-blue-100 bg-white shadow-sm">
+                  <div className="flex flex-col gap-3 border-b border-slate-100 p-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900">{isEnglish ? "Denials Import Result" : "Resultado de Import Denials"}</h4>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {denialImportPayload?.fileName || (isEnglish ? "Selected file" : "Archivo seleccionado")}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                      {[
+                        [isEnglish ? "Rows" : "Filas", denialImportResult.summary.totalRowsRead],
+                        [isEnglish ? "Ready" : "Listas", denialImportResult.summary.readyRows],
+                        [isEnglish ? "Imported" : "Importadas", denialImportResult.summary.importedRows],
+                        [isEnglish ? "Review" : "Revisión", denialImportResult.summary.needsReviewRows],
+                        [isEnglish ? "Rejected" : "Rechazadas", denialImportResult.summary.rejectedRows]
+                      ].map(([label, value]) => (
+                        <div key={String(label)} className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                          <p className="text-[9px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+                          <p className="font-mono text-sm font-bold text-slate-900">{value}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="max-h-72 overflow-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="sticky top-0 bg-slate-50 text-[10px] uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">Row</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2">Claim</th>
+                          <th className="px-3 py-2">Patient</th>
+                          <th className="px-3 py-2">CPT</th>
+                          <th className="px-3 py-2">DOS</th>
+                          <th className="px-3 py-2">Denial</th>
+                          <th className="px-3 py-2">Issue</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(denialImportResult.rows || []).slice(0, 100).map((row: any) => {
+                          const issue = [...(row.errors || []), ...(row.warnings || [])].join(" ");
+                          return (
+                            <tr key={`${row.rowNumber}-${row.claimId}-${row.cptCode}`} className="hover:bg-slate-50">
+                              <td className="px-3 py-2 font-mono">{row.rowNumber}</td>
+                              <td className="px-3 py-2">
+                                <span className={`rounded px-2 py-1 text-[10px] font-bold ${
+                                  row.status === "ready" || row.status === "imported"
+                                    ? "bg-emerald-50 text-emerald-700"
+                                    : row.status === "needs_review"
+                                      ? "bg-amber-50 text-amber-700"
+                                      : "bg-rose-50 text-rose-700"
+                                }`}>{String(row.status || "").replace("_", " ")}</span>
+                              </td>
+                              <td className="px-3 py-2 font-mono text-dark-blue">{row.claimId || "-"}</td>
+                              <td className="px-3 py-2">{row.patientName || row.patientId || "-"}</td>
+                              <td className="px-3 py-2 font-mono font-bold">{row.cptCode || "-"}</td>
+                              <td className="px-3 py-2 font-mono">{row.serviceDate || "-"}</td>
+                              <td className="px-3 py-2 font-mono font-bold">{row.denialCode || "-"}</td>
+                              <td className="px-3 py-2 text-slate-600">{issue || "-"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {(denialImportResult.rows || []).length > 100 && (
+                    <div className="border-t border-slate-100 px-4 py-2 text-xs font-semibold text-slate-500">
+                      {isEnglish ? "Showing first 100 rows." : "Mostrando las primeras 100 filas."}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Metrics blocks */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
