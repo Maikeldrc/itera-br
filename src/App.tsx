@@ -203,15 +203,24 @@ function viewFromPath(pathname: string): ViewType {
   return found?.[0] || "dashboard";
 }
 
-function LoginScreen({ onSignIn }: { onSignIn: (email: string, password: string) => Promise<void> }) {
+function LoginScreen({
+  onSignIn,
+  onPasswordReset
+}: {
+  onSignIn: (email: string, password: string) => Promise<void>;
+  onPasswordReset: (email: string) => Promise<void>;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [error, setError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError("");
+    setSuccessMessage("");
     setIsSubmitting(true);
     try {
       await onSignIn(email.trim(), password);
@@ -219,6 +228,25 @@ function LoginScreen({ onSignIn }: { onSignIn: (email: string, password: string)
       setError("Invalid credentials or account not authorized.");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const requestPasswordReset = async () => {
+    const trimmedEmail = email.trim();
+    setError("");
+    setSuccessMessage("");
+    if (!trimmedEmail) {
+      setError("Enter your email address first, then request a password reset.");
+      return;
+    }
+    setIsResettingPassword(true);
+    try {
+      await onPasswordReset(trimmedEmail);
+      setSuccessMessage("Password reset email sent. Check your inbox and follow the instructions.");
+    } catch {
+      setError("Unable to send the password reset email. Confirm the email address and try again.");
+    } finally {
+      setIsResettingPassword(false);
     }
   };
 
@@ -255,12 +283,21 @@ function LoginScreen({ onSignIn }: { onSignIn: (email: string, password: string)
           </label>
         </div>
         {error && <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">{error}</p>}
+        {successMessage && <p className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">{successMessage}</p>}
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || isResettingPassword}
           className="mt-5 w-full rounded-xl bg-primary-blue px-4 py-2.5 text-sm font-bold text-white shadow-md transition-colors hover:bg-dark-blue disabled:opacity-60"
         >
           {isSubmitting ? "Signing in..." : "Sign In"}
+        </button>
+        <button
+          type="button"
+          onClick={requestPasswordReset}
+          disabled={isSubmitting || isResettingPassword}
+          className="mt-3 w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold text-primary-blue transition-colors hover:border-primary-blue hover:bg-blue-50 disabled:opacity-60"
+        >
+          {isResettingPassword ? "Sending reset email..." : "Forgot password?"}
         </button>
       </form>
     </div>
@@ -3340,7 +3377,7 @@ export default function App() {
   }
 
   if (auth.isAuthEnabled && !auth.user) {
-    return <LoginScreen onSignIn={auth.signIn} />;
+    return <LoginScreen onSignIn={auth.signIn} onPasswordReset={auth.sendPasswordReset} />;
   }
 
   if (isLoading) {
